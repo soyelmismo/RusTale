@@ -356,7 +356,11 @@ unsafe fn swap_strings(region: &MemoryInfo) {
     let swaps = get_swaps(&mode);
 
     unsafe {
+        #[cfg(target_os = "linux")]
         apply_swaps(addr, len, &swaps, region.prot);
+
+        #[cfg(target_os = "windows")]
+        apply_swaps(addr, len, &swaps, 0);
     }
 }
 
