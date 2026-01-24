@@ -1,0 +1,69 @@
+name: Rust Build
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  pull_request:
+    branches: [ "master", "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: stable
+        target: x86_64-pc-windows-msvc
+
+    - name: Build Release
+      run: cargo build --release --verbose
+
+    - name: Prepare Artifacts
+      run: |
+        mkdir release_pack
+        copy target/release/rustale.exe release_pack/
+        copy target/aurora_build/release/aurora.dll release_pack/
+
+    - name: Upload Artifact (Windows)
+      uses: actions/upload-artifact@v4
+      with:
+        name: RusTale-Windows
+        path: release_pack/*
+        if-no-files-found: error
+
+  build-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y pkg-config libssl-dev libfreetype6-dev libexpat1-dev libxcb-composite0-dev libasound2-dev
+
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Build Release
+      run: cargo build --release --verbose
+
+    - name: Prepare Artifacts
+      run: |
+        mkdir release_pack
+        cp target/release/rustale release_pack/
+        cp target/aurora_build/release/libaurora.so release_pack/
+
+    - name: Upload Artifact (Linux)
+      uses: actions/upload-artifact@v4
+      with:
+        name: RusTale-Linux
+        path: release_pack/*
+        if-no-files-found: warn

@@ -1,0 +1,118 @@
+{
+    "_name": "Español",
+    "launcher": {
+        "title": "RusTale Launcher",
+        "play": "JUGAR",
+        "stop": "DETENER",
+        "update": "ACTUALIZAR",
+        "status": {
+            "initializing": "Inicializando...",
+            "checking": "VERIFICANDO ARCHIVOS...",
+            "ready": "LISTO PARA JUGAR",
+            "playing": "JUGANDO",
+            "busy": "OCUPADO...",
+            "downloading": "DESCARGANDO...",
+            "patching": "PARCHEANDO...",
+            "general": "General",
+            "step": "Paso Actual"
+        },
+        "info": {
+            "channel": "CANAL",
+            "version": "VERSIÓN"
+        }
+    },
+    "tray": {
+        "show_hide": "Mostrar/Ocultar Launcher",
+        "quit": "Salir de RusTale",
+        "tooltip": "RusTale Launcher"
+    },
+    "profile": {
+        "title": "PERFIL",
+        "select": "Seleccionar Perfil",
+        "add": "Añadir Perfil",
+        "name_placeholder": "Nombre...",
+        "new_name_placeholder": "Nuevo Nombre..."
+    },
+    "settings": {
+        "title": "AJUSTES",
+        "tabs": {
+            "game": "JUEGO",
+            "launcher": "LAUNCHER",
+            "about": "ACERCA DE",
+            "video": "VÍDEO",
+            "java": "JAVA"
+        },
+        "language": "Idioma",
+        "language.placeholder": "Seleccionar Idioma",
+        "game_config": "Configuración del Juego",
+        "install_path": "Ruta de Instalación",
+        "browse": "Explorar...",
+        "select_channel": "Seleccionar Canal",
+        "select_version": "Seleccionar Versión",
+        "version": {
+            "latest": "Última (Auto-Actualizar)",
+            "specific": "Versión {0}"
+        },
+        "storage": {
+            "title": "Gestión de Almacenamiento",
+            "desc": "Gestiona las versiones instaladas localmente",
+            "no_versions": "No hay versiones instaladas",
+            "latest_format": "Última ({0})",
+            "version_format": "Versión {0}"
+        },
+        "enable_news": "Habilitar Noticias",
+        "enable_online_fix": "Habilitar Online Fix (Parche Multijugador)",
+        "online_fix_desc": "Redirige la autenticación para jugar en servidores no oficiales.",
+        "minimize_to_tray": "Minimizar a la Bandeja al Cerrar",
+        "minimize_on_play": "Ocultar Ventana al Iniciar el Juego",
+        "quickplay": "Habilitar QuickPlay (Saltar Menú)",
+        "quickplay_desc": "Inicia el juego directamente saltando el menú principal.",
+        "patch_mode": "Modo de Parche:",
+        "update_channel": "Canal de Actualización",
+        "target_version": "Versión Objetivo",
+        "display": "Pantalla",
+        "width": "Ancho",
+        "height": "Alto",
+        "fullscreen": "Modo Pantalla Completa",
+        "java_memory": "Asignación de Memoria (GB)",
+        "min": "Mín",
+        "max": "Máx",
+        "jvm_args": "Argumentos JVM",
+        "jvm_args_placeholder": "Args JVM",
+        "save": "GUARDAR CAMBIOS",
+        "cancel": "CANCELAR"
+    },
+    "dialog": {
+        "select_folder": "Seleccionar Carpeta de Instalación"
+    },
+    "news": {
+        "loading": "Cargando últimas noticias...",
+        "failed": "Error al cargar noticias",
+        "retry": "Reintentar",
+        "empty": "No hay noticias disponibles en este momento",
+        "no_desc": "Sin descripción disponible",
+        "feed_loading": "CARGANDO FEED",
+        "feed_latest": "ÚLTIMAS NOTICIAS",
+        "browse_all": "VER TODAS"
+    },
+    "mods": {
+        "title": "MODS",
+        "installed": "INSTALADOS",
+        "browse": "EXPLORAR",
+        "search": "BUSCAR...",
+        "refresh": "REFRESCAR",
+        "delete": "ELIMINAR",
+        "open_folder": "ABRIR CARPETA",
+        "install": "INSTALAR",
+        "uninstall": "DESINSTALAR",
+        "loading": "CARGANDO...",
+        "no_mods": "NO HAY MODS INSTALADOS",
+        "no_results": "NO SE ENCONTRARON RESULTADOS",
+        "page": "PAGINA {0} DE {1}",
+        "prev": "ANTERIOR",
+        "next": "SIGUIENTE"
+    },
+    "common": {
+        "close": "CERRAR"
+    }
+}

@@ -1,0 +1,5 @@
+Cargo.lock
+target/
+.env
+*.txt
+*.log

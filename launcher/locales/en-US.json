@@ -1,0 +1,118 @@
+{
+    "_name": "English",
+    "launcher": {
+        "title": "RusTale Launcher",
+        "play": "PLAY",
+        "stop": "STOP",
+        "update": "UPDATE",
+        "status": {
+            "initializing": "Initializing...",
+            "checking": "CHECKING FILES...",
+            "ready": "READY TO PLAY",
+            "playing": "PLAYING",
+            "busy": "BUSY...",
+            "downloading": "DOWNLOADING...",
+            "patching": "PATCHING...",
+            "general": "General",
+            "step": "Current Step"
+        },
+        "info": {
+            "channel": "CHANNEL",
+            "version": "VERSION"
+        }
+    },
+    "tray": {
+        "show_hide": "Show/Hide Launcher",
+        "quit": "Quit RusTale",
+        "tooltip": "RusTale Launcher"
+    },
+    "profile": {
+        "title": "PROFILE",
+        "select": "Select Profile",
+        "add": "Add Profile",
+        "name_placeholder": "Name...",
+        "new_name_placeholder": "New Name..."
+    },
+    "settings": {
+        "title": "SETTINGS",
+        "tabs": {
+            "game": "GAME",
+            "launcher": "LAUNCHER",
+            "about": "ABOUT",
+            "video": "VIDEO",
+            "java": "JAVA"
+        },
+        "language": "Language",
+        "language.placeholder": "Select Language",
+        "game_config": "Game Configuration",
+        "install_path": "Installation Path",
+        "browse": "Browse...",
+        "select_channel": "Select Channel",
+        "select_version": "Select Version",
+        "version": {
+            "latest": "Latest (Auto-Update)",
+            "specific": "Version {0}"
+        },
+        "storage": {
+            "title": "Storage Management",
+            "desc": "Manage installed versions locally",
+            "no_versions": "No versions installed",
+            "latest_format": "Latest ({0})",
+            "version_format": "Version {0}"
+        },
+        "enable_news": "Enable News Section",
+        "enable_online_fix": "Enable Online Fix (Multiplayer Patch)",
+        "online_fix_desc": "Redirects authentication to play on unofficial servers.",
+        "minimize_to_tray": "Minimize to Tray on Close",
+        "minimize_on_play": "Hide Window when Game Starts",
+        "quickplay": "Enable QuickPlay (Skip Menu)",
+        "quickplay_desc": "Launches the game directly skipping the main menu.",
+        "patch_mode": "Patch Mode:",
+        "update_channel": "Update Channel",
+        "target_version": "Target Version",
+        "display": "Display",
+        "width": "Width",
+        "height": "Height",
+        "fullscreen": "Fullscreen Mode",
+        "java_memory": "Memory Allocation (GB)",
+        "min": "Min",
+        "max": "Max",
+        "jvm_args": "JVM Arguments",
+        "jvm_args_placeholder": "JVM Args",
+        "save": "SAVE CHANGES",
+        "cancel": "CANCEL"
+    },
+    "dialog": {
+        "select_folder": "Select Installation Folder"
+    },
+    "news": {
+        "loading": "Loading latest news...",
+        "failed": "Failed to load news",
+        "retry": "Retry",
+        "empty": "No news available at the moment",
+        "no_desc": "No description available",
+        "feed_loading": "LOADING FEED",
+        "feed_latest": "LATEST NEWS",
+        "browse_all": "BROWSE ALL"
+    },
+    "mods": {
+        "title": "MODS",
+        "installed": "INSTALLED",
+        "browse": "BROWSE",
+        "search": "Search...",
+        "refresh": "Refresh",
+        "delete": "Delete",
+        "open_folder": "Open Folder",
+        "install": "Install",
+        "uninstall": "Uninstall",
+        "loading": "Loading...",
+        "no_mods": "No mods installed",
+        "no_results": "No results found",
+        "page": "Page {0} of {1}",
+        "prev": "Previous",
+        "next": "Next"
+    },
+    "common": {
+        "close": "Close"
+    }
+}

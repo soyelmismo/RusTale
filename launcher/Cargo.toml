@@ -1,0 +1,88 @@
+[package]
+name = "rustale"
+version = "0.0.1"
+edition = "2024"
+default-run = "rustale"
+
+[build-dependencies]
+# Usamos std::process::Command para llamar a cargo, no se requieren dependencias externas extras por ahora
+winres = "0.1.12"
+
+# Optimization for Release: This makes the binary MUCH smaller and faster
+
+[dependencies]
+# UI Framework
+# It's VITAL to activate the features 'image', 'svg' and 'tokio'
+iced = { version = "0.14.0", features = [
+    "image",
+    "svg",
+    "tokio",
+    "advanced",
+    "canvas",
+] }
+
+# Async Runtime
+tokio = { version = "1.49.0", features = ["full"] }
+
+# HTTP Client
+reqwest = { version = "0.13.1", default-features = false, features = [
+    "json",
+    "stream",
+    "native-tls",
+    "http2",
+] }
+futures = "0.3.31"
+
+# Serialization
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+toml = "0.9.8"
+
+# System interaction
+directories = "6.0.0"
+open = "5.3.3"
+uuid = { version = "1.19.0", features = ["v4", "v5", "fast-rng", "serde"] }
+sha2 = "0.10.9"
+
+# Utilities
+hex = "0.4.3"
+# Added 'serde' feature to chrono
+chrono = { version = "0.4.43", features = ["serde"] }
+anyhow = "1.0.100"
+thiserror = "2.0.18"
+base64 = "0.22.1"
+rand = "0.9.2"
+memchr = "2.7.6"
+warp = { version = "0.4.2", features = ["server"] }
+portpicker = "0.1.1"
+
+# Archive extraction
+zip = { version = "7.2.0", features = ["aes-crypto", "deflate"] }
+flate2 = "1.1.8"
+tar = "0.4.44"
+
+# Native file dialogs
+rfd = "0.17.2"
+
+rust-embed = "8.11.0"
+
+# Command line arguments
+clap = { version = "4.5.54", features = ["derive"] }
+
+# System Tray
+tray-icon = "0.21.3"
+tao = "0.34.5"
+
+# To load icons in the tray
+image = "0.25.9"
+ed25519-dalek = { version = "2.2.0", features = ["rand_core"] }
+once_cell = "1.21.3"
+
+memmap2 = "0.9.9"
+
+rayon = "1.11.0"
+
+md5 = "0.8.0"
+bytes = "1.11.0"
+
+urlencoding = "2.1.3"

@@ -1,0 +1,11 @@
+[workspace]
+members = ["launcher", "aurora"]
+resolver = "2"
+
+[profile.release]
+opt-level = 3       # Máxima optimización (hace el flujo de control complejo)
+lto = true          # Link Time Optimization (mezcla código entre crates, difícil de separar)
+codegen-units = 1   # Reduce paralelismo para mejorar la optimización LTO
+panic = 'abort'     # Elimina la lógica de "unwinding" (reduce tamaño y pistas de flujo)
+strip = true        # ELIMINA LOS SÍMBOLOS (hace que las funciones se llamen sub_401000)
+debug = false       # Asegura que no haya info de debug
