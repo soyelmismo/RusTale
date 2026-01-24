@@ -28,7 +28,7 @@ tokio = { version = "1.49.0", features = ["full"] }
 reqwest = { version = "0.13.1", default-features = false, features = [
     "json",
     "stream",
-    "native-tls",
+    "rustls",
     "http2",
 ] }
 futures = "0.3.31"
@@ -64,7 +64,6 @@ tar = "0.4.44"
 # Native file dialogs
 rfd = { version = "0.17.2", default-features = false, features = [
     "xdg-portal",
-    "gtk3",
 ] }
 
 rust-embed = "8.11.0"
@@ -75,8 +74,8 @@ clap = { version = "4.5.54", features = ["derive"] }
 # System Tray
 tray-icon = "0.21.3"
 tao = { version = "0.34.5", default-features = false, features = [
-    "tray",
-    "linux-libappindicator",
+    "rwh_06",
+    "x11",
 ] }
 # To load icons in the tray
 image = "0.25.9"
