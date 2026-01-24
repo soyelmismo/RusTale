@@ -71,28 +71,6 @@ impl CsString {
 
 // ==================== MEMORY PATCHING LOGIC ====================
 
-// Define the search patterns according to the original C file
-#[cfg(target_os = "linux")]
-const PATTERN: [Option<u8>; 17] = [
-    Some(0x48),
-    Some(0x8D),
-    None,
-    None,
-    Some(0xE8),
-    None,
-    None,
-    None,
-    Some(0x00),
-    Some(0x80),
-    None,
-    None,
-    Some(0x00),
-    Some(0x0F),
-    Some(0x84),
-    None,
-    None, // Adjusted lengths
-];
-
 unsafe fn raw_search_and_replace(mem: &mut [u8], target: &[u8], replacement: &[u8]) {
     log!("Searching for pattern: {:?}", target);
     log!("Replacement: {:?}", replacement);
@@ -434,16 +412,18 @@ impl MemoryProtectionGuard {
     #[cfg(target_os = "linux")]
     unsafe fn new(addr: *mut u8, size: usize) -> Self {
         use libc::{_SC_PAGESIZE, PROT_EXEC, PROT_READ, PROT_WRITE, mprotect, sysconf};
-        let page_size = sysconf(_SC_PAGESIZE) as usize;
+        let page_size = unsafe { sysconf(_SC_PAGESIZE) as usize };
         let addr_usize = addr as usize;
         let page_start = addr_usize - (addr_usize % page_size);
         let len = (addr_usize + size) - page_start;
 
-        mprotect(
-            page_start as *mut c_void,
-            len,
-            PROT_READ | PROT_WRITE | PROT_EXEC,
-        );
+        unsafe {
+            mprotect(
+                page_start as *mut c_void,
+                len,
+                PROT_READ | PROT_WRITE | PROT_EXEC,
+            );
+        }
 
         Self {
             addr: page_start as *mut c_void,
