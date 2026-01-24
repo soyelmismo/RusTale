@@ -31,6 +31,9 @@ use crate::ui::mods_modal::{ModsMessage, ModsState};
 use crate::ui::news_section::{NewsMessage, NewsSection};
 use crate::ui::{control_section, profile_card}; // Import the struct
 
+#[cfg(target_os = "linux")]
+use gtk::prelude::IsA;
+
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -256,6 +259,13 @@ pub fn main() -> iced::Result {
             std::process::exit(1);
         }
         std::process::exit(0);
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        if let Err(e) = gtk::init() {
+            eprintln!("Failed to initialize GTK: {}", e);
+        }
     }
 
     // 2. NORMAL MODE: Launcher GUI
