@@ -35,6 +35,11 @@ pub fn launch_game(
 
     // Build command
     let mut cmd = Command::new(executable_path);
+
+    #[cfg(target_os = "windows")]
+    {
+        cmd.creation_flags(0x08000000);
+    }
     cmd.arg("--app-dir")
         .arg(game_working_dir)
         .arg("--user-dir")

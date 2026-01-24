@@ -255,7 +255,14 @@ pub async fn apply_pwr(
     let mut log_writer = std::io::BufWriter::new(log_file);
     use std::io::Write;
 
-    let mut child = tokio::process::Command::new(butler_path)
+    let mut cmd = tokio::process::Command::new(butler_path);
+
+    #[cfg(target_os = "windows")]
+    {
+        cmd.creation_flags(0x08000000);
+    }
+
+    let mut child = cmd
         .arg("apply")
         .arg("--staging-dir")
         .arg(&staging_dir)

@@ -227,7 +227,18 @@ fn run_java_proxy_logic() -> anyhow::Result<()> {
     use std::process::Command;
     proxy_log("Launching real java...");
 
-    let status = Command::new(java_real).args(final_args).status()?;
+    #[cfg(target_os = "windows")]
+    use std::os::windows::process::CommandExt;
+
+    let mut cmd = Command::new(java_real);
+    cmd.args(final_args);
+
+    #[cfg(target_os = "windows")]
+    {
+        cmd.creation_flags(0x08000000);
+    }
+
+    let status = cmd.status()?;
 
     if let Some(code) = status.code() {
         std::process::exit(code);
