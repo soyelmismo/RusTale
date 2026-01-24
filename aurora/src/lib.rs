@@ -403,11 +403,12 @@ unsafe fn get_base_module() -> MemoryInfo {
                     end = e;
                 }
             }
-            MemoryInfo {
-                start: start as *mut u8,
-                size: end - start,
-            }
         }
+    }
+
+    MemoryInfo {
+        start: start as *mut u8,
+        size: end - start,
     }
 }
 impl MemoryProtectionGuard {
@@ -432,8 +433,8 @@ impl MemoryProtectionGuard {
 
     #[cfg(target_os = "linux")]
     unsafe fn new(addr: *mut u8, size: usize) -> Self {
-        use libc::{PROT_EXEC, PROT_READ, PROT_WRITE, getpagesize, mprotect};
-        let page_size = getpagesize() as usize;
+        use libc::{_SC_PAGESIZE, PROT_EXEC, PROT_READ, PROT_WRITE, mprotect, sysconf};
+        let page_size = sysconf(_SC_PAGESIZE) as usize;
         let addr_usize = addr as usize;
         let page_start = addr_usize - (addr_usize % page_size);
         let len = (addr_usize + size) - page_start;
@@ -519,6 +520,8 @@ pub unsafe extern "system" fn GetUserNameExW(_nfmt: i32, name_buf: *mut u16, sz:
 #[ctor::ctor]
 unsafe fn init() {
     // Cleanup
-    let _ = std::env::remove_var("LD_PRELOAD");
+    unsafe {
+        let _ = std::env::remove_var("LD_PRELOAD");
+    }
     unsafe { main_logic() };
 }
