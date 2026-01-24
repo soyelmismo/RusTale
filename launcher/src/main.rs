@@ -31,9 +31,6 @@ use crate::ui::mods_modal::{ModsMessage, ModsState};
 use crate::ui::news_section::{NewsMessage, NewsSection};
 use crate::ui::{control_section, profile_card}; // Import the struct
 
-#[cfg(target_os = "linux")]
-use gtk::prelude::IsA;
-
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -138,28 +135,10 @@ fn run_java_proxy_logic() -> anyhow::Result<()> {
 
     let mut final_args = args.clone();
 
-    // 1. Read port from file
-    let mut port = 59313;
-    let possible_paths = vec![
-        crate::config::get_app_dir().join("server.port"),
-        std::path::PathBuf::from("../../UserData/server.port"),
-        std::path::PathBuf::from("server.port"),
-    ];
-
     proxy_log(&format!("CWD: {:?}", std::env::current_dir()));
     let cwd_res = std::env::current_dir();
 
-    for p in possible_paths {
-        if p.exists() {
-            if let Ok(s) = std::fs::read_to_string(&p) {
-                if let Ok(p_val) = s.trim().parse::<u16>() {
-                    port = p_val;
-                    proxy_log(&format!("Found port config at {:?}: {}", p, port));
-                    break;
-                }
-            }
-        }
-    }
+    let port = get_saved_port();
 
     // 2. Scan for server.jar
     proxy_log("Scanning arguments for HytaleServer.jar...");
@@ -249,6 +228,24 @@ fn run_java_proxy_logic() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn get_saved_port() -> u16 {
+    let possible_paths = vec![
+        crate::config::get_app_dir().join("server.port"),
+        std::path::PathBuf::from("../../UserData/server.port"),
+        std::path::PathBuf::from("server.port"),
+    ];
+
+    for p in possible_paths {
+        if p.exists() {
+            if let Ok(s) = std::fs::read_to_string(&p) {
+                if let Ok(p_val) = s.trim().parse::<u16>() {
+                    return p_val;
+                }
+            }
+        }
+    }
+    59313
+}
 pub fn main() -> iced::Result {
     // 1. PROXY MODE: Intercept server execution
     if is_running_as_java_proxy() {
