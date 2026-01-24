@@ -22,6 +22,14 @@
 *   **System Tray**: Minimizes the launcher to the system tray to keep your desktop clean while playing.
 *   **Responsive Interface**: Adapts perfectly to any window size or resolution.
 
+## 📚 Credits
+
+This project would not be possible without the work of the following projects:
+
+*   [HyLauncher](https://github.com/ArchDevs/HyLauncher): Launcher in TypeScript and Go.
+*   [HytaleSP](https://github.com/LiEnby/HytaleSP): Patching logic in C.
+
+
 ## ⚠️ Disclaimer & Contact
 
 **This project has been created strictly for educational purposes.**

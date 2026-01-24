@@ -1,14 +1,16 @@
+// Thanks to https://github.com/LiEnby/HytaleSP for the original C code
+
 use std::ffi::c_void;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::slice;
 use std::sync::Mutex;
+
 static LOG_FILE: Mutex<Option<std::fs::File>> = Mutex::new(None);
 
 fn init_logging() {
     if let Ok(dir) = std::env::var("RUSTALE_LOGS_DIR") {
         let path = std::path::Path::new(&dir).join("aurora.log");
-        // Truncate file on start
         if let Ok(file) = OpenOptions::new()
             .create(true)
             .write(true)
@@ -41,7 +43,7 @@ macro_rules! log {
 
 // Hytale internal string structure: Length + Fixed Buffer
 #[repr(C, packed)]
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 struct CsString {
     size: u32,
     data: [u16; 256],
@@ -72,8 +74,6 @@ impl CsString {
 // ==================== MEMORY PATCHING LOGIC ====================
 
 unsafe fn raw_search_and_replace(mem: &mut [u8], target: &[u8], replacement: &[u8]) {
-    log!("Searching for pattern: {:?}", target);
-    log!("Replacement: {:?}", replacement);
     if replacement.len() > target.len() {
         return;
     }
@@ -84,13 +84,14 @@ unsafe fn raw_search_and_replace(mem: &mut [u8], target: &[u8], replacement: &[u
         return;
     }
 
+    // Optimization: simple linear search
     for i in 0..=(len - pat_len) {
         if mem[i] != target[0] {
             continue;
         }
 
         if &mem[i..i + pat_len] == target {
-            log!("Found pattern at offset: {}", i);
+            log!("Found raw pattern at offset: {}", i);
             let _guard = unsafe { MemoryProtectionGuard::new(mem.as_mut_ptr().add(i), pat_len) };
 
             for (j, &byte) in replacement.iter().enumerate() {
@@ -137,51 +138,50 @@ fn match_pattern(mem: &[u8], offset: usize) -> bool {
 // ==================== PATCHING LOGIC ====================
 
 unsafe fn allow_offline_in_online(addr: *mut u8, len: usize) {
-    log!("Allowing offline in online");
-    let slice = unsafe {
-        let slice = slice::from_raw_parts_mut(addr, len);
-        slice
-    };
+    let slice = unsafe { slice::from_raw_parts_mut(addr, len) };
 
     for i in 0..len {
         if match_pattern(slice, i) {
-            log!("Found pattern at offset {}", i);
+            log!("Found offline/online pattern at offset {}", i);
 
-            // Enable writing
-            let _guard = unsafe {
-                log!("Enabling writing");
-                let _guard = MemoryProtectionGuard::new(addr.add(i), 100);
-                _guard
-            };
-
+            // Scan forward for JZ instructions (0x0F 0x84)
+            // Logic adapted from C implementation: find first two JZ and NOP them
             let mut jz_found_count = 0;
             let mut current_offset = i;
+            let max_scan = 500; // Safety limit
+            let mut scanned = 0;
 
-            while jz_found_count < 2 && current_offset < len - 1 {
+            while jz_found_count < 2 && scanned < max_scan && current_offset < len - 6 {
                 if slice[current_offset] == 0x0F && slice[current_offset + 1] == 0x84 {
                     log!("Found JZ instruction (offset {})", current_offset);
+
+                    // Enable writing for the NOP patch area
+                    let _guard = unsafe { MemoryProtectionGuard::new(addr.add(current_offset), 6) };
+
                     // NOP out (0x90) x 6 bytes
                     for k in 0..6 {
-                        if current_offset + k < len {
-                            slice[current_offset + k] = 0x90;
-                        }
+                        slice[current_offset + k] = 0x90;
                     }
                     jz_found_count += 1;
                     current_offset += 6;
                 } else {
                     current_offset += 1;
                 }
+                scanned += 1;
             }
-            break;
+            // Stop after first pattern match processed
+            // (Assumes only one instance needs patching per region)
+            if jz_found_count > 0 {
+                break;
+            }
         }
     }
 }
 
 unsafe fn patch_server_args(addr: *mut u8, len: usize) {
-    log!("Patching server launch arguments...");
     let slice = unsafe { slice::from_raw_parts_mut(addr, len) };
 
-    // Replace 'authenticated' with 'insecure' to bypass online mode checks in the server
+    // Replace 'authenticated' with 'insecure' to bypass online mode checks
     let target_utf8 = b"authenticated";
     let replace_utf8 = b"insecure";
 
@@ -204,38 +204,44 @@ struct SwapEntry {
 }
 
 unsafe fn swap_strings(addr: *mut u8, len: usize) {
-    log!("Swapping URLs...");
     let mode = std::env::var("AURORA_MODE").unwrap_or_else(|_| "local".to_string());
     let mut swaps = Vec::new();
 
     if mode == "sanasol" {
-        log!("Mode is Sanasol");
         swaps.push(SwapEntry {
             old: CsString::from_str("hytale.com"),
             new: CsString::from_str("sanasol.ws"),
         });
     } else {
-        log!("Mode is Local");
-
         let port_str = std::env::var("AURORA_PORT").unwrap_or_else(|_| "59313".to_string());
-        log!("Target port suffix: {}", port_str);
 
+        // Match logic from C implementation where possible
         let subdomains = vec![
-            ("account-data", "000000000"), // fills https://account-data.hytale.com -> http://127.0.0.0000000001:59313
-            ("sessions", "00000"), // fills https://sessions.hytale.com -> http://127.0.0.000001:59313
-            ("telemetry", "000000"), // fills https://telemetry.hytale.com -> http://127.0.0.0000001:59313
-            ("tools", "00"),         // fills https://tools.hytale.com -> http://127.0.0.001:59313
+            ("account-data", "000000000"),
+            ("sessions", "00000"),
+            ("telemetry", "000000"),
+            ("tools", "00"),
         ];
-        for (subdomain, filler) in subdomains {
+
+        // Some versions of the binary might hold short strings (as seen in C patch)
+        // or full strings. We attempt to match the C patch strategy exactly for robustness.
+
+        // Strategy A: Full replacements (Go Launcher logic)
+        for (subdomain, filler) in &subdomains {
             swaps.push(SwapEntry {
-                // El original para buscar
+                old: CsString::from_str(&format!("https://{}.hytale.com", subdomain)),
+                new: CsString::from_str(&format!("http://127.0.0.{}:{}", filler, port_str)),
+            });
+        }
+
+        // Strategy B: Short replacements (C Patch logic) - In case binary uses split strings
+        for (subdomain, filler) in &subdomains {
+            swaps.push(SwapEntry {
                 old: CsString::from_str(&format!("https://{}.", subdomain)),
-                // El nuevo, limpio y sin caracteres basura
                 new: CsString::from_str(&format!("http://127.0.0.{}", filler)),
             });
         }
 
-        // authenticated to insecure
         swaps.push(SwapEntry {
             old: CsString::from_str("authenticated"),
             new: CsString::from_str("insecure"),
@@ -245,65 +251,53 @@ unsafe fn swap_strings(addr: *mut u8, len: usize) {
             old: CsString::from_str("hytale.com"),
             new: CsString::from_str(&format!("1:{}", port_str)),
         });
-    }
 
-    for sap in &swaps {
-        log!("Swapping {:?} to {:?}", sap.old, sap.new);
-        log!("Old length: {}", sap.old.active_size_bytes());
-        log!("New length: {}", sap.new.active_size_bytes());
+        // C-patch specific: .1:port vs hytale.com (len 8 vs 10)
+        swaps.push(SwapEntry {
+            old: CsString::from_str("hytale.com"),
+            new: CsString::from_str(&format!(".1:{}", port_str)),
+        });
     }
-
-    let total_swaps_needed = swaps.len();
-    if total_swaps_needed == 0 {
-        return;
-    }
-    log!("Swapping {} strings", total_swaps_needed);
 
     let mut swaps_done = 0;
-    let slice = unsafe {
-        let slice = slice::from_raw_parts_mut(addr, len);
-        slice
-    };
 
     for i in 0..len {
-        if swaps_done >= total_swaps_needed {
-            break;
-        }
-
         for swap in &swaps {
             let active_size = swap.old.active_size_bytes();
             if i + active_size > len {
                 continue;
             }
 
-            let old_ptr = &swap.old as *const CsString as *const u8;
-            let mem_ptr = &slice[i] as *const u8;
-            let mut matches = true;
-            for j in 0..active_size {
-                if unsafe { *mem_ptr.add(j) != *old_ptr.add(j) } {
-                    matches = false;
-                    break;
+            // unsafe block to read raw memory for comparison
+            let matches = unsafe {
+                let mem_ptr = addr.add(i) as *const u8;
+                let old_ptr = &swap.old as *const CsString as *const u8;
+                let mut m = true;
+                for j in 0..active_size {
+                    if *mem_ptr.add(j) != *old_ptr.add(j) {
+                        m = false;
+                        break;
+                    }
                 }
-            }
+                m
+            };
 
             if matches {
-                log!("Found match at offset {}", i);
-                let _guard = unsafe {
-                    let _guard = MemoryProtectionGuard::new(addr.add(i), active_size);
-                    _guard
-                };
+                log!("Swapping string at offset {}", i);
+                let _guard = unsafe { MemoryProtectionGuard::new(addr.add(i), active_size) };
                 let new_ptr = &swap.new as *const CsString as *const u8;
                 let copy_size = swap.new.active_size_bytes();
 
                 unsafe {
                     std::ptr::copy_nonoverlapping(new_ptr, addr.add(i), copy_size);
                 }
-
                 swaps_done += 1;
             }
         }
     }
-    log!("Total replacements: {}", swaps_done);
+    if swaps_done > 0 {
+        log!("Total string replacements in region: {}", swaps_done);
+    }
 }
 
 // ==================== SYSTEM HELPERS ====================
@@ -311,33 +305,6 @@ unsafe fn swap_strings(addr: *mut u8, len: usize) {
 struct MemoryInfo {
     start: *mut u8,
     size: usize,
-}
-
-#[cfg(target_os = "windows")]
-unsafe fn get_base_module() -> MemoryInfo {
-    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleA;
-    use windows_sys::Win32::System::ProcessStatus::K32GetModuleInformation;
-    use windows_sys::Win32::System::ProcessStatus::MODULEINFO;
-    use windows_sys::Win32::System::Threading::GetCurrentProcess;
-
-    let h_module = unsafe {
-        let h_module = GetModuleHandleA(std::ptr::null());
-        h_module
-    };
-    let mut info: MODULEINFO = unsafe { std::mem::zeroed() };
-    unsafe {
-        K32GetModuleInformation(
-            GetCurrentProcess(),
-            h_module,
-            &mut info,
-            std::mem::size_of::<MODULEINFO>() as u32,
-        );
-    }
-
-    MemoryInfo {
-        start: info.lpBaseOfDll as *mut u8,
-        size: info.SizeOfImage as usize,
-    }
 }
 
 struct MemoryProtectionGuard {
@@ -349,46 +316,85 @@ struct MemoryProtectionGuard {
     old_protect: i32,
 }
 
+#[cfg(target_os = "windows")]
+unsafe fn get_memory_regions() -> Vec<MemoryInfo> {
+    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleA;
+    use windows_sys::Win32::System::ProcessStatus::K32GetModuleInformation;
+    use windows_sys::Win32::System::ProcessStatus::MODULEINFO;
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
+    let h_module = unsafe { GetModuleHandleA(std::ptr::null()) };
+    let mut info: MODULEINFO = unsafe { std::mem::zeroed() };
+    unsafe {
+        K32GetModuleInformation(
+            GetCurrentProcess(),
+            h_module,
+            &mut info,
+            std::mem::size_of::<MODULEINFO>() as u32,
+        );
+    }
+
+    vec![MemoryInfo {
+        start: info.lpBaseOfDll as *mut u8,
+        size: info.SizeOfImage as usize,
+    }]
+}
+
 #[cfg(target_os = "linux")]
-unsafe fn get_base_module() -> MemoryInfo {
-    // Simplified implementation of reading /proc/self/maps like in the original C
+unsafe fn get_memory_regions() -> Vec<MemoryInfo> {
     use std::fs::File;
     use std::io::{BufRead, BufReader};
 
     let exe_path = std::fs::read_link("/proc/self/exe").unwrap_or_default();
     let exe_str = exe_path.to_string_lossy();
 
-    let file = File::open("/proc/self/maps").expect("Cannot open maps");
-    let reader = BufReader::new(file);
+    let mut regions = Vec::new();
 
-    let mut start: usize = 0;
-    let mut end: usize = 0;
-    let mut found = false;
+    if let Ok(file) = File::open("/proc/self/maps") {
+        let reader = BufReader::new(file);
 
-    for line in reader.lines() {
-        if let Ok(l) = line {
-            if l.contains(&*exe_str) {
-                let parts: Vec<&str> = l.split_whitespace().collect();
-                if let Some(range) = parts.get(0) {
-                    let ranges: Vec<&str> = range.split('-').collect();
-                    let s = usize::from_str_radix(ranges[0], 16).unwrap_or(0);
-                    let e = usize::from_str_radix(ranges[1], 16).unwrap_or(0);
-
-                    if !found {
-                        start = s;
-                        found = true;
+        for line in reader.lines() {
+            if let Ok(l) = line {
+                if l.contains(&*exe_str) {
+                    // Parse line: 55a...-55a... rw-p ...
+                    let parts: Vec<&str> = l.split_whitespace().collect();
+                    if parts.len() < 2 {
+                        continue;
                     }
-                    end = e;
+
+                    let range_str = parts[0];
+                    let perms = parts[1];
+
+                    // We only care about Readable segments.
+                    // To be safe and match C logic, we generally want segments that are
+                    // executable (for code patch) or writable/readable (for data patch).
+                    if !perms.contains('r') {
+                        continue;
+                    }
+
+                    let ranges: Vec<&str> = range_str.split('-').collect();
+                    if ranges.len() != 2 {
+                        continue;
+                    }
+
+                    let start = usize::from_str_radix(ranges[0], 16).unwrap_or(0);
+                    let end = usize::from_str_radix(ranges[1], 16).unwrap_or(0);
+
+                    if end > start {
+                        regions.push(MemoryInfo {
+                            start: start as *mut u8,
+                            size: end - start,
+                        });
+                    }
                 }
             }
         }
     }
 
-    MemoryInfo {
-        start: start as *mut u8,
-        size: end - start,
-    }
+    // Sort logic not strictly needed as maps are ordered, but good for sanity
+    regions
 }
+
 impl MemoryProtectionGuard {
     #[cfg(target_os = "windows")]
     unsafe fn new(addr: *mut u8, size: usize) -> Self {
@@ -417,6 +423,7 @@ impl MemoryProtectionGuard {
         let page_start = addr_usize - (addr_usize % page_size);
         let len = (addr_usize + size) - page_start;
 
+        // Ensure we make the page strictly RWX to perform modifications
         unsafe {
             mprotect(
                 page_start as *mut c_void,
@@ -428,7 +435,7 @@ impl MemoryProtectionGuard {
         Self {
             addr: page_start as *mut c_void,
             size: len,
-            old_protect: (PROT_READ | PROT_EXEC) as i32,
+            old_protect: (PROT_READ | PROT_EXEC) as i32, // Default restore to RX
         }
     }
 }
@@ -455,14 +462,21 @@ impl Drop for MemoryProtectionGuard {
 unsafe fn main_logic() {
     init_logging();
     log!("Aurora Patcher initialized.");
-    let mod_info = unsafe { get_base_module() };
-    if mod_info.start.is_null() || mod_info.size == 0 {
-        return;
-    }
 
-    unsafe { allow_offline_in_online(mod_info.start, mod_info.size) };
-    unsafe { swap_strings(mod_info.start, mod_info.size) };
-    unsafe { patch_server_args(mod_info.start, mod_info.size) };
+    let regions = unsafe { get_memory_regions() };
+    log!("Found {} memory regions for patching.", regions.len());
+
+    for region in regions {
+        if region.start.is_null() || region.size == 0 {
+            continue;
+        }
+
+        // Try all patches on all valid regions.
+        // The pattern matchers will simply fail quickly if the data isn't there.
+        unsafe { allow_offline_in_online(region.start, region.size) };
+        unsafe { swap_strings(region.start, region.size) };
+        unsafe { patch_server_args(region.start, region.size) };
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -476,7 +490,6 @@ pub unsafe extern "system" fn DllMain(
     use windows_sys::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
 
     if ul_reason_for_call == DLL_PROCESS_ATTACH {
-        // Run logic
         unsafe { main_logic() };
     }
     1
@@ -499,7 +512,6 @@ pub unsafe extern "system" fn GetUserNameExW(_nfmt: i32, name_buf: *mut u16, sz:
 #[cfg(target_os = "linux")]
 #[ctor::ctor]
 unsafe fn init() {
-    // Cleanup
     unsafe {
         let _ = std::env::remove_var("LD_PRELOAD");
     }
