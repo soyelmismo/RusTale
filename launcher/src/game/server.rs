@@ -129,7 +129,7 @@ struct GameVersionInfo {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-struct AccountInfo {
+pub struct AccountInfo {
     #[serde(rename = "createdAt")]
     created_at: DateTime<Utc>,
     entitlements: Vec<String>,
@@ -448,6 +448,13 @@ async fn handle_game_profile(state: Arc<tokio::sync::Mutex<ServerState>>) -> imp
     println!("Game profile endpoint requested.");
     let info = gen_account_info(&state.username, &state.uuid, skin);
     warp::reply::json(&info)
+}
+
+pub fn get_profile(username: &str, uuid: &str) -> AccountInfo {
+    let skin = DEFAULT_SKIN;
+    println!("Game profile endpoint requested.");
+    let info = gen_account_info(username, uuid, skin);
+    info
 }
 
 async fn handle_skin_put(

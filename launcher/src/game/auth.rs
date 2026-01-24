@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
+use crate::game;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AuthTokens {
     #[serde(alias = "IdentityToken", alias = "identityToken")]
@@ -90,7 +92,8 @@ pub fn generate_fake_tokens(player_name: &str, player_uuid: &str, issuer_url: &s
         "iat": now,
         "exp": exp,
         "iss": issuer_url,
-        "jti": Uuid::new_v4().to_string()
+        "jti": Uuid::new_v4().to_string(),
+        "profile": game::server::get_profile(player_name, player_uuid)
     });
 
     let session_payload = serde_json::json!({
