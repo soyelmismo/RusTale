@@ -298,7 +298,7 @@ fn get_swaps(_mode: &str) -> Vec<SwapEntry> {
     // C: {.old = make_csstr(L"hytale.com"),            .new = make_csstr(L"1:59313")},
     swaps.push(SwapEntry {
         old: CsString::from_str("hytale.com"),
-        new: CsString::from_str(&format!("1:{}", port_str)),
+        new: CsString::from_str(&format!("0001:{}", port_str)),
     });
 
     // C: {.old = make_csstr(L"authenticated"),         .new = make_csstr(L"insecure")},

@@ -44,6 +44,12 @@ pub async fn make_executable(path: &std::path::PathBuf) -> anyhow::Result<()> {
 
 /// Busca un puerto libre aleatorio entre 10000 y 65535
 pub fn find_free_port() -> u16 {
+    // First check if there is a saved port
+    let saved_port = get_saved_port();
+    if std::net::TcpListener::bind(("127.0.0.1", saved_port)).is_ok() {
+        return saved_port;
+    }
+
     use rand::Rng;
     let mut rng = rand::rng();
 
@@ -57,4 +63,176 @@ pub fn find_free_port() -> u16 {
 
     // Fallback: Si falla el aleatorio, retornar el default antiguo por seguridad.
     59313
+}
+
+pub fn get_saved_port() -> u16 {
+    let possible_paths = vec![
+        crate::config::get_app_dir().join("server.port"),
+        std::path::PathBuf::from("../../UserData/server.port"),
+        std::path::PathBuf::from("server.port"),
+    ];
+
+    for p in possible_paths {
+        if p.exists() {
+            if let Ok(s) = std::fs::read_to_string(&p) {
+                if let Ok(p_val) = s.trim().parse::<u16>() {
+                    return p_val;
+                }
+            }
+        }
+    }
+    59313
+}
+
+// Java Proxy logic
+pub fn run_java_proxy_logic() -> anyhow::Result<()> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+
+    proxy_log("--- PROXY STARTED ---");
+    proxy_log(&format!("Raw Args: {:?}", args));
+
+    // Find the real Java executable
+    let current_exe = std::env::current_exe()?;
+    let bin_dir = current_exe.parent().unwrap();
+
+    let java_original_name = if cfg!(windows) {
+        "java_original.exe"
+    } else {
+        "java_original"
+    };
+    let java_default_name = if cfg!(windows) { "java.exe" } else { "java" };
+
+    let mut java_real = bin_dir.join(java_original_name);
+
+    if !java_real.exists() {
+        proxy_log("[WARN] java_original not found, checking side-by-side java...");
+        java_real = bin_dir.join(java_default_name);
+
+        if java_real == current_exe {
+            proxy_log(
+                "[CRITICAL] Recursive loop detected! We are java.exe but java_original is missing.",
+            );
+            return Err(anyhow::anyhow!(
+                "Recursive Proxy Loop: java_original missing"
+            ));
+        }
+    } else {
+        proxy_log(&format!(
+            "[INFO] Hijack mode active. Real java: {:?}",
+            java_real
+        ));
+    }
+
+    let mut final_args = args.clone();
+
+    proxy_log(&format!("CWD: {:?}", std::env::current_dir()));
+    let cwd_res = std::env::current_dir();
+
+    let port = get_saved_port();
+
+    // 2. Scan for server.jar
+    proxy_log("Scanning arguments for HytaleServer.jar...");
+    for (i, arg) in args.iter().enumerate() {
+        if arg.to_lowercase().ends_with("hytaleserver.jar") {
+            proxy_log(&format!("Found candidate arg: {}", arg));
+
+            let mut original_jar_path = std::path::PathBuf::from(arg);
+
+            // Try to resolve absolute path if it doesn't exist
+            if !original_jar_path.exists() {
+                if let Ok(cwd) = &cwd_res {
+                    let abs = cwd.join(arg);
+                    if abs.exists() {
+                        original_jar_path = abs;
+                        proxy_log(&format!(
+                            "Resolved relative path to: {:?}",
+                            original_jar_path
+                        ));
+                    }
+                }
+            }
+
+            if original_jar_path.exists() {
+                proxy_log(&format!(
+                    "Intercepting Server JAR at: {:?}",
+                    original_jar_path
+                ));
+
+                // Prepare temporary JAR path
+                let server_dir = original_jar_path
+                    .parent()
+                    .unwrap_or(std::path::Path::new("."));
+                let patched_jar_path =
+                    server_dir.join(format!("HytaleServer_Patched_{}.jar", port));
+
+                // === LOGICA OPTIMIZADA ===
+                // Verificar si el Runner ya creó el archivo (High Hit Rate)
+                if patched_jar_path.exists() {
+                    proxy_log("Patched JAR already exists (Runner pre-patched). Using it.");
+                    final_args[i] = patched_jar_path.to_string_lossy().to_string();
+                } else {
+                    // Fallback: Si el Runner falló o no terminó a tiempo, lo hacemos aquí (Wait/Patch)
+                    proxy_log("Patched JAR not found. Patching on-the-fly...");
+                    if let Err(e) = crate::game::patcher::patch_server_jar(
+                        &original_jar_path,
+                        &patched_jar_path,
+                        port,
+                    ) {
+                        proxy_log(&format!("Error patching JAR: {}", e));
+                        // Si falla, dejamos el original (probablemente fallará la conexión, pero no crashea java)
+                    } else {
+                        proxy_log(&format!(
+                            "Patch success. Redirecting to: {:?}",
+                            patched_jar_path
+                        ));
+                        final_args[i] = patched_jar_path.to_string_lossy().to_string();
+                    }
+                }
+                break;
+            } else {
+                proxy_log(&format!("File not found: {:?}", original_jar_path));
+            }
+        }
+    }
+
+    // Launch the real Java
+    use std::process::Command;
+    proxy_log("Launching real java...");
+
+    #[cfg(target_os = "windows")]
+    use std::os::windows::process::CommandExt;
+
+    let mut cmd = Command::new(java_real);
+    cmd.args(final_args);
+
+    #[cfg(target_os = "windows")]
+    {
+        cmd.creation_flags(0x08000000);
+    }
+
+    let status = cmd.status()?;
+
+    if let Some(code) = status.code() {
+        std::process::exit(code);
+    }
+    Ok(())
+}
+// Simple helper for proxy debug logs (since stdout can be lost)
+fn proxy_log(msg: &str) {
+    use std::io::Write;
+    let path = std::env::current_dir().unwrap().join("RusTale_Proxy.log");
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        let _ = writeln!(
+            file,
+            "[{}] {}",
+            chrono::Local::now().format("%H:%M:%S"),
+            msg
+        );
+    }
+    // Also print to stdout for safety
+    println!("{}", msg);
 }

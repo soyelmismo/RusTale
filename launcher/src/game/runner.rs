@@ -205,18 +205,12 @@ impl Recipe for Runner {
                 let mut _cleanup_guard: Option<FileCleanupGuard> = None;
                 let mut _server_jar_cleanup_guard: Option<ServerJarCleanupGuard> = None;
 
-                // --- NEW: Determine the port here ---
-                // Default to fixed port, but if it's local mode, find a random one
-                let mut server_port = 59313;
+                let server_port = crate::util::find_free_port();
 
                 if settings.enable_online_fix {
                     auth_mode = "authenticated".to_string();
 
-                    // 1. Choose random port
-                    server_port = crate::util::find_free_port();
-
-                    // 2. Write the port to a file for the proxy
-                    // This ensures the proxy knows exactly which port to use
+                    // Write the port to a file for the proxy
                     let port_file = user_data_dir.join("server.port");
                     if let Ok(mut f) = std::fs::File::create(&port_file) {
                         let _ = write!(f, "{}", server_port);
