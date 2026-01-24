@@ -4,6 +4,8 @@ use std::{path::PathBuf, process::Stdio};
 use tokio::io::AsyncBufReadExt;
 use zip::write::SimpleFileOptions;
 
+use crate::config::OnlineFixMode;
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GameVersionInfo {
     pub user_version: i32,
@@ -391,7 +393,12 @@ pub async fn clean_patches_cache(progress_callback: &impl Fn(&str, f64, &str)) -
 
 /// Parches the HytaleServer.jar to redirect authentication URLs to localhost/sanasol.
 /// This is used by both the Runner (pre-patching) and the Proxy (JIT patching).
-pub fn patch_server_jar(src: &PathBuf, dst: &PathBuf, port: u16) -> anyhow::Result<()> {
+pub fn patch_server_jar(
+    src: &PathBuf,
+    dst: &PathBuf,
+    online_mode: OnlineFixMode,
+    port: u16,
+) -> anyhow::Result<()> {
     if !src.exists() {
         anyhow::bail!("Source server JAR not found at {:?}", src);
     }
@@ -405,20 +412,34 @@ pub fn patch_server_jar(src: &PathBuf, dst: &PathBuf, port: u16) -> anyhow::Resu
     let mut zip_writer = zip::ZipWriter::new(writer);
 
     // Replacements logic
-    let replacements = vec![
-        (
-            "https://sessions.hytale.com",
-            format!("http://127.0.0.000001:{}", port),
-        ),
-        (
-            "https://api.hytale.com",
-            format!("http://127.0.0.1:{}", port),
-        ),
-        (
-            "https://account.hytale.com",
-            format!("http://127.0.0.00001:{}", port),
-        ),
-    ];
+    let replacements = if online_mode == OnlineFixMode::Sanasol {
+        vec![
+            (
+                "https://sessions.hytale.com",
+                "https://sessions.sanasol.ws".into(),
+            ),
+            ("https://api.hytale.com", "https://api.sanasol.ws".into()),
+            (
+                "https://account.hytale.com",
+                "https://account.sanasol.ws".into(),
+            ),
+        ]
+    } else {
+        vec![
+            (
+                "https://sessions.hytale.com",
+                format!("http://127.0.0.000001:{}", port),
+            ),
+            (
+                "https://api.hytale.com",
+                format!("http://127.0.0.1:{}", port),
+            ),
+            (
+                "https://account.hytale.com",
+                format!("http://127.0.0.00001:{}", port),
+            ),
+        ]
+    };
 
     let mut byte_replacements = Vec::new();
     for (target, replacement) in replacements {

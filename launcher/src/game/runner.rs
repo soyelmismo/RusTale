@@ -275,6 +275,37 @@ impl Recipe for Runner {
                         server_jar_path_clone
                     );
 
+                    match settings.online_fix_mode {
+                        crate::config::OnlineFixMode::Local => {
+                            // Local configuration
+                            aurora_env_value = "local".to_string();
+                            auth_url = format!("http://127.0.0.000001:{}", server_port);
+
+                            // Start local server
+                            let server_username = player_name.clone();
+                            let server_uuid = player_uuid.clone();
+                            let server_game_dir = game_working_dir.clone();
+                            tokio::spawn(async move {
+                                crate::game::server::start_server(
+                                    server_username,
+                                    server_uuid,
+                                    server_game_dir,
+                                    server_stop_rx,
+                                    server_port,
+                                )
+                                .await;
+                            });
+                            server_started = true;
+                        }
+                        crate::config::OnlineFixMode::Sanasol => {
+                            // Sanasol configuration
+                            auth_url = "https://sessions.sanasol.ws".to_string();
+                            aurora_env_value = "sanasol".to_string();
+
+                            // We don't start the local server
+                        }
+                    }
+
                     // Spawn blocking task (CPU intensive zip ops) in background
                     task::spawn_blocking(move || {
                         if server_jar_path_clone.exists() {
@@ -287,6 +318,7 @@ impl Recipe for Runner {
                             match crate::game::patcher::patch_server_jar(
                                 &server_jar_path_clone,
                                 &patched_tmp_path,
+                                settings.online_fix_mode,
                                 port_clone,
                             ) {
                                 Ok(_) => {
@@ -327,37 +359,6 @@ impl Recipe for Runner {
                     // =========================================================
                     // PARALLEL PATCHING END
                     // =========================================================
-
-                    match settings.online_fix_mode {
-                        crate::config::OnlineFixMode::Local => {
-                            // Local configuration
-                            aurora_env_value = "local".to_string();
-                            auth_url = format!("http://127.0.0.000001:{}", server_port);
-
-                            // Start local server
-                            let server_username = player_name.clone();
-                            let server_uuid = player_uuid.clone();
-                            let server_game_dir = game_working_dir.clone();
-                            tokio::spawn(async move {
-                                crate::game::server::start_server(
-                                    server_username,
-                                    server_uuid,
-                                    server_game_dir,
-                                    server_stop_rx,
-                                    server_port,
-                                )
-                                .await;
-                            });
-                            server_started = true;
-                        }
-                        crate::config::OnlineFixMode::Sanasol => {
-                            // Sanasol configuration
-                            auth_url = "https://sessions.sanasol.ws".to_string();
-                            aurora_env_value = "sanasol".to_string();
-
-                            // We don't start the local server
-                        }
-                    }
 
                     // Extract DLL/SO (common for both modes)
                     #[cfg(target_os = "windows")]

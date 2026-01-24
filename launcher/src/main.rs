@@ -75,15 +75,6 @@ fn is_running_as_java_proxy() -> bool {
 }
 
 pub fn main() -> iced::Result {
-    // 1. PROXY MODE: Intercept server execution
-    if is_running_as_java_proxy() {
-        if let Err(e) = util::run_java_proxy_logic() {
-            eprintln!("Java Proxy Error: {}", e);
-            std::process::exit(1);
-        }
-        std::process::exit(0);
-    }
-
     #[cfg(target_os = "linux")]
     {
         if let Err(e) = gtk::init() {
@@ -96,9 +87,18 @@ pub fn main() -> iced::Result {
 
     // 1. Determine if we should start in Quickplay mode
     // True if it comes from an argument OR if it's in the config file
-    let config_quickplay = config::load_quickplay_sync();
+    let config_initialization_mode = config::load_initialization_config_sync();
     let (width, height) = config::load_width_height();
-    let is_quickplay = args.quickplay || config_quickplay;
+    let is_quickplay = args.quickplay || config_initialization_mode.quickplay;
+
+    // 1. PROXY MODE: Intercept server execution
+    if is_running_as_java_proxy() {
+        if let Err(e) = util::run_java_proxy_logic(config_initialization_mode.online_mode) {
+            eprintln!("Java Proxy Error: {}", e);
+            std::process::exit(1);
+        }
+        std::process::exit(0);
+    }
 
     iced::application(
         move || RusTale::new(is_quickplay),

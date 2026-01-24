@@ -290,9 +290,16 @@ pub fn save_settings_sync(cfg: &GameSettings) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn load_quickplay_sync() -> bool {
+pub fn load_initialization_config_sync() -> InitializationConfig {
     let settings = load_settings_sync();
-    settings.quickplay
+    InitializationConfig {
+        quickplay: settings.quickplay,
+        online_mode: settings.online_fix_mode,
+    }
+}
+pub struct InitializationConfig {
+    pub quickplay: bool,
+    pub online_mode: OnlineFixMode,
 }
 
 pub fn load_width_height() -> (f32, f32) {

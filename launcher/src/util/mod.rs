@@ -1,3 +1,5 @@
+use crate::config::OnlineFixMode;
+
 pub mod icons;
 pub mod image_cache;
 
@@ -85,7 +87,7 @@ pub fn get_saved_port() -> u16 {
 }
 
 // Java Proxy logic
-pub fn run_java_proxy_logic() -> anyhow::Result<()> {
+pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
     proxy_log("--- PROXY STARTED ---");
@@ -176,6 +178,7 @@ pub fn run_java_proxy_logic() -> anyhow::Result<()> {
                     if let Err(e) = crate::game::patcher::patch_server_jar(
                         &original_jar_path,
                         &patched_jar_path,
+                        online_mode,
                         port,
                     ) {
                         proxy_log(&format!("Error patching JAR: {}", e));
