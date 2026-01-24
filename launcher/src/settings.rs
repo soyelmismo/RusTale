@@ -245,7 +245,7 @@ impl SettingsState {
                 .size(12)
                 .color(Color::from_rgb(0.7, 0.7, 0.7)),
             pick_list(
-                vec!["pre-release", "release"],
+                vec!["release", "pre-release"],
                 Some(self.temp_settings.channel.as_str()),
                 |c| SettingsMessage::ChannelChanged(c.to_string()),
             )
