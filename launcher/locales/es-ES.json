@@ -49,6 +49,7 @@
         "browse": "Explorar...",
         "select_channel": "Seleccionar Canal",
         "select_version": "Seleccionar Versión",
+        "auto_update": "Auto Actualizar Launcher",
         "version": {
             "latest": "Última (Auto-Actualizar)",
             "specific": "Versión {0}"
