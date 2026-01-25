@@ -241,6 +241,8 @@ pub enum Message {
     RequestVersionCheck(String),
     VersionsReceived(Vec<i32>),
     RequestDeleteVersion(u32),
+    RequestRepairVersion(u32),
+    RepairFinished(Result<(), String>),
     OpenVersionFolder(u32),
     InstalledVersionsReceived(Vec<(i32, bool)>),
     BackgroundLoaded(Result<image::Handle, String>),
@@ -493,6 +495,8 @@ impl RusTale {
                 | Message::InstalledVersionsReceived(_)
                 | Message::RequestVersionCheck(_)
                 | Message::RequestDeleteVersion(_)
+                | Message::RequestRepairVersion(_)
+                | Message::RepairFinished(_)
                 | Message::OpenVersionFolder(_)
                 | Message::CloseRequested
                 | Message::WindowResized(_)
@@ -1179,6 +1183,91 @@ impl RusTale {
                     Message::InstalledVersionsReceived,
                 )
             }
+            Message::RequestRepairVersion(v) => {
+                let mut tasks = Vec::new();
+
+                // 1. Check if game is running
+                if self.status == LauncherStatus::Playing || self.running_game.is_some() {
+                    self.running_game = None;
+                    self.status = LauncherStatus::Ready;
+                    self.rebuild_tray_menu();
+
+                    if !self.is_window_visible {
+                        self.is_window_visible = true;
+                        tasks.push(
+                            window::oldest()
+                                .and_then(|id: window::Id| {
+                                    Task::batch(vec![
+                                        window::set_mode(id, window::Mode::Windowed),
+                                        window::gain_focus(id),
+                                    ])
+                                })
+                                .then(|_: ()| Task::done(Message::None)),
+                        );
+                    }
+                }
+
+                self.status = LauncherStatus::Busy;
+                self.status_text = "Repairing installation...".to_string();
+
+                let base_dir = config::get_app_dir();
+                let channel = self.settings.channel.clone();
+
+                let version_str = if v == 0 {
+                    "latest".to_string()
+                } else {
+                    v.to_string()
+                };
+
+                tasks.push(Task::perform(
+                    async move {
+                        crate::game::repair::repair_installation(
+                            base_dir,
+                            channel,
+                            version_str,
+                            |_, msg| {
+                                println!("[Repair] {}", msg);
+                            },
+                        )
+                        .await
+                    },
+                    |res| match res {
+                        Ok(_) => Message::RepairFinished(Ok(())),
+                        Err(e) => Message::RepairFinished(Err(e.to_string())),
+                    },
+                ));
+
+                Task::batch(tasks)
+            }
+
+            Message::RepairFinished(res) => {
+                match res {
+                    Ok(_) => {
+                        self.status = LauncherStatus::Ready;
+                        self.status_text = "Repair successful.".to_string();
+
+                        let channel = self.settings.channel.clone();
+
+                        if self.settings_state.is_open {
+                            return Task::perform(
+                                async move {
+                                    let base_dir = config::get_app_dir();
+                                    game::install::get_installed_versions(&base_dir, &channel).await
+                                },
+                                Message::InstalledVersionsReceived,
+                            );
+                        }
+                        if self.mods_state.is_open {
+                            return Task::done(Message::Mods(ModsMessage::RefreshLocal));
+                        }
+                    }
+                    Err(e) => {
+                        self.status = LauncherStatus::Ready;
+                        self.error = Some(format!("Repair failed: {}", e));
+                    }
+                }
+                Task::none()
+            }
             Message::DownloadError(err) => {
                 self.status = LauncherStatus::Ready;
                 self.error = Some(err);
@@ -1316,14 +1405,6 @@ impl RusTale {
                 // no se sobrescriba con la resolución vieja al pulsar "Save".
                 self.settings_state.temp_settings.width = size.width as u32;
                 self.settings_state.temp_settings.height = size.height as u32;
-
-                // REQUERIMIENTO: Si se reduce mucho, deshabilitar noticias en settings
-                if self.settings.enable_news && size.width < 750.0 {
-                    self.settings.enable_news = false;
-
-                    // Sincronizamos también el estado temporal de settings si el modal está abierto
-                    self.settings_state.temp_settings.enable_news = false;
-                }
 
                 Task::none()
             }

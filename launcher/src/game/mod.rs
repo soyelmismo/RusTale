@@ -9,6 +9,7 @@ pub mod mods;
 pub mod patcher;
 pub mod paths;
 pub mod progress;
+pub mod repair;
 pub mod runner;
 pub mod server;
 pub mod status;

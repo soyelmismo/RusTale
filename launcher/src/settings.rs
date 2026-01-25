@@ -36,6 +36,7 @@ pub enum SettingsMessage {
 
     VersionSelected(u32),
     DeleteVersion(u32),
+    RepairVersion(u32),
     OpenVersionFolder(u32),
 
     PickMoveLocation,
@@ -491,6 +492,17 @@ impl SettingsState {
                             Space::new().width(5),
                             button(
                                 container(
+                                    svg(util::icons::icon(util::icons::WRENCH))
+                                        .style(theme::svg_accent),
+                                )
+                                .center_x(Length::Fill)
+                                .center_y(Length::Fill)
+                            )
+                            .on_press(SettingsMessage::RepairVersion(version_val))
+                            .style(theme::secondary_button_style),
+                            Space::new().width(5),
+                            button(
+                                container(
                                     svg(util::icons::icon(util::icons::TRASH))
                                         .style(theme::svg_accent),
                                 )
@@ -614,6 +626,7 @@ impl SettingsState {
                 None
             }
             SettingsMessage::DeleteVersion(v) => Some(Message::RequestDeleteVersion(v)),
+            SettingsMessage::RepairVersion(v) => Some(Message::RequestRepairVersion(v)),
             SettingsMessage::OpenVersionFolder(v) => Some(Message::OpenVersionFolder(v)),
             SettingsMessage::LanguageSelected(lang) => {
                 Some(Message::LanguageChangedInSettings(lang.id))
