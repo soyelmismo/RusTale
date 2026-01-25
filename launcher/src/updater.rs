@@ -40,14 +40,14 @@ pub async fn check_for_updates(client: &Client) -> Result<Option<ReleaseInfo>> {
     let release: ReleaseInfo = response.json().await?;
     let current_version = env!("CARGO_PKG_VERSION");
 
-    let remote_ver = release.tag_name.trim_start_matches('v');
+    // Normalizar: quitar 'v' y espacios
+    let remote_ver = release.tag_name.trim().trim_start_matches('v').to_string();
+    let local_ver = current_version.trim().trim_start_matches('v').to_string();
 
-    println!(
-        "[Updater] Local: v{}, Remote: v{}",
-        current_version, remote_ver
-    );
+    println!("[Updater] Local: v{}, Remote: v{}", local_ver, remote_ver);
 
-    if remote_ver != current_version {
+    // Solo actualizar si son diferentes
+    if remote_ver != local_ver {
         if get_asset_url(&release).is_some() {
             return Ok(Some(release));
         }
@@ -104,11 +104,11 @@ pub async fn perform_update(client: Client, asset_url: String) -> Result<()> {
 }
 
 fn spawn_update_process(current: &Path, new: &Path) -> Result<()> {
-    let cur_name = current.file_name().unwrap().to_string_lossy();
-    let new_name = new.file_name().unwrap().to_string_lossy();
+    let current_abs = std::fs::canonicalize(current)?;
+    let new_abs = std::fs::canonicalize(new)?;
+    let current_dir = current_abs.parent().unwrap();
 
     if cfg!(windows) {
-        // Script batch robusto con delay para Windows
         let script = format!(
             "@echo off\r\n\
              timeout /t 1 /nobreak >nul\r\n\
@@ -116,21 +116,25 @@ fn spawn_update_process(current: &Path, new: &Path) -> Result<()> {
              move /Y \"{}\" \"{}\"\r\n\
              start \"\" \"{}\"\r\n\
              del \"%~f0\"\r\n",
-            cur_name, new_name, cur_name, cur_name
+            current_abs.display(),
+            new_abs.display(),
+            current_abs.display(),
+            current_abs.display()
         );
-        let script_path = current.parent().unwrap().join("update.bat");
+        let script_path = current_dir.join("update.bat");
         std::fs::write(&script_path, script)?;
 
         std::process::Command::new("cmd")
             .args(["/C", &script_path.to_string_lossy()])
             .spawn()?;
     } else {
-        // Script sh para Linux (permite sobrescribir binario en ejecución, pero mejor reiniciar)
+        // En Linux usamos rutas absolutas para el mv y el reinicio
         let script = format!(
-            "sleep 1; mv -f \"{}\" \"{}\"; \"{}\" &",
-            new_name,
-            cur_name,
-            current.to_string_lossy()
+            "sleep 1; chmod +x \"{}\"; mv -f \"{}\" \"{}\"; \"{}\" &",
+            new_abs.display(),
+            new_abs.display(),
+            current_abs.display(),
+            current_abs.display()
         );
         std::process::Command::new("sh")
             .arg("-c")
