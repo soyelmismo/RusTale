@@ -52,6 +52,7 @@
         "select_version": "Select Version",
         "auto_update": "Auto Update Launcher",
         "check_updates": "Check for Updates",
+        "check_failed": "Check Failed",
         "version": {
             "latest": "Latest (Auto-Update)",
             "specific": "Version {0}"

@@ -52,6 +52,7 @@
         "select_version": "Seleccionar Versión",
         "auto_update": "Auto Actualizar Launcher",
         "check_updates": "Buscar Actualizaciones",
+        "check_failed": "Error al Buscar",
         "version": {
             "latest": "Última (Auto-Actualizar)",
             "specific": "Versión {0}"

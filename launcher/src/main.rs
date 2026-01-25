@@ -833,6 +833,8 @@ impl RusTale {
             Message::LauncherUpdate(sub_msg) => match sub_msg {
                 updater::UpdaterMessage::CheckForUpdates => {
                     let client = self.api_client.clone();
+                    let is_settings_open = self.settings_state.is_open;
+
                     Task::perform(
                         async move {
                             match updater::check_for_updates(&client).await {
@@ -841,7 +843,26 @@ impl RusTale {
                                 Err(e) => updater::UpdaterMessage::Error(e.to_string()),
                             }
                         },
-                        Message::LauncherUpdate,
+                        move |res| {
+                            if is_settings_open {
+                                match res {
+                                    updater::UpdaterMessage::UpdateFound(info) => {
+                                        Message::Settings(SettingsMessage::UpdateResult(Ok(Some(
+                                            info,
+                                        ))))
+                                    }
+                                    updater::UpdaterMessage::UpdateNotFound => {
+                                        Message::Settings(SettingsMessage::UpdateResult(Ok(None)))
+                                    }
+                                    updater::UpdaterMessage::Error(e) => {
+                                        Message::Settings(SettingsMessage::UpdateResult(Err(e)))
+                                    }
+                                    _ => Message::LauncherUpdate(res),
+                                }
+                            } else {
+                                Message::LauncherUpdate(res)
+                            }
+                        },
                     )
                 }
                 updater::UpdaterMessage::UpdateFound(info) => {
@@ -1003,6 +1024,12 @@ impl RusTale {
                 util::open_game_folder();
                 Task::none()
             }
+            Message::Settings(SettingsMessage::WaitAndReset) => Task::perform(
+                async {
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                },
+                |_| Message::Settings(SettingsMessage::ResetUpdateStatus),
+            ),
             Message::Settings(msg) => {
                 if let Some(m) = self.settings_state.update(msg) {
                     Task::done(m)

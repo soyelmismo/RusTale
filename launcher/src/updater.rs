@@ -15,14 +15,14 @@ pub enum UpdaterMessage {
     UpdateFinished,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct ReleaseInfo {
     pub tag_name: String,
     pub html_url: String,
     pub assets: Vec<Asset>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct Asset {
     pub name: String,
     pub browser_download_url: String,

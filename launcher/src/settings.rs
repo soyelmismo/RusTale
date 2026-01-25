@@ -15,6 +15,15 @@ pub enum Tab {
     Java,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum UpdateStatus {
+    Idle,
+    Checking,
+    Found(crate::updater::ReleaseInfo),
+    UpToDate,
+    Error(String),
+}
+
 #[derive(Debug, Clone)]
 pub enum SettingsMessage {
     TabSelected(Tab),
@@ -49,6 +58,9 @@ pub enum SettingsMessage {
     QuickplayToggled(bool),
     AutoUpdateToggled(bool),
     CheckForLauncherUpdates,
+    UpdateResult(Result<Option<crate::updater::ReleaseInfo>, String>),
+    ResetUpdateStatus,
+    WaitAndReset,
     None,
 }
 
@@ -98,6 +110,7 @@ pub struct SettingsState {
     pub installed_versions: Vec<(i32, bool)>, // (version, is_latest_folder)
     pub is_loading_versions: bool,
     pub new_install_path: String,
+    pub update_btn_status: UpdateStatus,
 }
 
 impl SettingsState {
@@ -110,6 +123,7 @@ impl SettingsState {
             is_open: false,
             is_loading_versions: false,
             new_install_path: String::new(),
+            update_btn_status: UpdateStatus::Idle,
         }
     }
 
@@ -118,6 +132,7 @@ impl SettingsState {
         self.new_install_path = crate::config::get_app_dir().to_string_lossy().to_string();
         self.current_tab = Tab::Launcher; // Opcional: volver siempre a la primera pestana
         self.is_open = true;
+        self.update_btn_status = UpdateStatus::Idle;
         // installed_versions should be updated via message shortly after opening
     }
 
@@ -207,26 +222,59 @@ impl SettingsState {
             Space::new().height(10),
             news_checkbox,
             auto_update_chk,
-            button(
-                row![
-                    svg(util::icons::icon(util::icons::REFRESH))
-                        .width(14)
-                        .height(14)
-                        .style(theme::svg_accent),
-                    text(localization.t("settings.check_updates")).size(14)
-                ]
-                .spacing(8)
-                .align_y(Alignment::Center)
-            )
-            .on_press(SettingsMessage::CheckForLauncherUpdates)
-            .style(theme::secondary_button_style)
-            .padding(8),
+            self.view_update_check_button(localization, _is_compact),
             minimize_tray_chk,
             minimize_play_chk,
             quickplay_chk,
         ]
         .spacing(15)
         .width(Length::Fill)
+        .into()
+    }
+
+    fn view_update_check_button<'a>(
+        &'a self,
+        localization: &'a crate::lang::Localization,
+        is_compact: bool,
+    ) -> Element<'a, SettingsMessage> {
+        let content = match &self.update_btn_status {
+            UpdateStatus::Idle => localization.t("settings.check_updates").to_string(),
+            UpdateStatus::Checking => localization.t("launcher.status.checking").to_string(),
+            UpdateStatus::Found(info) => {
+                format!("{} v{}", localization.t("mods.install"), info.tag_name)
+            }
+            UpdateStatus::UpToDate => localization.t("launcher.status.ready").to_string(),
+            UpdateStatus::Error(_) => localization.t("settings.check_failed").to_string(),
+        };
+
+        let style = match &self.update_btn_status {
+            UpdateStatus::Found(_) => theme::primary_button_style,
+            UpdateStatus::Error(_) => theme::danger_button_style,
+            _ => theme::secondary_button_style,
+        };
+
+        button(
+            container(
+                row![
+                    svg(util::icons::icon(util::icons::REFRESH))
+                        .width(14)
+                        .height(14)
+                        .style(theme::svg_accent),
+                    text(content).size(14)
+                ]
+                .spacing(8)
+                .align_y(Alignment::Center),
+            )
+            .center_x(Length::Fill),
+        )
+        .on_press(SettingsMessage::CheckForLauncherUpdates)
+        .style(style)
+        .width(if is_compact {
+            Length::Fill
+        } else {
+            Length::Fixed(180.0)
+        })
+        .padding(8)
         .into()
     }
 
@@ -649,11 +697,42 @@ impl SettingsState {
                 None
             }
             SettingsMessage::CheckForLauncherUpdates => {
-                self.is_open = false;
+                if let UpdateStatus::Found(info) = &self.update_btn_status {
+                    if let Some(url) = crate::updater::get_asset_url(info) {
+                        return Some(Message::LauncherUpdate(
+                            crate::updater::UpdaterMessage::StartUpdate(url),
+                        ));
+                    }
+                }
+
+                self.update_btn_status = UpdateStatus::Checking;
                 Some(Message::LauncherUpdate(
                     crate::updater::UpdaterMessage::CheckForUpdates,
                 ))
             }
+            SettingsMessage::UpdateResult(res) => {
+                match res {
+                    Ok(Some(info)) => {
+                        self.update_btn_status = UpdateStatus::Found(info);
+                    }
+                    Ok(None) => {
+                        self.update_btn_status = UpdateStatus::UpToDate;
+                        return Some(Message::Settings(SettingsMessage::WaitAndReset));
+                    }
+                    Err(e) => {
+                        self.update_btn_status = UpdateStatus::Error(e);
+                        return Some(Message::Settings(SettingsMessage::WaitAndReset));
+                    }
+                }
+                None
+            }
+            SettingsMessage::ResetUpdateStatus => {
+                if !matches!(self.update_btn_status, UpdateStatus::Found(_)) {
+                    self.update_btn_status = UpdateStatus::Idle;
+                }
+                None
+            }
+            SettingsMessage::WaitAndReset => Some(Message::Settings(SettingsMessage::WaitAndReset)),
             SettingsMessage::None => None,
         }
     }
