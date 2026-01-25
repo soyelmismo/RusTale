@@ -7,6 +7,7 @@ use iced::{Alignment, Color, Element, Font, Length};
 pub fn view<'a>(
     status: &'a LauncherStatus,
     settings: &'a GameSettings,
+    resolved_version: Option<i32>,
     download_progress: f32,
     sub_progress: f32,
     status_text: &'a str,
@@ -89,6 +90,15 @@ pub fn view<'a>(
         settings_btn = settings_btn.on_press(Message::OpenSettings);
     }
 
+    let version_display = if settings.game_version == 0 {
+        match resolved_version {
+            Some(v) if v > 0 => format!("{} (Latest)", v),
+            _ => "Latest".to_string(),
+        }
+    } else {
+        settings.game_version.to_string()
+    };
+
     let info_section = column![
         row![
             text(localization.t("launcher.info.channel"))
@@ -103,9 +113,7 @@ pub fn view<'a>(
                 .size(10)
                 .color(Color::from_rgb(0.5, 0.5, 0.5)),
             Space::new().width(Length::Fill),
-            text(settings.game_version.to_string())
-                .size(12)
-                .color(Color::WHITE),
+            text(version_display).size(12).color(Color::WHITE),
         ]
         .width(Length::Fill),
     ]

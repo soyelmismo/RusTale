@@ -1523,6 +1523,7 @@ impl RusTale {
             control_section::view(
                 &self.status,
                 &self.settings,
+                self.latest_version,
                 self.download_progress,
                 self.sub_progress,
                 &self.status_text,
