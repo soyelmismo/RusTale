@@ -278,6 +278,19 @@ pub fn active_tab_style(_theme: &Theme, _status: button::Status) -> button::Styl
     }
 }
 
+pub fn active_tab_container_style(_theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(Color::from_rgba(1.0, 0.658, 0.27, 0.15))),
+        border: Border {
+            color: ACCENT_ORANGE,
+            width: 1.0,
+            radius: 6.0.into(),
+        },
+        text_color: Some(ACCENT_ORANGE),
+        ..Default::default()
+    }
+}
+
 pub fn modal_container(_theme: &Theme) -> container::Style {
     container::Style {
         background: Some(Background::Color(Color::from_rgb(0.08, 0.08, 0.08))),
@@ -586,4 +599,8 @@ pub fn scrollable_style(_theme: &Theme, status: scrollable::Status) -> scrollabl
             icon: Color::WHITE,
         },
     }
+}
+
+pub fn container_style_transparent(_theme: &Theme) -> container::Style {
+    container::Style::default()
 }

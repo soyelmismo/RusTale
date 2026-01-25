@@ -67,6 +67,19 @@ impl ProfilesConfig {
         }
     }
 
+    pub fn update_profile_uuid(&mut self, old_id: &str, new_uuid: String) {
+        // Verificamos que el ID exista
+        if let Some(pos) = self.profiles.iter().position(|p| p.id == old_id) {
+            // Actualizamos el ID en el vector
+            self.profiles[pos].id = new_uuid.clone();
+
+            // Si el perfil editado era el seleccionado actualmente, actualizamos la referencia
+            if self.current_profile == old_id {
+                self.current_profile = new_uuid;
+            }
+        }
+    }
+
     pub fn delete_profile(&mut self, id: &str) {
         if self.profiles.len() <= 1 {
             return;

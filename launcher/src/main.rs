@@ -2,7 +2,9 @@
 use clap::Parser;
 use futures::SinkExt;
 use iced::widget::{Space, column, container, image, row, stack};
-use iced::{Color, ContentFit, Element, Length, Size, Subscription, Task, Theme, window};
+use iced::{
+    Color, ContentFit, Element, Length, Size, Subscription, Task, Theme, clipboard, window,
+};
 use tray_icon::{
     TrayIconBuilder,
     menu::{Menu, MenuItem},
@@ -227,6 +229,12 @@ pub enum Message {
     ProfileNameChanged(String),
     SaveProfileName,
     CancelProfileEdit,
+    EditProfileUUID(String),
+    ProfileUUIDChanged(String),
+    SaveProfileUUID,
+    CancelProfileUUIDEdit,
+    CopyUUID(String),
+    GenerateRandomUUID,
     DownloadError(String),
     ToggleProfileDropdown,
     TrayEvent(tray_icon::TrayIconEvent),
@@ -253,6 +261,7 @@ struct RusTale {
     running_game: Option<(GameSettings, String, String, Option<i32>, LauncherStatus)>, // (Settings, Name, ID/UUID, TargetVersion)
     bg_handle: Option<image::Handle>,
     editing_profile: Option<(Option<String>, String)>, // (ID, Name) - None ID means new profile
+    editing_uuid: Option<(String, String)>,
     profile_dropdown_open: bool,
     latest_version: Option<i32>,
     available_versions: Vec<i32>, // CAMBIO: Caché persistente de versiones
@@ -337,6 +346,7 @@ impl RusTale {
                 running_game: None,
                 bg_handle: initial_bg, // Assign the handle immediately (can be Some or None)
                 editing_profile: None,
+                editing_uuid: None,
                 profile_dropdown_open: false,
                 latest_version: None,
                 available_versions: Vec::new(), // Initialize empty
@@ -459,7 +469,9 @@ impl RusTale {
                 | Message::OpenVersionFolder(_)
                 | Message::CloseRequested
                 | Message::WindowResized(_)
-                | Message::AppExit => {}
+                | Message::AppExit
+                | Message::CopyUUID(_)
+                | Message::GenerateRandomUUID => {}
                 _ => return Task::none(),
             }
         }
@@ -833,7 +845,50 @@ impl RusTale {
                 }
                 _ => Task::none(),
             },
-
+            Message::EditProfileUUID(id) => {
+                self.editing_profile = None;
+                if let Some(p) = self.profiles.profiles.iter().find(|p| p.id == id) {
+                    self.editing_uuid = Some((p.id.clone(), p.id.clone()));
+                }
+                Task::none()
+            }
+            Message::ProfileUUIDChanged(val) => {
+                if let Some((original_id, _)) = &self.editing_uuid {
+                    self.editing_uuid = Some((original_id.clone(), val));
+                }
+                Task::none()
+            }
+            Message::SaveProfileUUID => {
+                if let Some((original_id, new_val)) = self.editing_uuid.take() {
+                    let cleaned_uuid = new_val.trim().to_string();
+                    if let Ok(parsed) = uuid::Uuid::parse_str(&cleaned_uuid) {
+                        let final_uuid = parsed.to_string();
+                        self.profiles.update_profile_uuid(&original_id, final_uuid);
+                        let profiles = self.profiles.clone();
+                        Task::perform(
+                            async move { config::save_profiles(&profiles).await },
+                            |_| Message::None,
+                        )
+                    } else {
+                        println!("UUID inválido ignorado");
+                        Task::none()
+                    }
+                } else {
+                    Task::none()
+                }
+            }
+            Message::CancelProfileUUIDEdit => {
+                self.editing_uuid = None;
+                Task::none()
+            }
+            Message::CopyUUID(uuid_str) => clipboard::write(uuid_str),
+            Message::GenerateRandomUUID => {
+                if let Some((original_id, _)) = &self.editing_uuid {
+                    let new_uuid = uuid::Uuid::new_v4().to_string();
+                    self.editing_uuid = Some((original_id.clone(), new_uuid));
+                }
+                Task::none()
+            }
             Message::OpenSettings => {
                 self.settings_state.open(self.settings.clone());
 
@@ -1194,6 +1249,7 @@ impl RusTale {
             profile_card::view(
                 &self.profiles,
                 &self.editing_profile,
+                &self.editing_uuid,
                 self.profile_dropdown_open,
                 &self.localization,
             ),

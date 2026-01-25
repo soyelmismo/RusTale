@@ -1,6 +1,8 @@
+use crate::game::crypto;
 use anyhow::{Context, Result};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
@@ -56,12 +58,19 @@ pub async fn fetch_remote_tokens(
         anyhow::bail!("Auth server returned error {}: {}", status, text);
     }
 
-    let tokens: AuthTokens = response
+    let mut tokens: AuthTokens = response
         .json()
         .await
         .context("Failed to parse auth tokens")?;
 
-    println!("[Auth] Tokens received successfully");
+    // --- NUEVO: Reemplazar ISS y re-firmar tokens ---
+    tokens.identity_token = re_sign_jwt(&tokens.identity_token, auth_server_url)?;
+    tokens.session_token = re_sign_jwt(&tokens.session_token, auth_server_url)?;
+
+    println!(
+        "[Auth] Tokens received and re-signed with issuer: {}",
+        auth_server_url
+    );
     Ok(tokens)
 }
 
@@ -133,4 +142,32 @@ pub fn generate_fake_tokens(player_name: &str, player_uuid: &str, issuer_url: &s
 fn to_b64<T: Serialize>(data: &T) -> String {
     let json = serde_json::to_string(data).unwrap();
     URL_SAFE_NO_PAD.encode(json.as_bytes())
+}
+
+fn re_sign_jwt(token: &str, new_issuer: &str) -> Result<String> {
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() != 3 {
+        anyhow::bail!("Invalid JWT");
+    }
+
+    // 1. Modificar HEADER (para que el kid coincida con nuestra clave local)
+    let header_raw = URL_SAFE_NO_PAD.decode(parts[0])?;
+    let mut header_json: Value = serde_json::from_slice(&header_raw)?;
+    header_json["kid"] = json!(crypto::KEY_ID); // Usar "2025-10-01"
+
+    // 2. Modificar PAYLOAD (el campo "iss")
+    let payload_raw = URL_SAFE_NO_PAD.decode(parts[1])?;
+    let mut payload_json: Value = serde_json::from_slice(&payload_raw)?;
+    payload_json["iss"] = json!(new_issuer);
+
+    // 3. Serializar y codificar nuevas partes
+    let new_header_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&header_json)?);
+    let new_payload_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&payload_json)?);
+
+    // 4. Firmar con nuestra clave privada (generada en crypto.rs)
+    let unsigned_token = format!("{}.{}", new_header_b64, new_payload_b64);
+    let new_signature = crypto::sign_message(&unsigned_token);
+
+    // 5. Reconstruir JWT completo
+    Ok(format!("{}.{}", unsigned_token, new_signature))
 }

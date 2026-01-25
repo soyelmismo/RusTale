@@ -2,12 +2,13 @@ use crate::Message;
 use crate::config::ProfilesConfig;
 use crate::theme;
 use crate::util;
-use iced::widget::{Space, button, column, container, row, svg, text, text_input};
+use iced::widget::{Space, button, column, container, row, svg, text, text_input, tooltip};
 use iced::{Alignment, Color, Element, Length};
 
 pub fn view<'a>(
     profiles: &'a ProfilesConfig,
     editing_profile: &'a Option<(Option<String>, String)>,
+    editing_uuid: &'a Option<(String, String)>,
     dropdown_open: bool,
     localization: &'a crate::lang::Localization,
 ) -> Element<'a, Message> {
@@ -25,13 +26,19 @@ pub fn view<'a>(
             .map(|p| p.id == profile.id)
             .unwrap_or(false);
 
-        let is_being_edited = if let Some((Some(id), _)) = editing_profile {
+        let is_being_edited_name = if let Some((Some(id), _)) = editing_profile {
             id == &profile.id
         } else {
             false
         };
 
-        if is_being_edited {
+        let is_being_edited_uuid = if let Some((id, _)) = editing_uuid {
+            id == &profile.id
+        } else {
+            false
+        };
+
+        if is_being_edited_name {
             let (_, current_name) = editing_profile.as_ref().unwrap();
             dropdown_content = dropdown_content.push(
                 container(
@@ -66,11 +73,94 @@ pub fn view<'a>(
                 )
                 .padding(5),
             );
+        } else if is_being_edited_uuid {
+            let (_, current_uuid_val) = editing_uuid.as_ref().unwrap();
+            dropdown_content = dropdown_content.push(
+                container(
+                    row![
+                        text_input("UUID...", current_uuid_val)
+                            .on_input(Message::ProfileUUIDChanged)
+                            .on_submit(Message::SaveProfileUUID)
+                            .style(theme::text_input_style)
+                            .padding(5)
+                            .width(Length::Fill),
+                        // Copy Button
+                        tooltip(
+                            button(
+                                svg(util::icons::icon(util::icons::COPY))
+                                    .width(12)
+                                    .height(12)
+                                    .style(theme::svg_accent),
+                            )
+                            .on_press(Message::CopyUUID(current_uuid_val.clone()))
+                            .style(theme::icon_button_style)
+                            .padding(4),
+                            "Copy UUID",
+                            tooltip::Position::Top,
+                        )
+                        .style(theme::container_style_transparent),
+                        // Generate Random UUID Button
+                        tooltip(
+                            button(
+                                svg(util::icons::icon(util::icons::DICE))
+                                    .width(12)
+                                    .height(12)
+                                    .style(theme::svg_accent),
+                            )
+                            .on_press(Message::GenerateRandomUUID)
+                            .style(theme::icon_button_style)
+                            .padding(4),
+                            "Generate Random UUID",
+                            tooltip::Position::Top,
+                        )
+                        .style(theme::container_style_transparent),
+                        // Save Button
+                        button(
+                            svg(util::icons::icon(util::icons::CHECK))
+                                .width(12)
+                                .height(12)
+                                .style(theme::svg_accent),
+                        )
+                        .on_press(Message::SaveProfileUUID)
+                        .style(theme::icon_button_style)
+                        .padding(4),
+                        // Cancel Button
+                        button(
+                            svg(util::icons::icon(util::icons::X))
+                                .width(12)
+                                .height(12)
+                                .style(theme::svg_accent),
+                        )
+                        .on_press(Message::CancelProfileUUIDEdit)
+                        .style(theme::icon_button_style)
+                        .padding(4),
+                    ]
+                    .spacing(5)
+                    .align_y(Alignment::Center),
+                )
+                .padding(5)
+                .style(theme::active_tab_container_style),
+            );
         } else {
             dropdown_content = dropdown_content.push(
                 button(
                     row![
                         text(&profile.name).size(13).width(Length::Fill),
+                        // UUID Button
+                        tooltip(
+                            button(
+                                svg(util::icons::icon(util::icons::PERSON))
+                                    .width(12)
+                                    .height(12)
+                                    .style(theme::svg_accent),
+                            )
+                            .on_press(Message::EditProfileUUID(profile.id.clone()))
+                            .style(theme::icon_button_style)
+                            .padding(4),
+                            "View/Edit UUID",
+                            tooltip::Position::Top,
+                        )
+                        .style(theme::container_style_transparent),
                         button(
                             svg(util::icons::icon(util::icons::EDIT))
                                 .width(12)
