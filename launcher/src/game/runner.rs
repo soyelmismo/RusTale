@@ -285,15 +285,21 @@ impl Recipe for Runner {
                             let server_username = player_name.clone();
                             let server_uuid = player_uuid.clone();
                             let server_game_dir = game_working_dir.clone();
+                            let port_clone = server_port;
+
                             tokio::spawn(async move {
-                                crate::game::server::start_server(
-                                    server_username,
-                                    server_uuid,
-                                    server_game_dir,
-                                    server_stop_rx,
-                                    server_port,
-                                )
-                                .await;
+                                if !crate::game::server::is_server_alive(port_clone).await {
+                                    let _ = crate::game::server::start_server(
+                                        server_username,
+                                        server_uuid,
+                                        server_game_dir,
+                                        server_stop_rx,
+                                        port_clone,
+                                    )
+                                    .await;
+                                } else {
+                                    println!("[Runner] Connected to existing Auth Server.");
+                                }
                             });
                             server_started = true;
                         }

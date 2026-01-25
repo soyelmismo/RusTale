@@ -205,13 +205,29 @@ struct ServerState {
     game_dir: PathBuf,
 }
 
+// AÑADIR ESTA FUNCIÓN AL FINAL O DONDE PREFIERAS
+pub async fn is_server_alive(port: u16) -> bool {
+    let client = reqwest::Client::new();
+    let url = format!("http://127.0.0.1:{}/health", port);
+
+    match client
+        .get(&url)
+        .timeout(std::time::Duration::from_millis(500))
+        .send()
+        .await
+    {
+        Ok(resp) => resp.status().is_success(),
+        Err(_) => false,
+    }
+}
+
 pub async fn start_server(
     username: String,
     uuid: String,
     game_folder_path: PathBuf,
     shutdown_rx: oneshot::Receiver<()>,
     port: u16,
-) {
+) -> anyhow::Result<()> {
     // 1. Load saved skin (Multi-user support)
     let base_dir = crate::config::get_app_dir();
     let server_data_dir = base_dir.join("serverdata");
@@ -425,8 +441,20 @@ pub async fn start_server(
 
     // Start server on 127.0.0.1:{port}
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), port);
-    println!("Emulated server starting on http://{}", addr);
 
+    {
+        match std::net::TcpListener::bind(addr) {
+            Ok(_) => {
+                // El puerto está libre. El listener se dropea aquí, liberando el puerto.
+            }
+            Err(_) => {
+                eprintln!("Port {} is already in use.", port);
+                return Err(anyhow::anyhow!("Port in use"));
+            }
+        }
+    }
+
+    println!("Emulated server started successfully on http://{}", addr);
     let server = warp::serve(routes).bind(addr).await;
 
     let graceful_server = server.graceful(async {
@@ -434,6 +462,7 @@ pub async fn start_server(
     });
 
     tokio::spawn(graceful_server.run());
+    Ok(())
 }
 
 // --- HANDLERS ---

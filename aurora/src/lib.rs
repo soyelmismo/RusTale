@@ -287,9 +287,9 @@ fn get_swaps(_mode: &str) -> Vec<SwapEntry> {
     });
 
     // C: {.old = make_csstr(L"https://tools."),        .new = make_csstr(L"http://127.0.0")},
-    // FIX: El codigo Rust anterior generaba "http://127.0.0.00" (17 chars) para "https://tools." (14 chars)
-    // Esto causaba que new.len > old.len, corrompiendo memoria o fallando la comparacion en C.
-    // Usamos la version C estricta:
+    // FIX: The previous Rust code generated "http://127.0.0.00" (17 chars) for "https://tools." (14 chars)
+    // This caused new.len > old.len, corrupting memory or failing the comparison in C.
+    // We use the strict C version:
     swaps.push(SwapEntry {
         old: CsString::from_str("https://tools."),
         new: CsString::from_str("http://127.000"),
@@ -320,10 +320,10 @@ fn get_swaps(_mode: &str) -> Vec<SwapEntry> {
     swaps
 }
 unsafe fn debug_read_csstr(ptr: *const u8) -> String {
-    // 1. Leer tamaño
+    // 1. Read size
     let size = unsafe { std::ptr::read_unaligned(ptr as *const u32) };
 
-    // Sanity check: si el tamaño es absurdo, retornar error
+    // Sanity check: if the size is absurd, return error
     if size > 512 {
         return "<invalid size>".to_string();
     }
@@ -335,8 +335,8 @@ unsafe fn debug_read_csstr(ptr: *const u8) -> String {
         let char_ptr = unsafe { data_ptr.add((k as usize) * 2) as *const u16 };
         let c = unsafe { std::ptr::read_unaligned(char_ptr) };
 
-        // CORRECCIÓN CRÍTICA: Detener lectura si encontramos un terminador nulo
-        // o si el caracter parece basura (opcional, pero ayuda a limpiar logs)
+        // critical: stop reading if we find a null terminator
+        // or if the character seems garbage (optional, but helps clean logs)
         if c == 0 {
             break;
         }
@@ -375,7 +375,7 @@ unsafe fn apply_swaps(
     #[cfg(target_os = "windows")]
     unsafe {
         internal_apply_swaps_windows(addr, len, swaps)
-    }; // prot no se usa en windows impl original
+    };
 
     #[cfg(target_os = "linux")]
     unsafe {
@@ -438,7 +438,7 @@ unsafe fn internal_apply_swaps_windows(addr: *mut u8, len: usize, swaps: &[SwapE
     }
 }
 
-// Nueva lógica corregida para Linux
+// New corrected logic for Linux
 #[cfg(target_os = "linux")]
 unsafe fn internal_apply_swaps_linux(addr: *mut u8, len: usize, swaps: &[SwapEntry], prot: i32) {
     let mut swaps_done = 0;
@@ -449,7 +449,7 @@ unsafe fn internal_apply_swaps_linux(addr: *mut u8, len: usize, swaps: &[SwapEnt
                 continue;
             }
 
-            // FIX: Comparar size - 1 (ignorando último byte/byte alto) para replicar comportamiento de C
+            // FIX: Compare size - 1 (ignoring last byte/byte high) to replicate C behavior
             let compare_len = active_size_old - 1;
 
             let matches = unsafe {
@@ -468,7 +468,7 @@ unsafe fn internal_apply_swaps_linux(addr: *mut u8, len: usize, swaps: &[SwapEnt
             if matches {
                 let old_str_debug = unsafe { debug_read_csstr(addr.add(i)) };
 
-                // Para el "new", leemos directamente de la estructura del swap
+                // For the "new", we read directly from the swap structure
                 let new_slice = unsafe {
                     std::slice::from_raw_parts(
                         std::ptr::addr_of!(swap.new.data) as *const u16,

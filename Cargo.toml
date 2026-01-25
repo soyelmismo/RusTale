@@ -9,3 +9,13 @@ codegen-units = 1   # Reduce paralelismo para mejorar la optimización LTO
 panic = 'abort'     # Elimina la lógica de "unwinding" (reduce tamaño y pistas de flujo)
 strip = true        # ELIMINA LOS SÍMBOLOS (hace que las funciones se llamen sub_401000)
 debug = false       # Asegura que no haya info de debug
+
+[profile.unopt]
+inherits = "release" # Hereda defaults de release para no olvidar detalles
+opt-level = 0        # Sin optimización (Compila rápido, corre lento)
+lto = "off"          # Apaga LTO explícitamente (Linkeo rápido)
+codegen-units = 256  # CLAVE: Paraleliza la compilación al máximo
+panic = 'abort'      # Sin unwinding (menor tamaño, linkeo más simple)
+strip = false        # Saltar el paso de stripping ahorra tiempo de build
+debug = false        # Sin info de debug
+incremental = true   # Opcional: Habilita compilación incremental (cache)

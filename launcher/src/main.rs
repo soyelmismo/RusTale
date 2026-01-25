@@ -14,6 +14,7 @@ mod game;
 mod java;
 mod lang;
 mod news;
+mod server;
 mod settings;
 mod theme;
 mod ui;
@@ -33,10 +34,35 @@ use crate::ui::{control_section, profile_card}; // Import the struct
 
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about = None)]
-struct Args {
-    /// Start in Quickplay mode (no UI, launch the game if possible)
+pub struct Args {
+    /// Start in Quickplay mode (no UI)
     #[arg(long)]
     quickplay: bool,
+
+    // --- SERVER ARGUMENTS ---
+    /// Enable Dedicated Server Mode (CLI only)
+    #[arg(long)]
+    dedicated_server: bool,
+
+    /// Online Mode: local or sanasol
+    #[arg(long)]
+    online_mode: Option<String>,
+
+    /// Update Branch: release or pre-release
+    #[arg(long)]
+    branch: Option<String>,
+
+    /// Game Version: latest, 5, etc.
+    #[arg(long)]
+    game_version: Option<String>,
+
+    /// Server Args
+    #[arg(long)]
+    server_args: Option<String>,
+
+    /// Java Exec Args
+    #[arg(long)]
+    java_exec_args: Option<String>,
 }
 
 // Add this function to detect if we are the proxy
@@ -75,6 +101,26 @@ fn is_running_as_java_proxy() -> bool {
 }
 
 pub fn main() -> iced::Result {
+    #[cfg(windows)]
+    {
+        // Si hay argumentos de consola, reconectamos la salida estándar
+        let args: Vec<String> = std::env::args().collect();
+        if args
+            .iter()
+            .any(|a| a == "--dedicated-server" || a == "--help" || a == "-h")
+        {
+            use windows_sys::Win32::System::Console::{
+                ATTACH_PARENT_PROCESS, AllocConsole, AttachConsole,
+            };
+            unsafe {
+                // Intenta adjuntarse a la consola desde donde se lanzó (PowerShell)
+                if AttachConsole(ATTACH_PARENT_PROCESS) == 0 {
+                    // Si falla (ej. doble click), crea una ventana nueva negra
+                    AllocConsole();
+                }
+            }
+        }
+    }
     #[cfg(target_os = "linux")]
     {
         if let Err(e) = gtk::init() {
@@ -97,6 +143,25 @@ pub fn main() -> iced::Result {
             eprintln!("Java Proxy Error: {}", e);
             std::process::exit(1);
         }
+        std::process::exit(0);
+    }
+
+    if args.dedicated_server {
+        // Inicializar runtime básico para el server (sin UI)
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to create tokio runtime");
+
+        rt.block_on(async {
+            // Cargar configuración (fusiona archivo + CLI)
+            let config = server::config::load_or_create(&args).await;
+
+            if let Err(e) = server::runner::run_server_flow(config).await {
+                eprintln!("Server Error: {}", e);
+                std::process::exit(1);
+            }
+        });
         std::process::exit(0);
     }
 
@@ -200,6 +265,7 @@ struct RusTale {
     window_size: Size,
     tray_icon: Option<tray_icon::TrayIcon>, // Store tray icon to rebuild menu dynamically
     mods_state: ModsState,                  // Modal state
+    local_server_stop_tx: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 impl RusTale {
@@ -283,6 +349,7 @@ impl RusTale {
                 window_size: Size::new(width, height),
                 tray_icon,
                 mods_state: ModsState::new(),
+                local_server_stop_tx: None,
             },
             Task::batch(vec![
                 Task::done(Message::Initialize),
@@ -336,6 +403,46 @@ impl RusTale {
         });
 
         Subscription::batch(vec![game_runner, tray_sub, menu_sub, window_sub])
+    }
+
+    fn reconcile_local_server(&mut self) {
+        let needs_server = self.settings.online_fix_mode == config::OnlineFixMode::Local;
+        let is_running = self.local_server_stop_tx.is_some();
+
+        if needs_server && !is_running {
+            // INICIAR SERVIDOR
+            let port = util::get_saved_port();
+            let base_dir = config::get_app_dir();
+            let paths = game::GamePaths::new(base_dir.clone());
+
+            // Usamos la carpeta del perfil actual o default
+            let channel = &self.settings.channel;
+            // Intentar adivinar la carpeta del juego para los assets
+            let game_dir = paths.version_dir(channel, "latest");
+
+            let username = self.profiles.get_current_profile_name();
+            let uuid = self.profiles.current_profile.clone();
+
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            self.local_server_stop_tx = Some(tx);
+
+            // Spawnear
+            tokio::spawn(async move {
+                // Primero check si ya corre
+                if !game::server::is_server_alive(port).await {
+                    println!("[App] Starting background Auth Server on {}", port);
+                    let _ = game::server::start_server(username, uuid, game_dir, rx, port).await;
+                } else {
+                    println!("[App] Auth Server already active on {}. Attached.", port);
+                }
+            });
+        } else if !needs_server && is_running {
+            // DETENER SERVIDOR
+            if let Some(tx) = self.local_server_stop_tx.take() {
+                let _ = tx.send(());
+                println!("[App] Background Auth Server stopped.");
+            }
+        }
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -397,6 +504,9 @@ impl RusTale {
                 self.settings = s.clone();
                 self.settings_state.temp_settings = s;
                 self.localization = loc;
+
+                // NUEVO: Asegurar servidor si es necesario
+                self.reconcile_local_server();
 
                 // --- AUTO-QUICKPLAY LOGIC ---
                 // Activated if passed by CLI (--quickplay) OR if enabled in permanent settings
@@ -754,6 +864,9 @@ impl RusTale {
                 // Reload paths in case bootstrap was changed
                 let base_dir = config::get_app_dir();
                 self.paths = GamePaths::new(base_dir);
+
+                // NUEVO: Reconciliar estado del servidor local
+                self.reconcile_local_server();
 
                 let news_action = if s.enable_news && !old_settings.enable_news {
                     Task::done(Message::News(NewsMessage::LoadNews))
