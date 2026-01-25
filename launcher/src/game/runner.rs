@@ -268,7 +268,27 @@ impl Recipe for Runner {
                                         )
                                         .await;
                                     } else {
-                                        println!("[Runner] Connected to existing Auth Server.");
+                                        println!(
+                                            "[Runner] Connected to existing Auth Server. Updating paths..."
+                                        );
+
+                                        let client = reqwest::Client::new();
+                                        let update_url = format!(
+                                            "http://127.0.0.1:{}/internal/update-path",
+                                            port_clone
+                                        );
+                                        let body = serde_json::json!({
+                                            "game_dir": server_game_dir.to_string_lossy().to_string()
+                                        });
+
+                                        if let Err(e) =
+                                            client.post(update_url).json(&body).send().await
+                                        {
+                                            eprintln!(
+                                                "[Runner] Failed to update Auth Server path: {}",
+                                                e
+                                            );
+                                        }
                                     }
                                 });
                                 server_started = true;

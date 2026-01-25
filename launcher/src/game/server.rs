@@ -11,6 +11,11 @@ use tokio::sync::oneshot;
 use uuid::Uuid;
 use warp::Filter;
 
+#[derive(Deserialize)]
+struct UpdatePathRequest {
+    game_dir: String,
+}
+
 // ==================== DATA STRUCTURES (hytFormats.go ported) ====================
 
 #[derive(Deserialize, Debug)]
@@ -267,6 +272,12 @@ pub async fn start_server(
 
     let state_filter = warp::any().map(move || state.clone());
 
+    let internal_update_path = warp::path!("internal" / "update-path")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(state_filter.clone())
+        .then(handle_update_path);
+
     // 1. GET /my-account/game-profile
     let game_profile = warp::path!("my-account" / "game-profile")
         .and(warp::get())
@@ -443,6 +454,7 @@ pub async fn start_server(
         .or(telemetry)
         .or(analytics)
         .or(event)
+        .or(internal_update_path)
         .or(catch_unknown)
         .with(cors)
         .with(log);
@@ -1089,4 +1101,20 @@ fn extract_uuid_from_auth(auth_header: Option<String>, default_uuid: &str) -> St
     }
 
     default_uuid.to_string()
+}
+
+async fn handle_update_path(
+    body: UpdatePathRequest,
+    state: Arc<tokio::sync::Mutex<ServerState>>,
+) -> impl warp::Reply {
+    let mut state = state.lock().await;
+    println!(">>> [INTERNAL] Updating Game Dir to: {}", body.game_dir);
+
+    let new_path = PathBuf::from(&body.game_dir);
+    if new_path.exists() {
+        state.game_dir = new_path;
+        warp::reply::with_status("Path updated", warp::http::StatusCode::OK)
+    } else {
+        warp::reply::with_status("Path does not exist", warp::http::StatusCode::BAD_REQUEST)
+    }
 }
