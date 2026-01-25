@@ -40,34 +40,39 @@ pub async fn check_for_updates(client: &Client) -> Result<Option<ReleaseInfo>> {
     let release: ReleaseInfo = response.json().await?;
     let current_version = env!("CARGO_PKG_VERSION");
 
-    // Remove 'v' prefix if present for comparison
+    // Limpieza de versiones para comparación (v0.0.1 -> 0.0.1)
     let remote_ver_str = release.tag_name.trim_start_matches('v');
     let current_ver_str = current_version.trim_start_matches('v');
 
-    if compare_versions(remote_ver_str, current_ver_str) {
-        Ok(Some(release))
-    } else {
-        Ok(None)
+    println!(
+        "[Updater] Local: {}, Remote: {}",
+        current_ver_str, remote_ver_str
+    );
+
+    // Lógica simple: Si son diferentes y el remoto no es vacío, actualizamos.
+    // Esto permite que builds tipo "nightly-build-123" disparen actualización sobre "0.0.1".
+    if remote_ver_str != current_ver_str {
+        // Verificar que existe un asset para nuestro sistema operativo antes de notificar
+        if get_asset_url(&release).is_some() {
+            return Ok(Some(release));
+        }
     }
+
+    Ok(None)
 }
 
-// Returns true if remote > current
-fn compare_versions(remote: &str, current: &str) -> bool {
-    let r_parts: Vec<&str> = remote.split('.').collect();
-    let c_parts: Vec<&str> = current.split('.').collect();
+// Función auxiliar para obtener la URL correcta según el SO
+pub fn get_asset_url(info: &ReleaseInfo) -> Option<String> {
+    let target_substring = if cfg!(windows) {
+        "windows" // Buscaremos 'rustale-windows.exe'
+    } else {
+        "linux" // Buscaremos 'rustale-linux'
+    };
 
-    for i in 0..std::cmp::max(r_parts.len(), c_parts.len()) {
-        let r_val = r_parts.get(i).unwrap_or(&"0").parse::<u32>().unwrap_or(0);
-        let c_val = c_parts.get(i).unwrap_or(&"0").parse::<u32>().unwrap_or(0);
-
-        if r_val > c_val {
-            return true;
-        }
-        if r_val < c_val {
-            return false;
-        }
-    }
-    false
+    info.assets
+        .iter()
+        .find(|a| a.name.to_lowercase().contains(target_substring))
+        .map(|a| a.browser_download_url.clone())
 }
 
 pub async fn perform_update(client: Client, asset_url: String) -> Result<()> {
@@ -95,9 +100,11 @@ pub async fn perform_update(client: Client, asset_url: String) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&temp_path)?.permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&temp_path, perms)?;
+        if let Ok(file) = std::fs::File::open(&temp_path) {
+            let mut perms = file.metadata()?.permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&temp_path, perms)?;
+        }
     }
 
     // 4. Spawn updater script/process
@@ -111,26 +118,26 @@ fn spawn_update_process(current_exe: &Path, new_exe: &Path) -> Result<()> {
     let new_exe_name = new_exe.file_name().unwrap().to_string_lossy();
 
     if cfg!(windows) {
-        // Windows: Create a batch script to sleep, move, and restart
+        // Windows: Script batch mejorado
+        // El ping es un truco para esperar (timeout no siempre está en PATH)
         let script_content = format!(
             "@echo off\r\n\
-             timeout /t 2 /nobreak >nul\r\n\
-             move /y \"{}\" \"{}\"\r\n\
+             ping 127.0.0.1 -n 2 > nul\r\n\
+             del /F \"{}\"\r\n\
+             move /Y \"{}\" \"{}\"\r\n\
              start \"\" \"{}\"\r\n\
-             del \"%~f0\"\r\n",
-            new_exe_name, current_exe_name, current_exe_name
+             (goto) 2>nul & del \"%~f0\"\r\n",
+            current_exe_name, new_exe_name, current_exe_name, current_exe_name
         );
 
-        let script_path = current_exe.parent().unwrap().join("update.bat");
+        let script_path = current_exe.parent().unwrap().join("update_launcher.bat");
         std::fs::write(&script_path, script_content)?;
 
         std::process::Command::new("cmd")
             .args(["/C", &script_path.to_string_lossy()])
             .spawn()?;
     } else {
-        // Linux: simpler, just rename over (Linux allows replacing running open files)
-        // However, since we want to restart, we might as well just exec?
-        // No, let's do a simple shell spawn
+        // Linux: shell script
         let script_content = format!(
             "sleep 1; mv -f \"{}\" \"{}\"; \"{}\" &",
             new_exe_name,

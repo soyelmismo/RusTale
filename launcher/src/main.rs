@@ -825,13 +825,14 @@ impl RusTale {
                 }
                 updater::UpdaterMessage::UpdateFound(info) => {
                     self.status_text = format!("Update found: v{}", info.tag_name);
-                    if let Some(asset) = info.assets.first() {
-                        let url = asset.browser_download_url.clone();
+
+                    // Utilizar la función helper para obtener el asset correcto según el SO
+                    if let Some(url) = updater::get_asset_url(&info) {
                         Task::done(Message::LauncherUpdate(
                             updater::UpdaterMessage::StartUpdate(url),
                         ))
                     } else {
-                        eprintln!("Update found but no assets!");
+                        eprintln!("Update found but no compatible asset for this OS!");
                         Task::none()
                     }
                 }

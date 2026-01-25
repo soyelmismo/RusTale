@@ -1,21 +1,20 @@
-name: Rust Build
+name: Build & Release
 
 on:
   push:
     branches: [ "master", "main" ]
-  pull_request:
-    branches: [ "master", "main" ]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # 1. Compilación para Windows
   build-windows:
     runs-on: windows-latest
-
     steps:
     - uses: actions/checkout@v4
-
+    
     - name: Set up Rust
       uses: dtolnay/rust-toolchain@stable
       with:
@@ -27,20 +26,19 @@ jobs:
 
     - name: Prepare Artifacts
       run: |
-        mkdir release_pack
-        copy target/release/rustale.exe release_pack/
-        copy target/aurora_build/release/aurora.dll release_pack/
+        cd target/release
+        echo '.\rustale.exe --dedicated-server --online-mode=local --branch=release --game-version=5' > start_server.bat
+        Compress-Archive -Path rustale.exe, start_server.bat -DestinationPath rustale-windows.zip
 
-    - name: Upload Artifact (Windows)
+    - name: Upload Windows Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: RusTale-Windows
-        path: release_pack/*
-        if-no-files-found: error
+        name: rustale-windows
+        path: target/release/rustale-windows.zip
 
+  # 2. Compilación para Linux
   build-linux:
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v4
 
@@ -57,13 +55,87 @@ jobs:
 
     - name: Prepare Artifacts
       run: |
-        mkdir release_pack
-        cp target/release/rustale release_pack/
-        cp target/aurora_build/release/libaurora.so release_pack/
+        cd target/release
+        echo '#!/bin/bash' > start_server.sh
+        echo './rustale --dedicated-server --online-mode=local --branch=release --game-version=5' >> start_server.sh
+        chmod +x start_server.sh
+        
+        cp ../../scripts/install_deps.sh .
+        chmod +x install_deps.sh
 
-    - name: Upload Artifact (Linux)
+        zip rustale-linux.zip rustale start_server.sh install_deps.sh
+
+    - name: Upload Linux Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: RusTale-Linux
-        path: release_pack/*
-        if-no-files-found: warn
+        name: rustale-linux
+        path: target/release/rustale-linux.zip
+
+  # 3. Crear Release y Changelog
+  release:
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # Importante para el git log
+
+    - name: Download Windows Artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: rustale-windows
+        path: artifacts
+
+    - name: Download Linux Artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: rustale-linux
+        path: artifacts
+
+    - name: Generate Changelog
+      id: changelog
+      run: |
+        # Obtener el último tag para saber desde dónde listar commits
+        LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+        
+        echo "Generating changelog since $LAST_TAG"
+        
+        if [ -z "$LAST_TAG" ]; then
+          # Si no hay tags, listar los últimos 10 commits
+          LOG=$(git log -n 10 --pretty=format:"- %s (%h)")
+        else
+          # Listar commits desde el último tag hasta HEAD
+          LOG=$(git log "$LAST_TAG"..HEAD --pretty=format:"- %s (%h)")
+        fi
+        
+        # Escapar saltos de línea para GitHub Actions output
+        echo "changelog<<EOF" >> $GITHUB_OUTPUT
+        echo "$LOG" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Create Tag Name
+      id: tagger
+      run: |
+        # Generar versión basada en fecha y short-sha para que sea única
+        DATE=$(date +'%Y.%m.%d')
+        SHA=$(git rev-parse --short HEAD)
+        echo "tag_name=v$DATE-$SHA" >> $GITHUB_OUTPUT
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ steps.tagger.outputs.tag_name }}
+        name: RusTale Build ${{ steps.tagger.outputs.tag_name }}
+        body: |
+          ## 🚀 Auto-generated Release
+          
+          **Changelog:**
+          ${{ steps.changelog.outputs.changelog }}
+        files: |
+          artifacts/rustale-windows.zip
+          artifacts/rustale-linux.zip
+        token: ${{ secrets.GITHUB_TOKEN }}
+        prerelease: false
+        make_latest: true
