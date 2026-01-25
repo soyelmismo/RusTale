@@ -37,73 +37,6 @@ pub fn view<'a>(
         (16, 20.0, 10) // Normal
     };
 
-    let mut play_btn = button(
-        container(
-            row![
-                svg(util::icons::icon(play_icon))
-                    .width(icon_size)
-                    .height(icon_size)
-                    .style(theme::svg_accent),
-                text(play_button_text)
-                    .size(font_size)
-                    .font(Font::MONOSPACE)
-                    .align_y(iced::alignment::Vertical::Center)
-            ]
-            .spacing(spacing_val)
-            .align_y(Alignment::Center),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .center_x(Length::Fill)
-        .center_y(Length::Fill),
-    )
-    .style(match status {
-        _ if is_disabled => theme::play_button_style,
-        LauncherStatus::Playing => theme::play_button_style_active,
-        LauncherStatus::Downloading | LauncherStatus::Migrating => theme::danger_button_style,
-        LauncherStatus::NeedsUpdate => theme::update_button_style,
-        _ => theme::play_button_style,
-    })
-    .width(Length::Fill)
-    .height(50);
-
-    if !is_disabled {
-        match status {
-            LauncherStatus::Downloading | LauncherStatus::Migrating => {
-                play_btn = play_btn.on_press(Message::CancelAction);
-            }
-            LauncherStatus::Checking | LauncherStatus::Busy => {
-                // BLOCKED
-            }
-            _ => {
-                play_btn = play_btn.on_press(Message::StartGame);
-            }
-        }
-    }
-
-    let mut settings_btn = button(
-        container(
-            row![
-                svg(util::icons::icon(util::icons::SETTINGS))
-                    .width(16)
-                    .height(16)
-                    .style(theme::svg_accent)
-            ]
-            .spacing(10)
-            .align_y(Alignment::Center),
-        )
-        .width(50)
-        .height(Length::Fill)
-        .center_x(Length::Fill)
-        .center_y(Length::Fill),
-    )
-    .style(theme::secondary_button_style)
-    .height(50);
-
-    if !is_disabled {
-        settings_btn = settings_btn.on_press(Message::OpenSettings);
-    }
-
     let version_display = if settings.game_version == 0 {
         match resolved_version {
             Some(v) if v > 0 => format!("{} (Latest)", v),
@@ -133,20 +66,89 @@ pub fn view<'a>(
     ]
     .spacing(5);
 
-    let mut mods_btn = button(
+    let mut play_btn = button(
         container(
-            svg(util::icons::icon(util::icons::PUZZLE))
-                .width(16)
-                .height(16)
-                .style(theme::svg_accent),
+            row![
+                svg(util::icons::icon(play_icon))
+                    .width(icon_size)
+                    .height(icon_size)
+                    .style(theme::svg_accent),
+                text(play_button_text)
+                    .size(font_size + 4)
+                    .font(Font::MONOSPACE)
+                    .align_y(iced::alignment::Vertical::Center)
+            ]
+            .spacing(spacing_val)
+            .align_y(Alignment::Center),
         )
-        .width(50)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill),
+    )
+    .style(match status {
+        _ if is_disabled => theme::play_button_style,
+        LauncherStatus::Playing => theme::play_button_style_active,
+        LauncherStatus::Downloading | LauncherStatus::Migrating => theme::danger_button_style,
+        LauncherStatus::NeedsUpdate => theme::update_button_style,
+        _ => theme::play_button_style,
+    })
+    .width(Length::Fill)
+    .height(Length::Fill); // Llena la altura definida en el row 'actions'
+
+    if !is_disabled {
+        match status {
+            LauncherStatus::Downloading | LauncherStatus::Migrating => {
+                play_btn = play_btn.on_press(Message::CancelAction);
+            }
+            LauncherStatus::Checking | LauncherStatus::Busy => {
+                // BLOCKED
+            }
+            _ => {
+                play_btn = play_btn.on_press(Message::StartGame);
+            }
+        }
+    }
+
+    let mut settings_btn = button(
+        container(
+            row![
+                svg(util::icons::icon(util::icons::SETTINGS))
+                    .width(18)
+                    .height(18)
+                    .style(theme::svg_accent)
+            ]
+            .spacing(10)
+            .align_y(Alignment::Center),
+        )
+        .width(Length::Fill)
         .height(Length::Fill)
         .center_x(Length::Fill)
         .center_y(Length::Fill),
     )
     .style(theme::secondary_button_style)
-    .height(50);
+    .width(Length::Fill)
+    .height(Length::Fill);
+
+    if !is_disabled {
+        settings_btn = settings_btn.on_press(Message::OpenSettings);
+    }
+
+    let mut mods_btn = button(
+        container(
+            svg(util::icons::icon(util::icons::PUZZLE))
+                .width(18)
+                .height(18)
+                .style(theme::svg_accent),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill),
+    )
+    .style(theme::secondary_button_style)
+    .width(Length::Fill)
+    .height(Length::Fill);
 
     if !is_disabled {
         mods_btn = mods_btn.on_press(Message::Mods(
@@ -154,8 +156,11 @@ pub fn view<'a>(
         ));
     }
 
-    let actions = row![play_btn, settings_btn, mods_btn].spacing(10);
+    let side_buttons = column![settings_btn, mods_btn].width(45).spacing(8);
 
+    let actions = row![play_btn, side_buttons].spacing(10).height(90);
+
+    // --- ENSAMBLAJE FINAL ---
     column![
         info_section,
         if *status == LauncherStatus::Downloading || *status == LauncherStatus::Migrating {
@@ -163,7 +168,7 @@ pub fn view<'a>(
                 column![
                     row![
                         text(if *status == LauncherStatus::Migrating {
-                            "Moving files..."
+                            localization.t("launcher.status.migrating")
                         } else {
                             localization.t("launcher.status.general")
                         })

@@ -208,7 +208,7 @@ pub fn secondary_button_style(_theme: &Theme, status: button::Status) -> button:
             border: Border {
                 color: Color::from_rgba(1.0, 1.0, 1.0, 0.1),
                 width: 1.0,
-                radius: 1.0.into(),
+                radius: 8.0.into(),
             },
             text_color: Color::from_rgb(0.7, 0.7, 0.7),
             ..button::Style::default()
@@ -222,7 +222,7 @@ pub fn ghost_button_style(_theme: &Theme, status: button::Status) -> button::Sty
             background: Some(Background::Color(HOVER_BG)),
             text_color: Color::WHITE,
             border: Border {
-                radius: 6.0.into(),
+                radius: 8.0.into(),
                 ..Default::default()
             },
             ..button::Style::default()
@@ -230,6 +230,10 @@ pub fn ghost_button_style(_theme: &Theme, status: button::Status) -> button::Sty
         _ => button::Style {
             background: None,
             text_color: Color::from_rgb(0.8, 0.8, 0.8),
+            border: Border {
+                radius: 8.0.into(),
+                ..Default::default()
+            },
             ..button::Style::default()
         },
     }
@@ -240,7 +244,7 @@ pub fn orange_bar_style(_theme: &Theme) -> progress_bar::Style {
         background: Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.1)),
         bar: Background::Color(ACCENT_ORANGE),
         border: Border {
-            radius: 2.0.into(),
+            radius: 16.0.into(),
             ..Default::default()
         },
     }

@@ -926,12 +926,12 @@ fn tab_button(
         // Solo icono, centrado
         row![
             svg(util::icons::icon(icon_data))
-                .width(20)
-                .height(20)
+                .width(16)
+                .height(16)
                 .style(theme::svg_accent),
         ]
         .align_y(Alignment::Center)
-        .padding(5)
+        .padding(0)
         .into()
     } else {
         // Icono + Texto
