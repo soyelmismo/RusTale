@@ -256,6 +256,23 @@ pub async fn dir_size(path: impl AsRef<Path>) -> Result<u64> {
     Ok(total_size)
 }
 
+/// Simple recursive copy WITHOUT callback/progress complexity
+/// Useful for quick internal copies
+pub fn copy_recursive_sync(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> Result<()> {
+    std::fs::create_dir_all(&dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let dst_path = dst.as_ref().join(entry.file_name());
+        if ty.is_dir() {
+            copy_recursive_sync(entry.path(), dst_path)?;
+        } else {
+            std::fs::copy(entry.path(), dst_path)?;
+        }
+    }
+    Ok(())
+}
+
 // Function for moving directory with progress reporting
 pub async fn move_dir_with_progress<F>(src: PathBuf, dst: PathBuf, on_progress: F) -> Result<()>
 where

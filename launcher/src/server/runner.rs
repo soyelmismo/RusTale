@@ -14,7 +14,6 @@ pub async fn run_server_flow(config: ServerConfig) -> Result<()> {
     );
 
     // 1. Definir Rutas (Unificadas a root_dir para evitar OS Error 3)
-    // 1. Definir Rutas (Unificadas a root_dir para evitar OS Error 3)
     let root_dir = crate::config::get_server_root_dir();
     let _ = tokio::fs::create_dir_all(&root_dir).await;
     let port_file = root_dir.join("server.port");
@@ -113,13 +112,37 @@ pub async fn run_server_flow(config: ServerConfig) -> Result<()> {
         .user_agent("RusTale-Server/0.0.1")
         .build()?;
 
-    // 2. Asegurar Herramientas (JRE y Butler)
+    // 2. Tools (JRE, Butler)
     println!("[1/5] Checking tools...");
     let callback = |task: &str, pct: f64, msg: &str| {
         if pct == 0.0 || pct == 100.0 {
             println!("[{}] {}", task, msg);
         }
     };
+
+    // --- OPTIMIZATION: REUSE MAIN INSTALLATION TOOLS ---
+    let main_app_dir = crate::config::get_app_dir();
+    let tools_dir = main_app_dir.join("tools");
+    let main_java = tools_dir.join("jre");
+    let main_butler = tools_dir.join("butler");
+    let server_java = _tools_dir.join("jre");
+    let server_butler = _tools_dir.join("butler");
+
+    if main_java.exists()
+        && (!server_java.exists() || crate::java::get_java_exec(&root_dir).is_err())
+    {
+        println!("[Tools] Copying JRE from main installation...");
+        let mr = main_java.clone();
+        let sr = server_java.clone();
+        tokio::task::spawn_blocking(move || crate::util::copy_recursive_sync(mr, sr)).await??;
+    }
+
+    if main_butler.exists() && !server_butler.exists() {
+        println!("[Tools] Copying Butler from main installation...");
+        let mt = main_butler.clone();
+        let st = server_butler.clone();
+        tokio::task::spawn_blocking(move || crate::util::copy_recursive_sync(mt, st)).await??;
+    }
 
     crate::java::download_jre(&client, &root_dir, &callback, None).await?;
     let _butler_path =
@@ -138,6 +161,84 @@ pub async fn run_server_flow(config: ServerConfig) -> Result<()> {
     };
 
     let server_jar_raw = install_dir.join("Server").join("HytaleServer.jar");
+
+    // --- OPTIMIZATION: REUSE MAIN INSTALLATION GAME FILES ---
+    if !server_jar_raw.exists() {
+        println!("Checking for local game files in main installation...");
+        let mut source_candidate = None;
+
+        // Candidate 1: Specific version folder
+        let specific = main_app_dir
+            .join(&config.branch)
+            .join(target_ver_num.to_string());
+        if specific.exists() && specific.join("Server").exists() {
+            source_candidate = Some(specific);
+        }
+
+        // Candidate 2: Latest folder (check version.json)
+        if source_candidate.is_none() {
+            let latest = main_app_dir.join(&config.branch).join("latest");
+            if latest.exists() {
+                if let Ok(ver) =
+                    crate::game::install::get_local_version(&main_app_dir, &config.branch).await
+                {
+                    if ver == target_ver_num {
+                        source_candidate = Some(latest);
+                    }
+                }
+            }
+        }
+
+        if let Some(src) = source_candidate {
+            println!(
+                "Found matching version {} at {:?}. Copying files...",
+                target_ver_num, src
+            );
+            let _ = tokio::fs::create_dir_all(&install_dir).await;
+
+            // Copy Assets.zip
+            let src_assets = src.join("Assets.zip");
+            let dst_assets = install_dir.join("Assets.zip");
+            if src_assets.exists() && !dst_assets.exists() {
+                println!("Copying Assets.zip (~3GB)...");
+                if let Err(e) = tokio::fs::copy(&src_assets, &dst_assets).await {
+                    eprintln!("Failed to copy Assets.zip: {}", e);
+                }
+            }
+
+            // Copy Server folder
+            let src_server = src.join("Server");
+            let dst_server = install_dir.join("Server");
+            if src_server.exists() && !dst_server.exists() {
+                println!("Copying Server folder...");
+                // Use blocking thread for recursive copy
+                let dst_s_clone = dst_server.clone();
+                let res = tokio::task::spawn_blocking(move || {
+                    crate::util::copy_recursive_sync(src_server, dst_s_clone)
+                })
+                .await?;
+
+                if let Err(e) = res {
+                    eprintln!("Failed to copy Server folder: {}", e);
+                } else {
+                    println!("Files copied successfully!");
+
+                    // CLEANUP: If we copied a patched server jar, restore the original
+                    let potential_original = dst_server.join("HytaleServer.original");
+                    let potential_jar = dst_server.join("HytaleServer.jar");
+
+                    if potential_original.exists() {
+                        println!("Found local .original backup. Restoring vanilla state...");
+                        if let Err(e) = tokio::fs::rename(&potential_original, &potential_jar).await
+                        {
+                            eprintln!("Failed to restore original JAR: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // --------------------------------------------------------
 
     if !server_jar_raw.exists() {
         println!("Downloading server version {}...", target_ver_num);
