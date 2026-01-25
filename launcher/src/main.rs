@@ -747,7 +747,12 @@ impl RusTale {
                 sub_progress,
                 speed,
             } => {
-                self.status = LauncherStatus::Downloading;
+                if progress >= 100.0 || speed.contains("verified") {
+                    self.status = LauncherStatus::Busy;
+                } else {
+                    self.status = LauncherStatus::Downloading;
+                }
+
                 self.download_progress = progress;
                 self.sub_progress = sub_progress;
                 self.status_text = speed;

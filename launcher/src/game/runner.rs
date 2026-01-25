@@ -138,7 +138,15 @@ impl Recipe for Runner {
                 }
 
                 match res_rx.recv().await {
-                    Some(Ok(_)) => {}
+                    Some(Ok(_)) => {
+                        let _ = output
+                            .send(Message::DownloadProgress {
+                                progress: 100.0,
+                                sub_progress: 100.0,
+                                speed: "Preparing to launch...".to_string(),
+                            })
+                            .await;
+                    }
                     _ => {
                         let _ = output.send(Message::GameStopped).await;
                         return;

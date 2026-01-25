@@ -173,7 +173,7 @@ pub async fn ensure_installed(
 
         // If game exists locally AND tools are present, we're done (trust local files)
         if game_ok && jre_ok && butler_ok {
-            progress_callback("complete", 100.0, "Ready to launch (offline verified)");
+            progress_callback("complete", 100.0, "Verified.");
             return Ok(());
         }
 
