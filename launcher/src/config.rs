@@ -231,15 +231,18 @@ pub fn get_identity_dir() -> PathBuf {
     get_server_root_dir().join("identity")
 }
 
-pub fn save_bootstrap_path(path: &PathBuf) -> anyhow::Result<()> {
+pub fn save_bootstrap_path(new_data_dir: &PathBuf) -> anyhow::Result<()> {
     let cfg = LauncherConfig {
-        data_dir: Some(path.clone()),
+        data_dir: Some(new_data_dir.clone()),
     };
+
     let bootstrap_path = get_bootstrap_path();
+
     if let Some(parent) = bootstrap_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        std::fs::create_dir_all(parent)?;
     }
-    let toml_str = toml::to_string(&cfg)?;
+
+    let toml_str = toml::to_string_pretty(&cfg)?;
     std::fs::write(bootstrap_path, toml_str)?;
     Ok(())
 }

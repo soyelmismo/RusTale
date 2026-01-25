@@ -2,23 +2,24 @@
     "_name": "Español",
     "launcher": {
         "title": "RusTale Launcher",
-        "play": "JUGAR",
-        "stop": "DETENER",
-        "update": "ACTUALIZAR",
+        "play": "Jugar",
+        "stop": "Detener",
+        "update": "Actualizar",
         "status": {
             "initializing": "Inicializando...",
-            "checking": "VERIFICANDO ARCHIVOS...",
-            "ready": "LISTO PARA JUGAR",
-            "playing": "JUGANDO",
-            "busy": "OCUPADO...",
-            "downloading": "DESCARGANDO...",
-            "patching": "PARCHEANDO...",
+            "checking": "Verificando archivos...",
+            "ready": "Listo para jugar",
+            "playing": "Jugando",
+            "busy": "Ocupado...",
+            "downloading": "Descargando...",
+            "patching": "Parcheando...",
             "general": "General",
+            "migrating": "Migrando...",
             "step": "Paso Actual"
         },
         "info": {
-            "channel": "CANAL",
-            "version": "VERSIÓN"
+            "channel": "Canal",
+            "version": "Versión"
         }
     },
     "tray": {
@@ -27,20 +28,20 @@
         "tooltip": "RusTale Launcher"
     },
     "profile": {
-        "title": "PERFIL",
+        "title": "Perfil",
         "select": "Seleccionar Perfil",
         "add": "Añadir Perfil",
         "name_placeholder": "Nombre...",
         "new_name_placeholder": "Nuevo Nombre..."
     },
     "settings": {
-        "title": "AJUSTES",
+        "title": "Ajustes",
         "tabs": {
-            "game": "JUEGO",
-            "launcher": "LAUNCHER",
-            "about": "ACERCA DE",
-            "video": "VÍDEO",
-            "java": "JAVA"
+            "game": "Juego",
+            "launcher": "Launcher",
+            "about": "Acerca de",
+            "video": "Vídeo",
+            "java": "Java"
         },
         "language": "Idioma",
         "language.placeholder": "Seleccionar Idioma",
@@ -80,8 +81,10 @@
         "max": "Máx",
         "jvm_args": "Argumentos JVM",
         "jvm_args_placeholder": "Args JVM",
-        "save": "GUARDAR CAMBIOS",
-        "cancel": "CANCELAR"
+        "move_to": "Mover a...",
+        "open_folder": "Abrir",
+        "save": "Guardar",
+        "cancel": "Cancelar"
     },
     "dialog": {
         "select_folder": "Seleccionar Carpeta de Instalación"
@@ -92,28 +95,28 @@
         "retry": "Reintentar",
         "empty": "No hay noticias disponibles en este momento",
         "no_desc": "Sin descripción disponible",
-        "feed_loading": "CARGANDO FEED",
-        "feed_latest": "ÚLTIMAS NOTICIAS",
-        "browse_all": "VER TODAS"
+        "feed_loading": "Cargando feed",
+        "feed_latest": "Últimas noticias",
+        "browse_all": "Ver todas"
     },
     "mods": {
-        "title": "MODS",
-        "installed": "INSTALADOS",
-        "browse": "EXPLORAR",
-        "search": "BUSCAR...",
-        "refresh": "REFRESCAR",
-        "delete": "ELIMINAR",
-        "open_folder": "ABRIR CARPETA",
-        "install": "INSTALAR",
-        "uninstall": "DESINSTALAR",
-        "loading": "CARGANDO...",
-        "no_mods": "NO HAY MODS INSTALADOS",
-        "no_results": "NO SE ENCONTRARON RESULTADOS",
-        "page": "PAGINA {0} DE {1}",
-        "prev": "ANTERIOR",
-        "next": "SIGUIENTE"
+        "title": "Mods",
+        "installed": "Instalados",
+        "browse": "Explorar",
+        "search": "Buscar...",
+        "refresh": "Refrescar",
+        "delete": "Eliminar",
+        "open_folder": "Abrir",
+        "install": "Instalar",
+        "uninstall": "Desinstalar",
+        "loading": "Cargando...",
+        "no_mods": "No hay mods instalados",
+        "no_results": "No se encontraron resultados",
+        "page": "Página {0} de {1}",
+        "prev": "Anterior",
+        "next": "Siguiente"
     },
     "common": {
-        "close": "CERRAR"
+        "close": "Cerrar"
     }
 }

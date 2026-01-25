@@ -385,7 +385,7 @@ pub async fn clean_patches_cache(progress_callback: &impl Fn(&str, f64, &str)) -
             }
         }
 
-        progress_callback("cleanup", 100.0, "Caché de parches limpiada");
+        progress_callback("cleanup", 100.0, "Patch cache cleaned");
     }
 
     Ok(())

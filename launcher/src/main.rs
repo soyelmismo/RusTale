@@ -268,6 +268,11 @@ pub enum Message {
     OpenMods,
     ModsLoadedComplex(Result<(Vec<ModInfo>, Vec<PatchManifest>), String>), // Result of the load
     LauncherUpdate(updater::UpdaterMessage),
+    RequestMoveData(std::path::PathBuf),
+    DataMoveStarted,
+    DataMoveFinished(Result<std::path::PathBuf, String>),
+    MigrationProgress(f32),
+    StartMigrationActual(std::path::PathBuf, std::path::PathBuf),
 }
 
 struct RusTale {
@@ -493,7 +498,10 @@ impl RusTale {
                 | Message::WindowResized(_)
                 | Message::AppExit
                 | Message::CopyUUID(_)
-                | Message::GenerateRandomUUID => {}
+                | Message::GenerateRandomUUID
+                | Message::RequestMoveData(_)
+                | Message::StartMigrationActual(_, _)
+                | Message::MigrationProgress(_) => {}
                 _ => return Task::none(),
             }
         }
@@ -534,12 +542,16 @@ impl RusTale {
                 |(p, s, loc)| Message::ConfigLoaded(p, s, loc),
             ),
             Message::ConfigLoaded(p, s, loc) => {
+                let was_migrating = self.status == LauncherStatus::Busy;
+
                 self.profiles = p;
                 self.settings = s.clone();
                 self.settings_state.temp_settings = s;
-                self.localization = loc;
 
-                // NUEVO: Asegurar servidor si es necesario
+                let current_lang = self.settings.language.clone();
+                self.localization.load_language(&current_lang);
+                let _ = loc; // discard dummy loc if needed
+
                 self.reconcile_local_server();
 
                 // --- AUTO-QUICKPLAY LOGIC ---
@@ -586,6 +598,10 @@ impl RusTale {
                     tasks.push(
                         window::oldest().and_then(|id| window::set_mode(id, window::Mode::Hidden)),
                     );
+                }
+
+                if was_migrating {
+                    self.status_text = "Data moved successfully. Verifying...".to_string();
                 }
 
                 Task::batch(tasks)
@@ -959,8 +975,8 @@ impl RusTale {
                     news_action,
                 ])
             }
-            Message::Settings(SettingsMessage::BrowseInstallPath) => {
-                let title = self.localization.t("dialog.select_folder").to_string();
+            Message::Settings(SettingsMessage::PickMoveLocation) => {
+                let title = "Select New Data Location";
                 Task::perform(
                     async move {
                         rfd::AsyncFileDialog::new()
@@ -971,12 +987,16 @@ impl RusTale {
                     },
                     |res| {
                         if let Some(path) = res {
-                            Message::Settings(SettingsMessage::PathSelected(path))
+                            Message::RequestMoveData(path)
                         } else {
                             Message::None
                         }
                     },
                 )
+            }
+            Message::Settings(SettingsMessage::OpenCurrentDataDir) => {
+                util::open_game_folder();
+                Task::none()
             }
             Message::Settings(msg) => {
                 if let Some(m) = self.settings_state.update(msg) {
@@ -984,6 +1004,128 @@ impl RusTale {
                 } else {
                     Task::none()
                 }
+            }
+
+            // LÓGICA DE MIGRACIÓN
+            Message::RequestMoveData(new_path) => {
+                // 1. Validaciones previas
+                if self.status == LauncherStatus::Playing || self.running_game.is_some() {
+                    self.error = Some("Cannot move data while game is running.".to_string());
+                    return Task::none();
+                }
+
+                let current_path = config::get_app_dir();
+                if new_path == current_path {
+                    return Task::none();
+                }
+
+                // 2. Iniciar proceso
+                self.status = LauncherStatus::Migrating;
+                self.status_text = "Migrating files... (patience)".to_string();
+                self.download_progress = 0.0;
+
+                // Bloquear interacción cerrando modales si están abiertos
+                self.settings_state.is_open = false;
+
+                Task::perform(async move { (current_path, new_path) }, |(curr, dest)| {
+                    Message::StartMigrationActual(curr, dest)
+                })
+            }
+            Message::StartMigrationActual(curr, dest) => {
+                use iced::stream;
+
+                Task::run(
+                    stream::channel(
+                        100,
+                        move |mut output: iced::futures::channel::mpsc::Sender<Message>| {
+                            let curr_clone = curr.clone();
+                            let dest_clone = dest.clone();
+                            async move {
+                                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+                                let tx_clone = tx.clone();
+
+                                tokio::spawn(async move {
+                                    let res = crate::util::move_dir_with_progress(
+                                        curr_clone,
+                                        dest_clone,
+                                        move |pct| {
+                                            let _ = tx_clone.send(pct);
+                                        },
+                                    )
+                                    .await;
+
+                                    // Señal de fin
+                                    let _ = tx.send(if res.is_ok() { 200.0 } else { -1.0 });
+                                    if let Err(e) = res {
+                                        eprintln!("Migration error: {}", e);
+                                    }
+                                });
+
+                                loop {
+                                    tokio::select! {
+                                       Some(pct) = rx.recv() => {
+                                           if pct == 200.0 {
+                                               let _ = crate::config::save_bootstrap_path(&dest);
+                                               let _ = output.send(Message::DataMoveFinished(Ok(dest.clone()))).await;
+                                               break;
+                                           } else if pct == -1.0 {
+                                               let _ = output.send(Message::DataMoveFinished(Err("Migration error".into()))).await;
+                                               break;
+                                           } else {
+                                               let _ = output.send(Message::MigrationProgress(pct)).await;
+                                           }
+                                       }
+                                    }
+                                }
+                            }
+                        },
+                    ),
+                    |m| m,
+                )
+            }
+            Message::MigrationProgress(pct) => {
+                self.status = LauncherStatus::Migrating;
+                self.download_progress = pct;
+                self.status_text = format!("Migrating files... {:.0}%", pct);
+                Task::none()
+            }
+
+            Message::DataMoveFinished(result) => {
+                match result {
+                    Ok(new_path) => {
+                        println!("Migration success to: {:?}", new_path);
+
+                        self.paths = crate::game::GamePaths::new(new_path.clone());
+
+                        let current_exe = std::env::current_exe().unwrap_or_default();
+                        if !current_exe.starts_with(&new_path) {
+                            self.status_text =
+                                "Migration done! Please restart from the NEW location.".to_string();
+                            crate::util::open_path(new_path.clone());
+                        } else {
+                            self.status_text = "Migration successful.".to_string();
+                        }
+
+                        // 3. Forzar recarga de configuración y perfiles desde la nueva ubicación
+                        Task::perform(
+                            async {
+                                // Pequeña pausa para asegurar FS sync
+                                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                                (config::load_profiles().await, config::load_settings().await)
+                            },
+                            |(p, s)| Message::ConfigLoaded(p, s, crate::lang::Localization::new()),
+                        )
+                    }
+                    Err(e) => {
+                        self.status = LauncherStatus::Ready; // Restaurar estado
+                        self.error = Some(format!("Migration failed: {}", e));
+                        Task::none()
+                    }
+                }
+            }
+            Message::DataMoveStarted => {
+                self.status = LauncherStatus::Busy;
+                Task::none()
             }
             Message::RequestVersionCheck(chan) => {
                 let client = self.api_client.clone();

@@ -2,23 +2,24 @@
     "_name": "English",
     "launcher": {
         "title": "RusTale Launcher",
-        "play": "PLAY",
-        "stop": "STOP",
-        "update": "UPDATE",
+        "play": "Play",
+        "stop": "Stop",
+        "update": "Update",
         "status": {
             "initializing": "Initializing...",
-            "checking": "CHECKING FILES...",
-            "ready": "READY TO PLAY",
-            "playing": "PLAYING",
-            "busy": "BUSY...",
-            "downloading": "DOWNLOADING...",
-            "patching": "PATCHING...",
+            "checking": "Checking files...",
+            "ready": "Ready to play",
+            "playing": "Playing",
+            "busy": "Busy...",
+            "downloading": "Downloading...",
+            "patching": "Patching...",
             "general": "General",
+            "migrating": "Migrating...",
             "step": "Current Step"
         },
         "info": {
-            "channel": "CHANNEL",
-            "version": "VERSION"
+            "channel": "Channel",
+            "version": "Version"
         }
     },
     "tray": {
@@ -27,20 +28,20 @@
         "tooltip": "RusTale Launcher"
     },
     "profile": {
-        "title": "PROFILE",
+        "title": "Profile",
         "select": "Select Profile",
         "add": "Add Profile",
         "name_placeholder": "Name...",
         "new_name_placeholder": "New Name..."
     },
     "settings": {
-        "title": "SETTINGS",
+        "title": "Settings",
         "tabs": {
-            "game": "GAME",
-            "launcher": "LAUNCHER",
-            "about": "ABOUT",
-            "video": "VIDEO",
-            "java": "JAVA"
+            "game": "Game",
+            "launcher": "Launcher",
+            "about": "About",
+            "video": "Video",
+            "java": "Java"
         },
         "language": "Language",
         "language.placeholder": "Select Language",
@@ -80,8 +81,10 @@
         "max": "Max",
         "jvm_args": "JVM Arguments",
         "jvm_args_placeholder": "JVM Args",
-        "save": "SAVE CHANGES",
-        "cancel": "CANCEL"
+        "move_to": "Move to...",
+        "open_folder": "Open Folder",
+        "save": "Save",
+        "cancel": "Cancel"
     },
     "dialog": {
         "select_folder": "Select Installation Folder"
@@ -92,14 +95,14 @@
         "retry": "Retry",
         "empty": "No news available at the moment",
         "no_desc": "No description available",
-        "feed_loading": "LOADING FEED",
-        "feed_latest": "LATEST NEWS",
-        "browse_all": "BROWSE ALL"
+        "feed_loading": "Loading feed",
+        "feed_latest": "Latest news",
+        "browse_all": "Browse all"
     },
     "mods": {
-        "title": "MODS",
-        "installed": "INSTALLED",
-        "browse": "BROWSE",
+        "title": "Mods",
+        "installed": "Installed",
+        "browse": "Browse",
         "search": "Search...",
         "refresh": "Refresh",
         "delete": "Delete",

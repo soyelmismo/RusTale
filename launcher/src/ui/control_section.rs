@@ -16,6 +16,7 @@ pub fn view<'a>(
         LauncherStatus::Playing => localization.t("launcher.stop"),
         LauncherStatus::Downloading => localization.t("launcher.status.downloading"),
         LauncherStatus::Checking => localization.t("launcher.status.checking"),
+        LauncherStatus::Migrating => localization.t("launcher.status.migrating"),
         LauncherStatus::NeedsInstall => localization.t("launcher.play"),
         LauncherStatus::NeedsUpdate => localization.t("launcher.update"),
         _ => localization.t("launcher.play"),
@@ -53,7 +54,10 @@ pub fn view<'a>(
 
     if !matches!(
         status,
-        LauncherStatus::Downloading | LauncherStatus::Checking | LauncherStatus::Busy
+        LauncherStatus::Downloading
+            | LauncherStatus::Checking
+            | LauncherStatus::Busy
+            | LauncherStatus::Migrating
     ) {
         play_btn = play_btn.on_press(Message::StartGame);
     }
@@ -122,13 +126,17 @@ pub fn view<'a>(
 
     column![
         info_section,
-        if *status == LauncherStatus::Downloading {
+        if *status == LauncherStatus::Downloading || *status == LauncherStatus::Migrating {
             column![
                 column![
                     row![
-                        text(localization.t("launcher.status.general"))
-                            .size(11)
-                            .color(Color::from_rgb(0.7, 0.7, 0.7)),
+                        text(if *status == LauncherStatus::Migrating {
+                            "Moving files..."
+                        } else {
+                            localization.t("launcher.status.general")
+                        })
+                        .size(11)
+                        .color(Color::from_rgb(0.7, 0.7, 0.7)),
                         Space::new().width(Length::Fill),
                         text(format!("{:.0}%", download_progress))
                             .size(11)
@@ -142,23 +150,30 @@ pub fn view<'a>(
                     .width(Length::Fill),
                 ]
                 .spacing(3),
-                column![
-                    row![
-                        text(localization.t("launcher.status.step"))
-                            .size(10)
-                            .color(Color::from_rgb(0.5, 0.5, 0.5)),
-                        Space::new().width(Length::Fill),
-                        text(format!("{:.0}%", sub_progress))
-                            .size(10)
-                            .color(Color::from_rgb(0.8, 0.8, 0.8)),
-                    ],
-                    container(
-                        ProgressBar::new(0.0..=100.0, sub_progress).style(theme::sub_bar_style)
+                if *status == LauncherStatus::Migrating {
+                    Element::from(column![])
+                } else {
+                    Element::from(
+                        column![
+                            row![
+                                text(localization.t("launcher.status.step"))
+                                    .size(10)
+                                    .color(Color::from_rgb(0.5, 0.5, 0.5)),
+                                Space::new().width(Length::Fill),
+                                text(format!("{:.0}%", sub_progress))
+                                    .size(10)
+                                    .color(Color::from_rgb(0.8, 0.8, 0.8)),
+                            ],
+                            container(
+                                ProgressBar::new(0.0..=100.0, sub_progress)
+                                    .style(theme::sub_bar_style)
+                            )
+                            .height(3)
+                            .width(Length::Fill),
+                        ]
+                        .spacing(2),
                     )
-                    .height(3)
-                    .width(Length::Fill),
-                ]
-                .spacing(2)
+                }
             ]
             .spacing(10)
         } else {

@@ -10,6 +10,7 @@ pub enum LauncherStatus {
     Playing,
     Busy,
     Downloading,
+    Migrating,
 }
 
 /// Calculates the current launcher status based on settings and file system state

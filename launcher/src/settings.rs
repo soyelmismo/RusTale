@@ -38,8 +38,9 @@ pub enum SettingsMessage {
     DeleteVersion(u32),
     OpenVersionFolder(u32),
 
-    BrowseInstallPath,
-    PathSelected(std::path::PathBuf),
+    PickMoveLocation,
+    PerformMove(std::path::PathBuf),
+    OpenCurrentDataDir,
     LanguageSelected(crate::lang::Language),
     OnlineFixModeChanged(crate::config::OnlineFixMode),
     ToggleMinimizeTray(bool),
@@ -219,22 +220,39 @@ impl SettingsState {
         is_compact: bool,
     ) -> Element<'a, SettingsMessage> {
         // --- 1. Installation Path Selector ---
+        let current_path_display = crate::config::get_app_dir().to_string_lossy().to_string();
+
         let path_selector = column![
             section_title(localization.t("settings.install_path")),
             row![
                 text_input(
                     localization.t("settings.game.path_field"),
-                    &self.new_install_path
+                    &current_path_display
                 )
-                .on_input(|_| SettingsMessage::BrowseInstallPath)
-                .size(14) // Text Size ajustado
+                .size(14)
                 .style(theme::text_input_style)
                 .width(Length::Fill),
-                button(text(localization.t("settings.browse")).size(14))
-                    .on_press(SettingsMessage::BrowseInstallPath)
-                    .style(theme::secondary_button_style)
+                button(
+                    row![
+                        svg(util::icons::icon(util::icons::FOLDER))
+                            .width(14)
+                            .height(14)
+                            .style(theme::svg_accent),
+                        text("Open").size(14)
+                    ]
+                    .spacing(5)
+                    .align_y(Alignment::Center)
+                )
+                .on_press(SettingsMessage::OpenCurrentDataDir)
+                .style(theme::secondary_button_style)
+                .padding(10),
+                button(text("Move to...").size(14))
+                    .on_press(SettingsMessage::PickMoveLocation)
+                    .style(theme::primary_button_style)
+                    .padding(10)
             ]
             .spacing(10)
+            .align_y(Alignment::Center)
         ]
         .spacing(5);
 
@@ -537,22 +555,15 @@ impl SettingsState {
             }
             SettingsMessage::SaveSettings => {
                 self.is_open = false;
-                // Save bootstrap path if changed
-                let current_dir = crate::config::get_app_dir();
-                if self.new_install_path != current_dir.to_string_lossy() {
-                    let path = std::path::PathBuf::from(&self.new_install_path);
-                    let _ = crate::config::save_bootstrap_path(&path);
-                }
-
                 Some(Message::SaveSettings(self.temp_settings.clone()))
             }
-            SettingsMessage::BrowseInstallPath => {
-                Some(Message::Settings(SettingsMessage::BrowseInstallPath))
+            SettingsMessage::PickMoveLocation => {
+                Some(Message::Settings(SettingsMessage::PickMoveLocation))
             }
-            SettingsMessage::PathSelected(path) => {
-                self.new_install_path = path.to_string_lossy().to_string();
-                None
+            SettingsMessage::OpenCurrentDataDir => {
+                Some(Message::Settings(SettingsMessage::OpenCurrentDataDir))
             }
+            SettingsMessage::PerformMove(_path) => None,
             SettingsMessage::WidthChanged(val) => {
                 if let Ok(num) = val.parse() {
                     self.temp_settings.width = num;

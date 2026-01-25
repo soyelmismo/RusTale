@@ -1,4 +1,8 @@
 use crate::config::OnlineFixMode;
+use anyhow::{Context, Result};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub mod icons;
 pub mod image_cache;
@@ -9,18 +13,16 @@ pub fn open_game_folder() {
 }
 
 pub fn open_path(path: std::path::PathBuf) {
-    // 1. Asegurar que la carpeta existe antes de intentar abrirla o normalizarla
     if !path.exists() {
         let _ = std::fs::create_dir_all(&path);
     }
 
-    // 2. Intentar obtener la ruta "canónica" (absoluta y real)
     let final_path = match path.canonicalize() {
         Ok(p) => p,
-        Err(_) => path, // Si falla, usamos la original
+        Err(_) => path,
     };
 
-    println!("Abriendo carpeta: {:?}", final_path);
+    println!("Opening folder: {:?}", final_path);
 
     if let Err(e) = open::that(final_path) {
         eprintln!("Error opening folder: {}", e);
@@ -40,13 +42,11 @@ pub async fn make_executable(path: &std::path::PathBuf) -> anyhow::Result<()> {
             tokio::fs::set_permissions(path, perms).await?;
         }
     }
-    let _ = path; // avoid unused variable on non-unix
+    let _ = path;
     Ok(())
 }
 
-/// Busca un puerto libre aleatorio entre 10000 y 65535
 pub fn find_free_port() -> u16 {
-    // First check if there is a saved port
     let saved_port = get_saved_port();
     if std::net::TcpListener::bind(("127.0.0.1", saved_port)).is_ok() {
         return saved_port;
@@ -55,7 +55,6 @@ pub fn find_free_port() -> u16 {
     use rand::Rng;
     let mut rng = rand::rng();
 
-    // Intentamos hasta 100 veces encontrar un puerto libre
     for _ in 0..100 {
         let port = rng.random_range(10000..=65535);
         if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
@@ -63,7 +62,6 @@ pub fn find_free_port() -> u16 {
         }
     }
 
-    // Fallback: Si falla el aleatorio, retornar el default antiguo por seguridad.
     59313
 }
 
@@ -90,14 +88,12 @@ pub fn get_saved_port() -> u16 {
     59313
 }
 
-// Java Proxy logic
 pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
     proxy_log("--- PROXY STARTED ---");
     proxy_log(&format!("Raw Args: {:?}", args));
 
-    // Find the real Java executable
     let current_exe = std::env::current_exe()?;
     let bin_dir = current_exe.parent().unwrap();
 
@@ -172,19 +168,14 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
                     .parent()
                     .unwrap_or(std::path::Path::new("."));
 
-                // CAMBIO: Detectar si existe HytaleServer.original
-                // Si existe, significa que el Runner ha aplicado el parche "persistent swap"
-                // y que el archivo "HytaleServer.jar" que nos pasaron YA es el parcheado.
                 let possible_original = server_dir.join("HytaleServer.original");
                 if possible_original.exists() {
                     proxy_log(
                         "Detected persistent swap (HytaleServer.original exists). Assuming input arg is patched.",
                     );
-                    // No hacemos nada, dejamos que Java ejecute el jar tal cual.
                     break;
                 }
 
-                // CAMBIO: Nomenclatura persistente igual que en dedicated server
                 let patched_jar_name = format!("HytaleServer.{}.{}.jar", mode_str, port);
                 let patched_jar_path = server_dir.join(patched_jar_name);
 
@@ -249,4 +240,141 @@ fn proxy_log(msg: &str) {
     }
     // Also print to stdout for safety
     println!("{}", msg);
+}
+
+pub async fn dir_size(path: impl AsRef<Path>) -> Result<u64> {
+    let mut total_size = 0;
+    let mut entries = tokio::fs::read_dir(path).await?;
+    while let Some(entry) = entries.next_entry().await? {
+        let meta = entry.metadata().await?;
+        if meta.is_dir() {
+            total_size += Box::pin(dir_size(entry.path())).await?;
+        } else {
+            total_size += meta.len();
+        }
+    }
+    Ok(total_size)
+}
+
+// Function for moving directory with progress reporting
+pub async fn move_dir_with_progress<F>(src: PathBuf, dst: PathBuf, on_progress: F) -> Result<()>
+where
+    F: Fn(f32) + Send + Sync + 'static + Clone,
+{
+    if !src.exists() {
+        return Ok(());
+    }
+    if src == dst {
+        return Ok(());
+    }
+
+    // 1. Detect if we are running inside the source folder
+    let current_exe = std::env::current_exe().unwrap_or_default();
+    let is_self_contained = current_exe.starts_with(&src);
+
+    // 2. Calculate total size
+    let total_bytes = dir_size(&src).await?;
+    let copied_bytes = Arc::new(AtomicU64::new(0));
+
+    // 3. Recursive copy internal
+    async fn copy_recursive<F>(
+        src: PathBuf,
+        dst: PathBuf,
+        total: u64,
+        current: Arc<AtomicU64>,
+        cb: F,
+    ) -> Result<()>
+    where
+        F: Fn(f32) + Send + Sync + 'static + Clone,
+    {
+        tokio::fs::create_dir_all(&dst).await?;
+        let mut entries = tokio::fs::read_dir(&src).await?;
+
+        while let Some(entry) = entries.next_entry().await? {
+            let ty = entry.file_type().await?;
+            let src_path = entry.path();
+            let dst_path = dst.join(entry.file_name());
+
+            if ty.is_dir() {
+                Box::pin(copy_recursive(
+                    src_path,
+                    dst_path,
+                    total,
+                    current.clone(),
+                    cb.clone(),
+                ))
+                .await?;
+            } else {
+                tokio::fs::copy(&src_path, &dst_path).await?;
+                let len = entry.metadata().await?.len();
+                let prev = current.fetch_add(len, Ordering::Relaxed);
+
+                // Report progress
+                if total > 0 {
+                    let pct = ((prev + len) as f64 / total as f64 * 100.0) as f32;
+                    cb(pct);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    // Execute copy
+    copy_recursive(src.clone(), dst, total_bytes, copied_bytes, on_progress).await?;
+
+    // 4. Intelligent Cleanup
+    if is_self_contained {
+        println!(
+            "[Migration] Running executable is inside source dir. Performing selective cleanup."
+        );
+        // Delete everything EXCEPT the current executable
+        if let Err(e) = remove_dir_recursive_exclude(&src, &current_exe).await {
+            eprintln!("[Migration] Warning during cleanup: {}", e);
+            // We don't return fatal error here, because the copy (the important data) is already done.
+        }
+    } else {
+        // Standard full deletion
+        tokio::fs::remove_dir_all(&src)
+            .await
+            .context("Failed to remove old directory")?;
+    }
+
+    Ok(())
+}
+
+/// Recursively deletes but skips a specific file (the executable)
+async fn remove_dir_recursive_exclude(dir: &Path, exclude_file: &Path) -> Result<()> {
+    let mut entries = tokio::fs::read_dir(dir).await?;
+    let mut is_empty = true;
+
+    while let Some(entry) = entries.next_entry().await? {
+        let path = entry.path();
+
+        // If it's the file we want to protect, skip it
+        if path == exclude_file {
+            is_empty = false;
+            continue;
+        }
+
+        if entry.file_type().await?.is_dir() {
+            // Recursion
+            if let Err(_) = Box::pin(remove_dir_recursive_exclude(&path, exclude_file)).await {
+                is_empty = false;
+            }
+            // Try to delete folder if it became empty
+            if tokio::fs::remove_dir(&path).await.is_err() {
+                is_empty = false; // Could not delete, probably contains the exe inside
+            }
+        } else {
+            // It's a normal file, delete it
+            let _ = tokio::fs::remove_file(&path).await;
+        }
+    }
+
+    // Try to delete root directory (only works if empty, i.e., didn't contain the exe)
+    if is_empty {
+        let _ = tokio::fs::remove_dir(dir).await;
+    }
+
+    Ok(())
 }
