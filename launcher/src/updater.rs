@@ -48,9 +48,15 @@ pub async fn check_for_updates(client: &Client) -> Result<Option<ReleaseInfo>> {
 
     let release: ReleaseInfo = response.json().await?;
 
-    // Normalizar: quitar 'v' y espacios
-    let remote_ver = release.tag_name.trim().trim_start_matches('v').to_string();
-    let local_ver = current_version.trim().trim_start_matches('v').to_string();
+    let remote_ver = release
+        .tag_name
+        .trim()
+        .trim_start_matches('v')
+        .replace("-g", "-");
+    let local_ver = current_version
+        .trim()
+        .trim_start_matches('v')
+        .replace("-g", "-");
 
     println!("[Updater] Local: v{}, Remote: v{}", local_ver, remote_ver);
 
