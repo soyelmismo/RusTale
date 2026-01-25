@@ -732,8 +732,12 @@ impl RusTale {
                     let settings = self.settings.clone();
                     let target_ver = self.latest_version;
 
-                    // CAPTURA: Guardamos el estado actual (ej: NeedsUpdate) antes de cambiarlo
                     let trigger_status = self.status.clone();
+
+                    self.status_text = self
+                        .localization
+                        .t("launcher.status.initializing")
+                        .to_string();
 
                     if self.is_quickplay_mode {
                         self.is_window_visible = false;

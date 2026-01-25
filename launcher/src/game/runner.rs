@@ -165,7 +165,9 @@ impl Recipe for Runner {
                 let java_exec = match crate::java::get_java_exec(&base_dir) {
                     Ok(j) => j,
                     Err(e) => {
-                        let _ = output.send(Message::GameLaunched(Err(e.to_string()))).await;
+                        let _ = output
+                            .send(Message::GameLaunched(Err(format!("Java Error: {}", e))))
+                            .await;
                         return;
                     }
                 };
@@ -357,7 +359,11 @@ impl Recipe for Runner {
                             "[Runner] ERROR: HytaleServer.jar NOT FOUND at {:?}",
                             server_jar_path
                         );
-                        let _ = output.send(Message::GameStopped).await;
+                        let _ = output
+                            .send(Message::GameLaunched(Err(
+                                "Critical File Missing: HytaleServer.jar.".into(),
+                            )))
+                            .await;
                         return;
                     }
 
