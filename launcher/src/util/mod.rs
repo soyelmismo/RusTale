@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 pub mod icons;
 pub mod image_cache;
+pub mod win_job;
 
 pub fn open_game_folder() {
     let path = crate::config::get_app_dir();

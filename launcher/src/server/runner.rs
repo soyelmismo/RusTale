@@ -49,28 +49,26 @@ pub async fn run_server_flow(config: ServerConfig) -> Result<()> {
     // -----------------------------------------------------------------------
     // INICIAR SERVIDOR WEB LOCAL (Si es necesario)
     // -----------------------------------------------------------------------
-    // Necesitamos un canal para detener el servidor web cuando el proceso termine (aunque al matar el proceso muere todo)
+    let (auth_result_tx, mut auth_result_rx) = tokio::sync::oneshot::channel();
     let (_server_stop_tx, server_stop_rx) = tokio::sync::oneshot::channel::<()>();
 
     if config.online_mode == "local" {
-        // 1. Comprobar si ya existe
         if crate::game::server::is_server_alive(auth_port).await {
             println!(
                 "Local Auth Server already running on port {}. Attaching...",
                 auth_port
             );
-            // No hacemos nada, simplemente usamos el puerto.
+            let _ = auth_result_tx.send(Ok(()));
         } else {
             println!(
                 "Starting Local Auth Server (Emulator) on port {}...",
                 auth_port
             );
 
-            // Generar credenciales "Host" dummy para el servidor dedicado
+            // ... (setup host_uuid and host_name) ...
             let host_uuid = uuid::Uuid::new_v4().to_string();
             let host_name = "ConsoleHost".to_string();
 
-            // El directorio de assets para skins suele ser el del juego instalado
             let version_dir_name = if config.game_version == "latest" || config.game_version == "0"
             {
                 "latest".to_string()
@@ -79,24 +77,35 @@ pub async fn run_server_flow(config: ServerConfig) -> Result<()> {
             };
             let install_dir_ref = root_dir.join(&config.branch).join(&version_dir_name);
 
-            // Lanzar el servidor web en background
             tokio::spawn(async move {
-                if let Err(e) = crate::game::server::start_server(
+                // Try to start the server
+                let res = crate::game::server::start_server(
                     host_name,
                     host_uuid,
                     install_dir_ref,
                     server_stop_rx,
                     auth_port,
                 )
-                .await
-                {
-                    eprintln!("Auth Server Error: {}", e);
-                }
+                .await;
+
+                // Notify the main thread the result
+                let _ = auth_result_tx.send(res);
             });
 
-            // Esperar un momento para asegurar que arranque
+            // Give it a small break to start or fail
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
+    } else {
+        let _ = auth_result_tx.send(Ok(()));
+    }
+
+    // Check if the Auth Server failed before downloading anything
+    // If the port is occupied by a zombie, this will fail here and stop everything
+    if let Ok(Err(e)) = auth_result_rx.try_recv() {
+        eprintln!("\n[FATAL] Could not start authentication server: {}", e);
+        eprintln!("It is likely that a previous instance was left open.");
+        eprintln!("Please close 'java.exe' or 'rustale.exe' from Task Manager.\n");
+        std::process::exit(1);
     }
 
     let _tools_dir = root_dir.join("tools");
@@ -352,6 +361,7 @@ pub async fn run_server_flow(config: ServerConfig) -> Result<()> {
     // 6. Ejecutar
     println!("[5/5] Launching Server on port 5520!");
     println!("---------------------------------------------------");
+    println!("Press Ctrl+C to stop the server safely.");
 
     let mut cmd = Command::new(java_exec);
 
@@ -365,24 +375,59 @@ pub async fn run_server_flow(config: ServerConfig) -> Result<()> {
         .stderr(std::process::Stdio::inherit())
         .stdin(std::process::Stdio::inherit());
 
+    cmd.kill_on_drop(true);
+
     let mut child = cmd.spawn().context("Failed to spawn java process")?;
+
+    #[cfg(windows)]
+    let _job_guard = {
+        use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_ALL_ACCESS};
+
+        match crate::util::win_job::JobObject::new() {
+            Ok(job) => {
+                if let Some(pid) = child.id() {
+                    unsafe {
+                        let process_handle = OpenProcess(PROCESS_ALL_ACCESS, 0, pid);
+
+                        if process_handle.is_null() {
+                            eprintln!("[Warning] Failed to open process handle for PID {}", pid);
+                            None
+                        } else {
+                            if let Err(e) = job.add_process(process_handle) {
+                                eprintln!("[Warning] Failed to assign Java to Job Object: {}", e);
+                                windows_sys::Win32::Foundation::CloseHandle(process_handle);
+                                None
+                            } else {
+                                println!(
+                                    "[Security] Process attached to Job Object. Java will terminate if launcher closes."
+                                );
+                                windows_sys::Win32::Foundation::CloseHandle(process_handle);
+                                Some(job)
+                            }
+                        }
+                    }
+                } else {
+                    eprintln!("[Warning] Could not get child process PID");
+                    None
+                }
+            }
+            Err(e) => {
+                eprintln!("[Warning] Could not create Job Object: {}", e);
+                None
+            }
+        }
+    };
 
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
-            println!("\nStopping server...");
+            println!("\n[RusTale] Stop signal received. Closing server...");
+
             let _ = child.kill().await;
         }
         status = child.wait() => {
-            println!("Server exited with: {:?}", status?);
+            println!("[RusTale] Server process terminated: {:?}", status?);
         }
     }
-
-    // LIMPIEZA: Matar el túnel al salir
-    // LIMPIEZA: El túnel se cerrará automáticamente al finalizar el runtime gracias a kill_on_drop
-    // if let Some(mut tp) = tunnel_process {
-    //     println!("Stopping Tunnel...");
-    //     let _ = tp.kill().await;
-    // }
 
     Ok(())
 }

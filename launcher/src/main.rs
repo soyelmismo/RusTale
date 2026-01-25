@@ -167,10 +167,11 @@ pub fn main() -> iced::Result {
     let instance = SingleInstance::new(lock_name).unwrap();
 
     if !instance.is_single() {
-        eprintln!(
-            "ERROR: Another instance of {} is already running.",
-            lock_name
-        );
+        eprintln!("===================================================");
+        eprintln!("ERROR: There's already an instance of RusTale running.");
+        eprintln!("If you don't see the window, check Task Manager");
+        eprintln!("and close 'rustale.exe' or 'java.exe'.");
+        eprintln!("===================================================");
         std::process::exit(1);
     }
 
