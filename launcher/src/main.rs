@@ -5,6 +5,7 @@ use iced::widget::{Space, column, container, image, row, stack};
 use iced::{
     Color, ContentFit, Element, Length, Size, Subscription, Task, Theme, clipboard, window,
 };
+use single_instance::SingleInstance;
 use tray_icon::{
     TrayIconBuilder,
     menu::{Menu, MenuItem},
@@ -103,13 +104,7 @@ fn is_running_as_java_proxy() -> bool {
 }
 
 pub fn main() -> iced::Result {
-    // -----------------------------------------------------------------------
-    // 1. PROXY MODE CHECK (MUST BE FIRST)
-    // -----------------------------------------------------------------------
-    // We check this BEFORE parsing args with Clap, because Clap will panic
-    // if it receives JVM arguments (like -Xms, -jar) that are not defined in Args.
     if is_running_as_java_proxy() {
-        // Read the mode from the environment variable set by the Runner
         let mode_env = std::env::var("AURORA_MODE").unwrap_or_default();
         let mode = match mode_env.as_str() {
             "sanasol" => config::OnlineFixMode::Sanasol,
@@ -128,12 +123,8 @@ pub fn main() -> iced::Result {
         std::process::exit(0);
     }
 
-    // -----------------------------------------------------------------------
-    // 2. WINDOWS CONSOLE ATTACHMENT
-    // -----------------------------------------------------------------------
     #[cfg(windows)]
     {
-        // Si hay argumentos de consola, reconectamos la salida estándar
         let raw_args: Vec<String> = std::env::args().collect();
         if raw_args
             .iter()
@@ -143,9 +134,7 @@ pub fn main() -> iced::Result {
                 ATTACH_PARENT_PROCESS, AllocConsole, AttachConsole,
             };
             unsafe {
-                // Intenta adjuntarse a la consola desde donde se lanzó (PowerShell)
                 if AttachConsole(ATTACH_PARENT_PROCESS) == 0 {
-                    // Si falla (ej. doble click), crea una ventana nueva negra
                     AllocConsole();
                 }
             }
@@ -159,13 +148,24 @@ pub fn main() -> iced::Result {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 3. ARGUMENT PARSING (Only safe now that we know we aren't Java)
-    // -----------------------------------------------------------------------
     let args = Args::parse();
 
-    // 1. Determine if we should start in Quickplay mode
-    // True if it comes from an argument OR if it's in the config file
+    let lock_name = if args.dedicated_server {
+        "RusTaleServer_Lock"
+    } else {
+        "RusTaleLauncher_Lock"
+    };
+
+    let instance = SingleInstance::new(lock_name).unwrap();
+
+    if !instance.is_single() {
+        eprintln!(
+            "ERROR: Another instance of {} is already running.",
+            lock_name
+        );
+        std::process::exit(1);
+    }
+
     let config_initialization_mode = config::load_initialization_config_sync();
     let (width, height) = config::load_width_height();
     let is_quickplay = args.quickplay || config_initialization_mode.quickplay;
