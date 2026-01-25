@@ -57,9 +57,7 @@ struct KeyPairData {
 }
 
 pub static KEY_PAIR: Lazy<Mutex<SigningKey>> = Lazy::new(|| {
-    let path = crate::config::get_app_dir()
-        .join("data")
-        .join("jwt_keys.json");
+    let path = crate::config::get_identity_dir().join("jwt_keys.json");
     Mutex::new(load_or_generate_keys(&path))
 });
 

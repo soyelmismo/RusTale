@@ -12,6 +12,8 @@ pub async fn initialize() -> Result<()> {
     // Lista de carpetas a crear
     let folders = vec![
         base_dir.clone(),
+        config::get_server_root_dir(), // RusTale/server
+        config::get_identity_dir(),    // RusTale/server/identity
         base_dir.join("cache"),
         base_dir.join("cache").join("images"),
         base_dir.join("cache").join("game_patches"),

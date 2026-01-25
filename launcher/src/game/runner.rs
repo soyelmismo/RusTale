@@ -203,7 +203,6 @@ impl Recipe for Runner {
                 let mut aurora_env_value = "local".to_string();
 
                 let mut _cleanup_guard: Option<FileCleanupGuard> = None;
-                let mut _server_jar_cleanup_guard: Option<ServerJarCleanupGuard> = None;
 
                 let server_port = crate::util::find_free_port();
 
@@ -217,10 +216,8 @@ impl Recipe for Runner {
                     }
 
                     // =========================================================
-                    // PARALLEL PATCHING START
+                    // PARALLEL PATCHING START (PERSISTENT & NON-DESTRUCTIVE)
                     // =========================================================
-                    // Lanzamos el parcheo en segundo plano AHORA, mientras el cliente inicia.
-                    // El archivo resultante se guardará en temp_dir para que el proxy lo encuentre.
                     let mut server_jar_path =
                         game_working_dir.join("Server").join("HytaleServer.jar");
 
@@ -238,20 +235,85 @@ impl Recipe for Runner {
                         }
                     }
 
-                    let original_jar_path = server_jar_path.with_file_name("HytaleServer.original");
+                    if server_jar_path.exists() {
+                        let server_jar_path_clone = server_jar_path.clone();
+                        let mode_fix = settings.online_fix_mode.clone();
+                        let port_clone = server_port;
 
-                    // 0. Crash Recovery: If .original exists, restore it first to ensure clean state
-                    if original_jar_path.exists() {
-                        println!("[Runner] Found leftover HytaleServer.original. Restoring...");
-                        if server_jar_path.exists() {
-                            let _ = std::fs::remove_file(&server_jar_path);
-                        }
-                        if let Err(e) = std::fs::rename(&original_jar_path, &server_jar_path) {
-                            eprintln!("[Runner] Failed to restore original jar: {}", e);
-                        }
-                    }
+                        // Authentication & Server Logic
+                        match settings.online_fix_mode {
+                            crate::config::OnlineFixMode::Local => {
+                                // Local configuration
+                                aurora_env_value = "local".to_string();
+                                auth_url = format!("http://127.0.0.1:{}", server_port);
 
-                    if !server_jar_path.exists() {
+                                // Start local server
+                                let server_username = player_name.clone();
+                                let server_uuid = player_uuid.clone();
+                                let server_game_dir = game_working_dir.clone();
+                                let port_clone = server_port;
+
+                                tokio::spawn(async move {
+                                    if !crate::game::server::is_server_alive(port_clone).await {
+                                        let _ = crate::game::server::start_server(
+                                            server_username,
+                                            server_uuid,
+                                            server_game_dir,
+                                            server_stop_rx,
+                                            port_clone,
+                                        )
+                                        .await;
+                                    } else {
+                                        println!("[Runner] Connected to existing Auth Server.");
+                                    }
+                                });
+                                server_started = true;
+                            }
+                            crate::config::OnlineFixMode::Sanasol => {
+                                // Sanasol configuration
+                                auth_url = "https://sessions.sanasol.ws".to_string();
+                                aurora_env_value = "sanasol".to_string();
+                            }
+                        }
+
+                        // LOGICA DE SWAP PERSISTENTE
+                        task::spawn_blocking(move || {
+                            let original_jar_path =
+                                server_jar_path_clone.with_file_name("HytaleServer.original");
+
+                            // 1. Asegurar BACKUP: Si no existe .original, el .jar actual es el original
+                            if !original_jar_path.exists() {
+                                println!(
+                                    "[Runner] First run detected. Renaming HytaleServer.jar -> HytaleServer.original"
+                                );
+                                if let Err(e) =
+                                    std::fs::rename(&server_jar_path_clone, &original_jar_path)
+                                {
+                                    eprintln!("[Runner] Failed to backup original jar: {}", e);
+                                    return; // Critical failure
+                                }
+                            }
+
+                            // 2. Asegurar PARCHE: Si existe .original, usamos ese para generar HytaleServer.jar
+                            // Sobrescribimos siempre HytaleServer.jar para garantizar que el puerto/modo sea correcto
+                            if original_jar_path.exists() {
+                                println!(
+                                    "[Runner] Generating HytaleServer.jar from HytaleServer.original (Persistent Mode)..."
+                                );
+                                match crate::game::patcher::patch_server_jar(
+                                    &original_jar_path,
+                                    &server_jar_path_clone,
+                                    mode_fix,
+                                    port_clone,
+                                ) {
+                                    Ok(_) => println!(
+                                        "[Runner] Patch applied successfully to HytaleServer.jar"
+                                    ),
+                                    Err(e) => eprintln!("[Runner] Failed to patch jar: {}", e),
+                                }
+                            }
+                        });
+                    } else {
                         println!(
                             "[Runner] ERROR: HytaleServer.jar NOT FOUND at {:?}",
                             server_jar_path
@@ -260,108 +322,6 @@ impl Recipe for Runner {
                         return;
                     }
 
-                    // Initialize the cleanup guard NOW, so it handles cleanup if we crash/exit
-                    _server_jar_cleanup_guard = Some(ServerJarCleanupGuard {
-                        original_path: original_jar_path.clone(),
-                        current_path: server_jar_path.clone(),
-                    });
-
-                    let port_clone = server_port;
-                    let server_jar_path_clone = server_jar_path.clone();
-                    let original_jar_path_clone = original_jar_path.clone();
-
-                    println!(
-                        "[Runner] Scheduling background patch for: {:?}",
-                        server_jar_path_clone
-                    );
-
-                    match settings.online_fix_mode {
-                        crate::config::OnlineFixMode::Local => {
-                            // Local configuration
-                            aurora_env_value = "local".to_string();
-                            auth_url = format!("http://127.0.0.000001:{}", server_port);
-
-                            // Start local server
-                            let server_username = player_name.clone();
-                            let server_uuid = player_uuid.clone();
-                            let server_game_dir = game_working_dir.clone();
-                            let port_clone = server_port;
-
-                            tokio::spawn(async move {
-                                if !crate::game::server::is_server_alive(port_clone).await {
-                                    let _ = crate::game::server::start_server(
-                                        server_username,
-                                        server_uuid,
-                                        server_game_dir,
-                                        server_stop_rx,
-                                        port_clone,
-                                    )
-                                    .await;
-                                } else {
-                                    println!("[Runner] Connected to existing Auth Server.");
-                                }
-                            });
-                            server_started = true;
-                        }
-                        crate::config::OnlineFixMode::Sanasol => {
-                            // Sanasol configuration
-                            auth_url = "https://sessions.sanasol.ws".to_string();
-                            aurora_env_value = "sanasol".to_string();
-
-                            // We don't start the local server
-                        }
-                    }
-
-                    // Spawn blocking task (CPU intensive zip ops) in background
-                    task::spawn_blocking(move || {
-                        if server_jar_path_clone.exists() {
-                            println!("[Runner] Starting background server patching (Swap Mode)...");
-
-                            // 1. Patch to a temporary file
-                            let patched_tmp_path =
-                                server_jar_path_clone.with_file_name("HytaleServer.patched.tmp");
-
-                            match crate::game::patcher::patch_server_jar(
-                                &server_jar_path_clone,
-                                &patched_tmp_path,
-                                settings.online_fix_mode,
-                                port_clone,
-                            ) {
-                                Ok(_) => {
-                                    println!("[Runner] Patch created at: {:?}", patched_tmp_path);
-
-                                    // 2. Rename Original -> .original
-                                    if let Err(e) = std::fs::rename(
-                                        &server_jar_path_clone,
-                                        &original_jar_path_clone,
-                                    ) {
-                                        eprintln!("[Runner] Failed to backup original jar: {}", e);
-                                        // Cleanup temp
-                                        let _ = std::fs::remove_file(&patched_tmp_path);
-                                        return;
-                                    }
-
-                                    // 3. Rename Patched -> .jar
-                                    if let Err(e) =
-                                        std::fs::rename(&patched_tmp_path, &server_jar_path_clone)
-                                    {
-                                        eprintln!("[Runner] Failed to install patched jar: {}", e);
-                                        // Try to rollback
-                                        let _ = std::fs::rename(
-                                            &original_jar_path_clone,
-                                            &server_jar_path_clone,
-                                        );
-                                        return;
-                                    }
-
-                                    println!(
-                                        "[Runner] Successfully swapped HytaleServer.jar with patched version."
-                                    );
-                                }
-                                Err(e) => eprintln!("[Runner] Background patching failed: {}", e),
-                            }
-                        }
-                    });
                     // =========================================================
                     // PARALLEL PATCHING END
                     // =========================================================
@@ -499,24 +459,5 @@ impl Recipe for Runner {
             },
         );
         s.boxed()
-    }
-}
-struct ServerJarCleanupGuard {
-    original_path: PathBuf,
-    current_path: PathBuf,
-}
-
-impl Drop for ServerJarCleanupGuard {
-    fn drop(&mut self) {
-        if self.original_path.exists() {
-            println!("[Cleanup] Restoring original server jar...");
-            // Remove the patched one (current HytaleServer.jar)
-            if self.current_path.exists() {
-                let _ = std::fs::remove_file(&self.current_path);
-            }
-            // Restore original
-            let _ = std::fs::rename(&self.original_path, &self.current_path);
-            println!("[Cleanup] Original server jar restored.");
-        }
     }
 }

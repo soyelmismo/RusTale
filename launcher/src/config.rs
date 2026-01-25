@@ -209,6 +209,14 @@ pub fn get_app_dir() -> PathBuf {
     default_path
 }
 
+pub fn get_server_root_dir() -> PathBuf {
+    get_app_dir().join("server")
+}
+
+pub fn get_identity_dir() -> PathBuf {
+    get_server_root_dir().join("identity")
+}
+
 pub fn save_bootstrap_path(path: &PathBuf) -> anyhow::Result<()> {
     let cfg = LauncherConfig {
         data_dir: Some(path.clone()),

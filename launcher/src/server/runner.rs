@@ -13,7 +13,9 @@ pub async fn run_server_flow(config: ServerConfig) -> Result<()> {
     );
 
     // 1. Definir Rutas (Unificadas a root_dir para evitar OS Error 3)
-    let root_dir = std::env::current_dir()?;
+    // 1. Definir Rutas (Unificadas a root_dir para evitar OS Error 3)
+    let root_dir = crate::config::get_server_root_dir();
+    let _ = tokio::fs::create_dir_all(&root_dir).await;
     let port_file = root_dir.join("server.port");
 
     let auth_port: u16 = if port_file.exists() {

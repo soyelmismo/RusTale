@@ -15,7 +15,8 @@ use warp::Filter;
 
 #[derive(Deserialize, Debug)]
 struct SessionRequest {
-    // A veces el cliente envía scope o scopes
+    pub uuid: Option<String>,
+    pub name: Option<String>,
     #[serde(alias = "scope")]
     scopes: Option<Vec<String>>,
     #[serde(flatten)]
@@ -229,9 +230,12 @@ pub async fn start_server(
     port: u16,
 ) -> anyhow::Result<()> {
     // 1. Load saved skin (Multi-user support)
-    let base_dir = crate::config::get_app_dir();
-    let server_data_dir = base_dir.join("serverdata");
-    let skin_file = server_data_dir.join("skin.json");
+    // 1. Load saved skin (Multi-user support)
+    // Usar RusTale/server/identity/skins.json
+    let identity_dir = crate::config::get_identity_dir();
+    let skin_file = identity_dir.join("skins.json");
+
+    let auth_header = warp::header::optional::<String>("authorization");
 
     let skins: HashMap<String, String> = if skin_file.exists() {
         let content = tokio::fs::read_to_string(&skin_file)
@@ -266,12 +270,14 @@ pub async fn start_server(
     // 1. GET /my-account/game-profile
     let game_profile = warp::path!("my-account" / "game-profile")
         .and(warp::get())
+        .and(auth_header.clone())
         .and(state_filter.clone())
         .then(handle_game_profile);
 
     // 2. PUT /my-account/skin (Save skin)
     let skin_put = warp::path!("my-account" / "skin")
         .and(warp::put())
+        .and(auth_header.clone())
         .and(warp::body::bytes())
         .and(state_filter.clone())
         .then(handle_skin_put);
@@ -290,8 +296,10 @@ pub async fn start_server(
 
     // 5. POST /game-session/child (Auth)
     let session_child = warp::path!("game-session" / "child")
+        .and(warp::post())
+        .and(warp::body::json()) // Extraer el JSON
         .and(state_filter.clone())
-        .then(move |state| handle_session_child(port, state));
+        .then(move |body, state| handle_session_child(port, body, state));
 
     // 6. Stubs (Bugs, Feedback)
     let stubs = warp::path!("bugs" / "create")
@@ -467,15 +475,22 @@ pub async fn start_server(
 
 // --- HANDLERS ---
 
-async fn handle_game_profile(state: Arc<tokio::sync::Mutex<ServerState>>) -> impl warp::Reply {
+async fn handle_game_profile(
+    auth: Option<String>, // Nueva entrada
+    state: Arc<tokio::sync::Mutex<ServerState>>,
+) -> impl warp::Reply {
     let state = state.lock().await;
+
+    // Identificar al usuario por su token, o fallback al uuid del estado
+    let target_uuid = extract_uuid_from_auth(auth, &state.uuid);
+
     let skin = state
         .skins
-        .get(&state.uuid)
+        .get(&target_uuid)
         .map(|s| s.as_str())
         .unwrap_or(DEFAULT_SKIN);
-    println!("Game profile endpoint requested.");
-    let info = gen_account_info(&state.username, &state.uuid, skin);
+
+    let info = gen_account_info(&state.username, &target_uuid, skin);
     warp::reply::json(&info)
 }
 
@@ -487,19 +502,19 @@ pub fn get_profile(username: &str, uuid: &str) -> AccountInfo {
 }
 
 async fn handle_skin_put(
+    auth: Option<String>, // Nueva entrada
     body: bytes::Bytes,
     state: Arc<tokio::sync::Mutex<ServerState>>,
 ) -> impl warp::Reply {
     let mut state = state.lock().await;
-    println!("Skin put endpoint requested.");
+    let target_uuid = extract_uuid_from_auth(auth, &state.uuid);
 
     if let Ok(json_str) = String::from_utf8(body.to_vec()) {
-        let uuid = state.uuid.clone();
-        state.skins.insert(uuid, json_str);
+        state.skins.insert(target_uuid.clone(), json_str);
 
         // Persist to disk
-        let base_dir = crate::config::get_app_dir();
-        let save_path = base_dir.join("serverdata").join("skin.json");
+        let identity_dir = crate::config::get_identity_dir();
+        let save_path = identity_dir.join("skins.json");
         if let Some(parent) = save_path.parent() {
             let _ = tokio::fs::create_dir_all(parent).await;
         }
@@ -510,7 +525,6 @@ async fn handle_skin_put(
 
         return warp::reply::with_status("Skin saved", warp::http::StatusCode::NO_CONTENT);
     }
-
     warp::reply::with_status("Invalid UTF-8", warp::http::StatusCode::BAD_REQUEST)
 }
 
@@ -560,27 +574,39 @@ async fn handle_launcher_data(state: Arc<tokio::sync::Mutex<ServerState>>) -> im
 
 async fn handle_session_child(
     port: u16,
+    body: SessionRequest, // Ahora recibe el body
+
     state: Arc<tokio::sync::Mutex<ServerState>>,
 ) -> impl warp::Reply {
     let state = state.lock().await;
     println!("Session child endpoint requested.");
-    let username = state.username.clone();
+    println!("Body: {:?}", body);
+    let requested_uuid = body.uuid.clone().unwrap_or_else(|| state.uuid.clone());
+    let requested_name = body.name.clone().unwrap_or_else(|| state.username.clone());
+
     let skin = state
         .skins
-        .get(&state.uuid)
+        .get(&requested_uuid)
         .map(|s| s.as_str())
         .unwrap_or(DEFAULT_SKIN)
         .to_string();
 
     let identity_token = generate_jwt(
-        &username,
-        &state.uuid,
+        &requested_name,
+        &requested_uuid,
         &skin,
         "hytale:server hytale:client",
         true,
         port,
     );
-    let session_token = generate_jwt(&username, &state.uuid, &skin, "hytale:server", false, port);
+    let session_token = generate_jwt(
+        &requested_name,
+        &requested_uuid,
+        &skin,
+        "hytale:server",
+        false,
+        port,
+    );
 
     let resp = SessionNewResponse {
         expires_at: Utc::now() + chrono::Duration::hours(10),
@@ -1036,4 +1062,31 @@ fn generate_advanced_jwt(
     let signature = crypto::sign_message(&to_sign);
 
     format!("{}.{}", to_sign, signature)
+}
+
+fn extract_uuid_from_auth(auth_header: Option<String>, default_uuid: &str) -> String {
+    let header = match auth_header {
+        Some(h) => h,
+        None => return default_uuid.to_string(),
+    };
+
+    // Formato: "Bearer header.payload.signature"
+    let token = header.trim_start_matches("Bearer ").trim();
+    let parts: Vec<&str> = token.split('.').collect();
+
+    if parts.len() < 2 {
+        return default_uuid.to_string();
+    }
+
+    // El payload es la segunda parte
+    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+    if let Ok(payload_bytes) = URL_SAFE_NO_PAD.decode(parts[1]) {
+        if let Ok(payload_json) = serde_json::from_slice::<serde_json::Value>(&payload_bytes) {
+            if let Some(sub) = payload_json.get("sub").and_then(|s| s.as_str()) {
+                return sub.to_string();
+            }
+        }
+    }
+
+    default_uuid.to_string()
 }
