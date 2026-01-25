@@ -645,6 +645,10 @@ impl RusTale {
                 Task::none()
             }
             Message::CheckStatus => {
+                if self.status == LauncherStatus::Playing || self.running_game.is_some() {
+                    return Task::none();
+                }
+
                 self.status = LauncherStatus::Checking;
                 self.status_text = self.localization.t("launcher.status.checking").to_string();
 
@@ -893,6 +897,15 @@ impl RusTale {
                     )
                 }
                 updater::UpdaterMessage::UpdateFound(info) => {
+                    // SAFETY CHECK: Do not update if game is running
+                    if self.status == LauncherStatus::Playing || self.running_game.is_some() {
+                        println!(
+                            "Update found v{} but game is running. Skipping.",
+                            info.tag_name
+                        );
+                        return Task::none();
+                    }
+
                     self.status_text = format!("Update found: v{}", info.tag_name);
 
                     // Utilizar la función helper para obtener el asset correcto según el SO
