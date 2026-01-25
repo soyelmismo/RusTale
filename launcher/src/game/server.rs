@@ -435,27 +435,37 @@ pub async fn start_server(
             warp::reply::with_status("", warp::http::StatusCode::NOT_FOUND)
         });
 
-    let routes = game_profile
+    let account_routes = game_profile
         .or(skin_put)
         .or(cosmetics_get)
         .or(launcher_data)
-        .or(session_child)
-        .or(stubs)
+        .boxed();
+
+    let session_routes = session_child
         .or(session_new)
         .or(session_refresh)
         .or(session_delete)
         .or(session_authorize)
         .or(session_exchange)
-        .or(profile_by_uuid)
-        .or(profile_by_username)
-        .or(health)
-        .or(jwks_route)
-        .or(permissive_jwks)
-        .or(telemetry)
+        .boxed();
+
+    let profile_routes = profile_by_uuid.or(profile_by_username).boxed();
+
+    let system_routes = health.or(jwks_route).or(permissive_jwks).or(stubs).boxed();
+
+    let misc_routes = telemetry
         .or(analytics)
         .or(event)
         .or(internal_update_path)
         .or(catch_unknown)
+        .boxed();
+
+    // Combinar los grupos ya "cajitas" (boxed)
+    let routes = account_routes
+        .or(session_routes)
+        .or(profile_routes)
+        .or(system_routes)
+        .or(misc_routes)
         .with(cors)
         .with(log);
 

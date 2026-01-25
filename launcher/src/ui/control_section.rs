@@ -29,16 +29,26 @@ pub fn view<'a>(
         _ => util::icons::PLAY,
     };
 
+    let is_long_text = play_button_text.len() > 9;
+    let (font_size, icon_size, spacing_val) = if is_long_text {
+        (13, 16.0, 6) // Compact
+    } else {
+        (16, 20.0, 10) // Normal
+    };
+
     let mut play_btn = button(
         container(
             row![
                 svg(util::icons::icon(play_icon))
-                    .width(20)
-                    .height(20)
+                    .width(icon_size)
+                    .height(icon_size)
                     .style(theme::svg_accent),
-                text(play_button_text).size(16).font(Font::MONOSPACE)
+                text(play_button_text)
+                    .size(font_size)
+                    .font(Font::MONOSPACE)
+                    .align_y(iced::alignment::Vertical::Center)
             ]
-            .spacing(10)
+            .spacing(spacing_val)
             .align_y(Alignment::Center),
         )
         .width(Length::Fill)

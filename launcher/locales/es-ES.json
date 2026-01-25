@@ -7,7 +7,7 @@
         "update": "Actualizar",
         "status": {
             "initializing": "Inicializando...",
-            "checking": "Verificando archivos...",
+            "checking": "Verificando...",
             "ready": "Listo para jugar",
             "playing": "Jugando",
             "busy": "Ocupado...",
