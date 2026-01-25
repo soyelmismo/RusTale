@@ -99,17 +99,12 @@ pub async fn get_installed_versions(base_dir: &PathBuf, channel: &str) -> Vec<(i
                     });
 
             if fs::metadata(&latest_client_path).await.is_ok() {
-                // Siempre agregamos 'latest', incluso si ya existe la versión numérica.
-                // Así el usuario puede elegir lanzar desde 'latest' o desde '8' explícitamente.
                 installed.push((latest_ver, true)); // true = carpeta latest
             }
         }
     }
 
-    // Ordenar descendente (versiones nuevas primero)
-    // Si hay empate en versión (ej 8 latest y 8 folder), latest (true) va primero si queremos
     installed.sort_by(|a, b| b.0.cmp(&a.0));
-
     installed
 }
 
@@ -117,19 +112,16 @@ pub async fn get_installed_versions(base_dir: &PathBuf, channel: &str) -> Vec<(i
 pub async fn delete_version(base_dir: &PathBuf, channel: &str, version: i32) -> Result<()> {
     let version_dir = base_dir.join(channel).join(version.to_string());
 
-    // 1. Delete explicit version folder if it exists
     if version_dir.exists() {
         fs::remove_dir_all(&version_dir).await?;
     }
 
-    // 2. Check if 'latest' folder matches this version and delete it if so
     if let Ok(local_ver) = get_local_version(base_dir, channel).await {
         if local_ver == version {
             let latest_dir = base_dir.join(channel).join("latest");
             if latest_dir.exists() {
                 fs::remove_dir_all(&latest_dir).await?;
             }
-            // Also remove the version.json since we deleted the "latest" content
             let version_file = base_dir.join(channel).join("version.json");
             if version_file.exists() {
                 let _ = fs::remove_file(version_file).await;
@@ -141,11 +133,6 @@ pub async fn delete_version(base_dir: &PathBuf, channel: &str, version: i32) -> 
 }
 
 /// Ensures the game is installed and up to date (downloads JRE, Butler, and game)
-///
-/// # Parameters
-/// - `policy`: Defines the installation strategy:
-///   - `OfflineVerify`: Fast path - only checks local files, skips network
-///   - `NetworkUpdate`: Full path - contacts server and downloads if needed
 pub async fn ensure_installed(
     client: &reqwest::Client,
     base_dir: &PathBuf,
@@ -164,23 +151,16 @@ pub async fn ensure_installed(
             .unwrap_or_else(|| "latest".to_string());
         let check_ver = if ver_str == "0" { "latest" } else { &ver_str };
 
-        // Check 1: Game Client
         let game_ok = is_game_installed(base_dir, channel, check_ver).await;
-
-        // Check 2: JRE & Butler (Required for running/patching)
-        // Even if we are offline, we can't run without JRE.
         let paths = crate::game::paths::GamePaths::new(base_dir.clone());
         let jre_ok = paths.java_exec().exists();
         let butler_ok = paths.butler().exists();
 
-        // If game exists locally AND tools are present, we're done (trust local files)
         if game_ok && jre_ok && butler_ok {
             progress_callback("complete", 100.0, "Verified.");
             return Ok(());
         }
 
-        // If files are missing, we must download even in offline mode
-        // Switch to network mode to download missing files
         if !game_ok {
             progress_callback("check", 0.0, "Files missing, downloading...");
         } else if !jre_ok {
@@ -209,36 +189,64 @@ pub async fn ensure_installed(
     progress_callback("version", 0.0, "Checking for game updates...");
 
     let requested_version = target_version.unwrap_or(0);
-    let version_manifest =
+    let mut version_manifest =
         get_version_manifest(client, channel, base_dir, requested_version).await?;
 
     let user_version = version_manifest.user_version;
     let remote_version = version_manifest.latest_remote;
     let is_latest = user_version == 0;
 
-    let install_dir = if is_latest {
+    let install_dir_name = if is_latest {
         "latest".to_string()
     } else {
         user_version.to_string()
     };
-    let target_ver = if is_latest {
+
+    let target_ver_val = if is_latest {
         remote_version
     } else {
         user_version
     };
-    let is_installed = is_game_installed(base_dir, channel, &install_dir).await;
+
+    let files_exist = is_game_installed(base_dir, channel, &install_dir_name).await;
+
+    if files_exist && version_manifest.current_local == 0 && is_latest {
+        progress_callback("check", 50.0, "Detected manual installation. Adopting...");
+
+        // CLEANUP: Check if there's a leftover .original file from a previous patch/mod
+        // and restore it to ensure we are adopting a clean state.
+        let paths = crate::game::paths::GamePaths::new(base_dir.clone());
+        let client_path = paths.client_exe(channel, &install_dir_name);
+
+        let mut original_path = client_path.clone().into_os_string();
+        original_path.push(".original");
+        let original_path = PathBuf::from(original_path);
+
+        if fs::metadata(&original_path).await.is_ok() {
+            progress_callback(
+                "check",
+                55.0,
+                "Found dirty patch. Restoring original binary...",
+            );
+            // Restore: move .original -> .exe (overwriting if necessary)
+            fs::rename(&original_path, &client_path).await?;
+            println!("Restored original binary from {:?}", original_path);
+        }
+
+        save_local_version(base_dir, channel, remote_version).await?;
+
+        version_manifest.current_local = remote_version;
+        println!("Manual installation adopted as version {}", remote_version);
+    }
 
     // Verificar si ya está al día
-    if is_installed && (!is_latest || version_manifest.current_local == remote_version) {
+    if files_exist && (!is_latest || version_manifest.current_local == remote_version) {
         progress_callback("complete", 100.0, "Game is up to date");
         return Ok(());
     }
 
     // 4. Download and install game
-    // Base para el parche incremental: solo si es 'latest' y ya existe la carpeta
-    // 4. Download and install game
-    // Base para el parche incremental: solo si es 'latest' y ya existe la carpeta
-    let start_version = if is_latest && is_installed {
+    let start_version = if is_latest && files_exist {
         version_manifest.current_local
     } else {
         0
@@ -249,14 +257,14 @@ pub async fn ensure_installed(
         progress_callback(
             "download",
             0.0,
-            &format!("Installing game version {}...", target_ver),
+            &format!("Installing game version {}...", target_ver_val),
         );
 
         let pwr_path = crate::game::patcher::download_pwr(
             client,
             channel,
             0,
-            target_ver,
+            target_ver_val,
             &progress_callback,
             cancel_token.clone(),
         )
@@ -268,28 +276,23 @@ pub async fn ensure_installed(
             base_dir,
             channel,
             &pwr_path,
-            &install_dir,
+            &install_dir_name,
             &progress_callback,
         )
         .await?;
     } else {
         // --- INCREMENTAL UPDATE (Step-by-Step) ---
-        // Calculate intermediate steps
-        // we use available_versions which contains [latest, ..., 1]
-        // Filter those > start_version and <= target_ver
         let mut steps: Vec<i32> = version_manifest
             .available_versions
             .iter()
             .cloned()
-            .filter(|&v| v > start_version && v <= target_ver)
+            .filter(|&v| v > start_version && v <= target_ver_val)
             .collect();
 
-        // Sort ascending to ensure we go 10 -> 11 -> 12
         steps.sort();
 
-        // Safety fallback: if for some reason steps is empty but start < target, try direct
-        if steps.is_empty() && start_version < target_ver {
-            steps.push(target_ver);
+        if steps.is_empty() && start_version < target_ver_val {
+            steps.push(target_ver_val);
         }
 
         let mut current_ver = start_version;
@@ -308,7 +311,6 @@ pub async fn ensure_installed(
                 ),
             );
 
-            // Download patch current -> next
             let pwr_path = crate::game::patcher::download_pwr(
                 client,
                 channel,
@@ -319,7 +321,6 @@ pub async fn ensure_installed(
             )
             .await?;
 
-            // Apply patch
             progress_callback(
                 "install",
                 0.0,
@@ -330,15 +331,13 @@ pub async fn ensure_installed(
                 base_dir,
                 channel,
                 &pwr_path,
-                &install_dir,
+                &install_dir_name,
                 &progress_callback,
             )
             .await?;
 
-            // Update state
             current_ver = *next_ver;
 
-            // Save version immediately after success so we don't re-patch if interrupted later
             if is_latest {
                 let _ = save_local_version(base_dir, channel, current_ver).await;
             }
@@ -347,7 +346,7 @@ pub async fn ensure_installed(
 
     // Verify critical file after patch
     let client_path =
-        crate::game::paths::GamePaths::new(base_dir.clone()).client_exe(channel, &install_dir);
+        crate::game::paths::GamePaths::new(base_dir.clone()).client_exe(channel, &install_dir_name);
 
     if !fs::metadata(&client_path).await.is_ok() {
         anyhow::bail!(
@@ -356,17 +355,15 @@ pub async fn ensure_installed(
         );
     }
 
-    // Ensure execution permissions on Unix
     let _ = crate::util::make_executable(&client_path).await;
 
-    // Save version if we installed/updated the "latest" folder
     if is_latest {
-        let _ = save_local_version(base_dir, channel, target_ver).await;
+        let _ = save_local_version(base_dir, channel, target_ver_val).await;
     }
 
     progress_callback("complete", 100.0, "Game installed successfully");
 
-    if start_version != target_ver {
+    if start_version != target_ver_val {
         let _ = crate::game::patcher::clean_patches_cache(&progress_callback).await;
     }
 
