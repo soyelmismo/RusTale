@@ -30,6 +30,15 @@ pub struct Asset {
 }
 
 pub async fn check_for_updates(client: &Client) -> Result<Option<ReleaseInfo>> {
+    let current_version = env!("CARGO_PKG_VERSION");
+    if cfg!(debug_assertions) || current_version == "0.0.1" {
+        println!(
+            "[Updater] Development mode detected (v{}). Auto-update disabled.",
+            current_version
+        );
+        return Ok(None);
+    }
+
     let url = "https://api.github.com/repos/soyelmismo/RusTale/releases/latest";
     let response = client.get(url).send().await?;
 
@@ -38,7 +47,6 @@ pub async fn check_for_updates(client: &Client) -> Result<Option<ReleaseInfo>> {
     }
 
     let release: ReleaseInfo = response.json().await?;
-    let current_version = env!("CARGO_PKG_VERSION");
 
     // Normalizar: quitar 'v' y espacios
     let remote_ver = release.tag_name.trim().trim_start_matches('v').to_string();
