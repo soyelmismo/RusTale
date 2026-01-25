@@ -47,6 +47,7 @@ pub enum SettingsMessage {
     ToggleMinimizePlay(bool),
     QuickplayToggled(bool),
     AutoUpdateToggled(bool),
+    CheckForLauncherUpdates,
     None,
 }
 
@@ -205,6 +206,20 @@ impl SettingsState {
             Space::new().height(10),
             news_checkbox,
             auto_update_chk,
+            button(
+                row![
+                    svg(util::icons::icon(util::icons::REFRESH))
+                        .width(14)
+                        .height(14)
+                        .style(theme::svg_accent),
+                    text(localization.t("settings.check_updates")).size(14)
+                ]
+                .spacing(8)
+                .align_y(Alignment::Center)
+            )
+            .on_press(SettingsMessage::CheckForLauncherUpdates)
+            .style(theme::secondary_button_style)
+            .padding(8),
             minimize_tray_chk,
             minimize_play_chk,
             quickplay_chk,
@@ -618,6 +633,12 @@ impl SettingsState {
             SettingsMessage::AutoUpdateToggled(val) => {
                 self.temp_settings.enable_auto_update = val;
                 None
+            }
+            SettingsMessage::CheckForLauncherUpdates => {
+                self.is_open = false;
+                Some(Message::LauncherUpdate(
+                    crate::updater::UpdaterMessage::CheckForUpdates,
+                ))
             }
             SettingsMessage::None => None,
         }

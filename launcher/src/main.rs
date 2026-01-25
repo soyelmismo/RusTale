@@ -1090,39 +1090,35 @@ impl RusTale {
                 Task::none()
             }
 
-            Message::DataMoveFinished(result) => {
-                match result {
-                    Ok(new_path) => {
-                        println!("Migration success to: {:?}", new_path);
+            Message::DataMoveFinished(result) => match result {
+                Ok(new_path) => {
+                    println!("Migration success to: {:?}", new_path);
 
-                        self.paths = crate::game::GamePaths::new(new_path.clone());
+                    self.paths = crate::game::GamePaths::new(new_path.clone());
 
-                        let current_exe = std::env::current_exe().unwrap_or_default();
-                        if !current_exe.starts_with(&new_path) {
-                            self.status_text =
-                                "Migration done! Please restart from the NEW location.".to_string();
-                            crate::util::open_path(new_path.clone());
-                        } else {
-                            self.status_text = "Migration successful.".to_string();
-                        }
-
-                        // 3. Forzar recarga de configuración y perfiles desde la nueva ubicación
-                        Task::perform(
-                            async {
-                                // Pequeña pausa para asegurar FS sync
-                                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                                (config::load_profiles().await, config::load_settings().await)
-                            },
-                            |(p, s)| Message::ConfigLoaded(p, s, crate::lang::Localization::new()),
-                        )
+                    let current_exe = std::env::current_exe().unwrap_or_default();
+                    if !current_exe.starts_with(&new_path) {
+                        self.status_text =
+                            "Migration done! Please restart from the NEW location.".to_string();
+                        crate::util::open_path(new_path.clone());
+                    } else {
+                        self.status_text = "Migration successful.".to_string();
                     }
-                    Err(e) => {
-                        self.status = LauncherStatus::Ready; // Restaurar estado
-                        self.error = Some(format!("Migration failed: {}", e));
-                        Task::none()
-                    }
+
+                    Task::perform(
+                        async {
+                            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                            (config::load_profiles().await, config::load_settings().await)
+                        },
+                        |(p, s)| Message::ConfigLoaded(p, s, crate::lang::Localization::new()),
+                    )
                 }
-            }
+                Err(e) => {
+                    self.status = LauncherStatus::Ready;
+                    self.error = Some(format!("Migration failed: {}", e));
+                    Task::none()
+                }
+            },
             Message::DataMoveStarted => {
                 self.status = LauncherStatus::Busy;
                 Task::none()
@@ -1131,7 +1127,6 @@ impl RusTale {
                 let client = self.api_client.clone();
                 Task::perform(
                     async move {
-                        // Aquí cache_remote es None implícitamente porque find_latest_version siempre busca
                         let v = game::patcher::find_latest_version(&client, &chan)
                             .await
                             .unwrap_or(0);
@@ -1154,14 +1149,12 @@ impl RusTale {
             Message::VersionsReceived(v) => {
                 self.settings_state.available_versions = v.clone();
 
-                // Opcional: Actualizar también el caché global si el canal coincide
                 if self.settings_state.temp_settings.channel == self.settings.channel {
                     self.available_versions = v;
                 }
 
                 self.settings_state.is_loading_versions = false;
 
-                // If we arrived here from channel change, we should also check installed versions again
                 let channel = self.settings_state.temp_settings.channel.clone();
                 Task::perform(
                     async move {
@@ -1190,10 +1183,7 @@ impl RusTale {
                 self.status = LauncherStatus::Ready;
                 self.error = Some(err);
 
-                // --- NEW: Clean up running game ---
-                // This ensures Iced knows there's no active subscription
                 self.running_game = None;
-                // ---------------------------------
 
                 Task::none()
             }

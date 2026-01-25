@@ -106,7 +106,7 @@ pub fn view<'a>(
 
     let mods_btn = button(
         container(
-            svg(util::icons::icon(util::icons::FOLDER)) // O usa un icono de CAJA/CUBO si añades uno
+            svg(util::icons::icon(util::icons::PUZZLE))
                 .width(16)
                 .height(16)
                 .style(theme::svg_accent),

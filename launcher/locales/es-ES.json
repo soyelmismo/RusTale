@@ -51,6 +51,7 @@
         "select_channel": "Seleccionar Canal",
         "select_version": "Seleccionar Versión",
         "auto_update": "Auto Actualizar Launcher",
+        "check_updates": "Buscar Actualizaciones",
         "version": {
             "latest": "Última (Auto-Actualizar)",
             "specific": "Versión {0}"
