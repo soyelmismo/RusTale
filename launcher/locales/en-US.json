@@ -44,7 +44,7 @@
             "java": "Java"
         },
         "language": "Language",
-        "language.placeholder": "Select Language",
+        "language_placeholder": "Select Language",
         "game_config": "Game Configuration",
         "install_path": "Installation Path",
         "browse": "Browse...",

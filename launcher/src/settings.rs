@@ -139,7 +139,7 @@ impl SettingsState {
             SettingsMessage::LanguageSelected,
         )
         .text_size(14) // Tamaño de texto explícito
-        .placeholder(localization.t("settings.language.placeholder"))
+        .placeholder(localization.t("settings.language_placeholder"))
         .padding(10)
         .width(150)
         .style(theme::pick_list_style)
