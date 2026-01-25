@@ -6,7 +6,7 @@ use crate::{theme, util};
 use iced::widget::{
     Space, button, column, container, image, row, scrollable, svg, text, text_input,
 };
-use iced::{Alignment, Color, ContentFit, Element, Length, Size, Task};
+use iced::{Alignment, Color, ContentFit, Element, Length, Renderer, Size, Task, Theme};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -19,8 +19,6 @@ pub enum ModTab {
 pub enum ModsMessage {
     Close,
     SwitchTab(ModTab),
-
-    // Local
     RefreshLocal,
     RefreshLocalBackground,
     ToggleLocal(ModInfo),
@@ -29,20 +27,18 @@ pub enum ModsMessage {
     OpenPatchFolder,
     OpenJarFolder,
     ModsLoaded(Result<Vec<ModInfo>, String>),
-
-    // Remote
     SearchChanged(String),
     SearchSubmit,
     NextPage,
     PrevPage,
     SearchLoaded(Result<SearchResult, String>),
-    ImageLoaded(i32, Result<image::Handle, String>), // id del mod, resultado
+    ImageLoaded(i32, Result<image::Handle, String>),
     InstallMod(CfMod),
-    ModInstalled(Result<String, String>, i32), // Nombre del archivo instalado, ID del mod
+    ModInstalled(Result<String, String>, i32),
     OpenModPage(String),
-    InstallZipPatch(std::path::PathBuf, GameSettings), // Ruta del archivo ZIP seleccionado
-    ToggleZipPatch(String, bool),                      // ID, nuevo estado (true=activar)
-    UninstallZipPatch(String, GameSettings),           // Mod ID
+    InstallZipPatch(std::path::PathBuf, GameSettings),
+    ToggleZipPatch(String, bool),
+    UninstallZipPatch(String, GameSettings),
     PatchOperationFinished(Result<(), String>),
     ModsLoadedComplex(Result<(Vec<ModInfo>, Vec<crate::game::zip_mods::PatchManifest>), String>),
     OpenMods,
@@ -51,20 +47,17 @@ pub enum ModsMessage {
 pub struct ModsState {
     pub is_open: bool,
     pub current_tab: ModTab,
-    // Remote State
     pub search_query: String,
     pub remote_mods: Vec<CfMod>,
     pub current_page: u32,
     pub total_results: u32,
     pub page_size: u32,
-    pub thumbnails: HashMap<i32, image::Handle>, // Cache de imágenes
-
+    pub thumbnails: HashMap<i32, image::Handle>,
     pub loading: bool,
     pub error: Option<String>,
     pub patch_mods: Vec<PatchManifest>,
     pub installed_mods: Vec<ModInfo>,
     pub temp_settings: GameSettings,
-
     pub installing_ids: HashSet<i32>,
     pub installed_ids: HashSet<i32>,
 }
@@ -93,23 +86,7 @@ impl Default for ModsState {
 
 impl ModsState {
     pub fn new() -> Self {
-        Self {
-            is_open: false,
-            current_tab: ModTab::Installed,
-            search_query: String::new(),
-            remote_mods: Vec::new(),
-            current_page: 0,
-            total_results: 0,
-            page_size: 10,
-            thumbnails: HashMap::new(),
-            loading: false,
-            error: None,
-            patch_mods: Vec::new(),
-            installed_mods: Vec::new(),
-            temp_settings: GameSettings::default(),
-            installing_ids: HashSet::new(),
-            installed_ids: HashSet::new(),
-        }
+        Self::default()
     }
 
     pub fn update(
@@ -127,18 +104,13 @@ impl ModsState {
             ModsMessage::RefreshLocal | ModsMessage::OpenMods => {
                 self.is_open = true;
                 self.loading = true;
-
-                // Limpiamos visualmente para dar feedback de carga
                 self.installed_mods.clear();
                 self.patch_mods.clear();
                 self.installing_ids.clear();
                 self.installed_ids.clear();
-
                 self.load_mods_task(base_dir, settings)
             }
-
             ModsMessage::RefreshLocalBackground => self.load_mods_task(base_dir, settings),
-
             ModsMessage::ModsLoaded(res) => {
                 self.loading = false;
                 match res {
@@ -147,7 +119,6 @@ impl ModsState {
                 }
                 Task::none()
             }
-
             ModsMessage::ModsLoadedComplex(res) => {
                 if self.loading {
                     self.loading = false;
@@ -160,34 +131,29 @@ impl ModsState {
                     }
                     Err(e) => {
                         if self.is_open {
-                            self.error = Some(format!("Error loading mods: {}", e));
+                            self.error = Some(format!("Error: {}", e));
                         }
                     }
                 }
                 Task::none()
             }
-
             ModsMessage::ToggleLocal(mod_info) => {
                 self.loading = true;
-                let base_dir = base_dir.clone();
-                let channel = settings.channel.clone();
-                let ver = if settings.game_version == 0 {
+                let bd = base_dir.clone();
+                let ch = settings.channel.clone();
+                let v = if settings.game_version == 0 {
                     "latest".to_string()
                 } else {
                     settings.game_version.to_string()
                 };
-
                 Task::perform(
                     async move {
-                        crate::game::mods::toggle_mod(&base_dir, &channel, &ver, &mod_info)
-                            .await
-                            .unwrap();
+                        let _ = crate::game::mods::toggle_mod(&bd, &ch, &v, &mod_info).await;
                         Ok::<(), String>(())
                     },
                     |_| ModsMessage::RefreshLocalBackground,
                 )
             }
-
             ModsMessage::DeleteLocal(mod_info) => {
                 self.loading = true;
                 Task::perform(
@@ -198,43 +164,36 @@ impl ModsState {
                     |_| ModsMessage::RefreshLocalBackground,
                 )
             }
-
             ModsMessage::OpenFolder => {
-                let paths = crate::game::GamePaths::new(base_dir);
-                let ver = if settings.game_version == 0 {
-                    "latest".to_string()
+                let p = crate::game::GamePaths::new(base_dir);
+                let v = if settings.game_version == 0 {
+                    "latest"
                 } else {
-                    settings.game_version.to_string()
+                    &settings.game_version.to_string()
                 };
-                let mods_path = paths.mods_dir(&settings.channel, &ver);
-                crate::util::open_path(mods_path);
+                crate::util::open_path(p.mods_dir(&settings.channel, v));
                 Task::none()
             }
-
             ModsMessage::OpenPatchFolder => {
-                let paths = crate::game::GamePaths::new(base_dir);
-                let ver = if settings.game_version == 0 {
-                    "latest".to_string()
+                let p = crate::game::GamePaths::new(base_dir);
+                let v = if settings.game_version == 0 {
+                    "latest"
                 } else {
-                    settings.game_version.to_string()
+                    &settings.game_version.to_string()
                 };
-                let dir = paths.core_patches_dir(&settings.channel, &ver);
-                crate::util::open_path(dir);
+                crate::util::open_path(p.core_patches_dir(&settings.channel, v));
                 Task::none()
             }
-
             ModsMessage::OpenJarFolder => {
-                let paths = crate::game::GamePaths::new(base_dir);
-                let ver = if settings.game_version == 0 {
-                    "latest".to_string()
+                let p = crate::game::GamePaths::new(base_dir);
+                let v = if settings.game_version == 0 {
+                    "latest"
                 } else {
-                    settings.game_version.to_string()
+                    &settings.game_version.to_string()
                 };
-                let dir = paths.mods_dir(&settings.channel, &ver);
-                crate::util::open_path(dir);
+                crate::util::open_path(p.mods_dir(&settings.channel, v));
                 Task::none()
             }
-
             ModsMessage::SwitchTab(tab) => {
                 self.current_tab = tab;
                 if self.current_tab == ModTab::Browse && self.remote_mods.is_empty() {
@@ -242,15 +201,14 @@ impl ModsState {
                 }
                 Task::none()
             }
-            ModsMessage::SearchChanged(query) => {
-                self.search_query = query;
+            ModsMessage::SearchChanged(q) => {
+                self.search_query = q;
                 Task::none()
             }
             ModsMessage::SearchSubmit => {
                 self.current_page = 0;
                 self.perform_search(client)
             }
-
             ModsMessage::NextPage => {
                 if (self.current_page + 1) * self.page_size < self.total_results {
                     self.current_page += 1;
@@ -272,21 +230,21 @@ impl ModsState {
                         self.remote_mods = result.mods;
                         self.total_results = result.total_count;
                         self.error = None;
-
-                        // Cargar imágenes
                         let mut tasks = Vec::new();
-                        for mod_item in &self.remote_mods {
-                            if let Some(logo) = &mod_item.logo {
-                                if !self.thumbnails.contains_key(&mod_item.id) {
+                        for m in &self.remote_mods {
+                            if let Some(logo) = &m.logo {
+                                if !self.thumbnails.contains_key(&m.id) {
                                     let url = logo.thumbnail_url.clone();
-                                    let id = mod_item.id;
+                                    let id = m.id;
                                     let c = client.clone();
                                     tasks.push(Task::perform(
                                         async move {
-                                            let res =
+                                            (
+                                                id,
                                                 crate::util::image_cache::load_image(&c, &url)
-                                                    .await;
-                                            (id, res.map_err(|e| e.to_string()))
+                                                    .await
+                                                    .map_err(|e| e.to_string()),
+                                            )
                                         },
                                         |(id, res)| ModsMessage::ImageLoaded(id, res),
                                     ));
@@ -306,42 +264,34 @@ impl ModsState {
                 }
             }
             ModsMessage::ImageLoaded(id, res) => {
-                if let Ok(handle) = res {
-                    self.thumbnails.insert(id, handle);
+                if let Ok(h) = res {
+                    self.thumbnails.insert(id, h);
                 }
                 Task::none()
             }
             ModsMessage::InstallMod(cf_mod) => {
                 self.installing_ids.insert(cf_mod.id);
-                let mod_id = cf_mod.id;
-
+                let id = cf_mod.id;
                 if let Some(file) = cf_mod.latest_files.first() {
                     if let Some(url) = &file.download_url {
-                        let url_clone = url.clone();
-                        let file_name = file.file_name.clone();
-                        let base_dir_clone = base_dir.clone();
-
+                        let (uc, fnm, bdc) =
+                            (url.clone(), file.file_name.clone(), base_dir.clone());
                         return Task::perform(
                             async move {
-                                let channel = settings.channel.clone();
-                                let ver = if settings.game_version == 0 {
-                                    "latest".to_string()
-                                } else {
-                                    settings.game_version.to_string()
-                                };
-
-                                let (mods_dir, _) = crate::game::mods::ensure_mod_dirs(
-                                    &base_dir_clone,
-                                    &channel,
-                                    &ver,
-                                )
-                                .await;
-                                let dest = mods_dir.join(&file_name);
-
-                                // 1. Descargar
+                                let (c, v) = (
+                                    settings.channel.clone(),
+                                    if settings.game_version == 0 {
+                                        "latest".to_string()
+                                    } else {
+                                        settings.game_version.to_string()
+                                    },
+                                );
+                                let (md, _) =
+                                    crate::game::mods::ensure_mod_dirs(&bdc, &c, &v).await;
+                                let dest = md.join(&fnm);
                                 match crate::game::downloader::download_file(
                                     &client,
-                                    &url_clone,
+                                    &uc,
                                     &dest,
                                     |_, _| {},
                                     None,
@@ -349,135 +299,115 @@ impl ModsState {
                                 .await
                                 {
                                     Ok(_) => {
-                                        // 2. VALIDACIÓN: Chequear tamaño del archivo
-                                        if let Ok(metadata) = tokio::fs::metadata(&dest).await {
-                                            if metadata.len() == 0 {
+                                        if let Ok(m) = tokio::fs::metadata(&dest).await {
+                                            if m.len() == 0 {
                                                 let _ = tokio::fs::remove_file(&dest).await;
-                                                return Err("Downloaded file is empty (0 bytes)"
-                                                    .to_string());
+                                                return Err("Empty".to_string());
                                             }
                                         }
-                                        Ok(file_name)
+                                        Ok(fnm)
                                     }
                                     Err(e) => Err(e.to_string()),
                                 }
                             },
-                            move |res| ModsMessage::ModInstalled(res, mod_id),
+                            move |res| ModsMessage::ModInstalled(res, id),
                         );
                     }
                 }
-                self.installing_ids.remove(&mod_id);
-                self.error = Some("No download URL available".to_string());
+                self.installing_ids.remove(&id);
+                self.error = Some("No URL".to_string());
                 Task::none()
             }
             ModsMessage::OpenModPage(url) => {
                 let _ = open::that(url);
                 Task::none()
             }
-
-            ModsMessage::ModInstalled(res, mod_id) => {
-                self.installing_ids.remove(&mod_id);
+            ModsMessage::ModInstalled(res, id) => {
+                self.installing_ids.remove(&id);
                 match res {
-                    Ok(file_name) => {
-                        self.installed_ids.insert(mod_id);
-                        let base_dir_clone = base_dir.clone();
-                        let channel = settings.channel.clone();
-                        let ver = if settings.game_version == 0 {
-                            "latest".to_string()
-                        } else {
-                            settings.game_version.to_string()
-                        };
-
-                        // Comprobar si es un parche
-                        let (mods_dir, _) = tokio::task::block_in_place(|| {
+                    Ok(fnm) => {
+                        self.installed_ids.insert(id);
+                        let (bdc, sc, sv) = (
+                            base_dir.clone(),
+                            settings.channel.clone(),
+                            if settings.game_version == 0 {
+                                "latest".to_string()
+                            } else {
+                                settings.game_version.to_string()
+                            },
+                        );
+                        let (md, _) = tokio::task::block_in_place(|| {
                             futures::executor::block_on(crate::game::mods::ensure_mod_dirs(
-                                &base_dir_clone,
-                                &channel,
-                                &ver,
+                                &bdc, &sc, &sv,
                             ))
                         });
-                        let full_path = mods_dir.join(&file_name);
-
-                        if file_name.ends_with(".zip")
-                            && crate::game::zip_mods::is_patch_mod(&full_path)
-                        {
-                            Task::done(ModsMessage::InstallZipPatch(full_path, settings))
+                        let fp = md.join(&fnm);
+                        if fnm.ends_with(".zip") && crate::game::zip_mods::is_patch_mod(&fp) {
+                            Task::done(ModsMessage::InstallZipPatch(fp, settings))
                         } else {
                             Task::done(ModsMessage::RefreshLocalBackground)
                         }
                     }
                     Err(e) => {
-                        self.error = Some(format!("Install failed: {}", e));
+                        self.error = Some(format!("Failed: {}", e));
                         Task::none()
                     }
                 }
             }
-
-            ModsMessage::InstallZipPatch(zip_path, settings) => {
+            ModsMessage::InstallZipPatch(zp, s) => {
                 self.loading = true;
-                let base_dir = base_dir.clone();
-
+                let bd = base_dir.clone();
                 Task::perform(
                     async move {
-                        let paths = crate::game::GamePaths::new(base_dir);
-                        let channel = settings.channel.clone();
-                        let ver = if settings.game_version == 0 {
-                            "latest".to_string()
-                        } else {
-                            settings.game_version.to_string()
-                        };
-
-                        let game_dir = paths.version_dir(&channel, &ver);
-                        let patches_dir = paths.core_patches_dir(&channel, &ver);
-                        let mod_name = zip_path
+                        let p = crate::game::GamePaths::new(bd);
+                        let (c, v) = (
+                            s.channel.clone(),
+                            if s.game_version == 0 {
+                                "latest".to_string()
+                            } else {
+                                s.game_version.to_string()
+                            },
+                        );
+                        let (gd, pd) = (p.version_dir(&c, &v), p.core_patches_dir(&c, &v));
+                        let nm = zp
                             .file_stem()
                             .unwrap_or_default()
                             .to_string_lossy()
                             .to_string();
-                        let zip_path_to_clean = zip_path.clone();
-
+                        let zpc = zp.clone();
                         tokio::task::spawn_blocking(move || {
-                            crate::game::zip_mods::install_new_patch(
-                                zip_path,
-                                game_dir,
-                                patches_dir,
-                                mod_name,
-                            )
+                            crate::game::zip_mods::install_new_patch(zp, gd, pd, nm)
                         })
                         .await
                         .map_err(|e| e.to_string())?
                         .map_err(|e| e.to_string())?;
-
-                        let _ = tokio::fs::remove_file(zip_path_to_clean).await;
+                        let _ = tokio::fs::remove_file(zpc).await;
                         Ok(())
                     },
                     ModsMessage::PatchOperationFinished,
                 )
             }
-
-            ModsMessage::ToggleZipPatch(mod_id, enable) => {
+            ModsMessage::ToggleZipPatch(id, en) => {
                 self.loading = true;
-                let base_dir = base_dir.clone();
-                let settings = settings.clone();
-
+                let bd = base_dir.clone();
+                let s = settings.clone();
                 Task::perform(
                     async move {
-                        let paths = crate::game::GamePaths::new(base_dir);
-                        let channel = settings.channel;
-                        let ver = if settings.game_version == 0 {
-                            "latest".to_string()
-                        } else {
-                            settings.game_version.to_string()
-                        };
-
-                        let game_dir = paths.version_dir(&channel, &ver);
-                        let patches_dir = paths.core_patches_dir(&channel, &ver);
-
-                        tokio::task::spawn_blocking(move || {
-                            if enable {
-                                crate::game::zip_mods::enable_patch(game_dir, patches_dir, &mod_id)
+                        let p = crate::game::GamePaths::new(bd);
+                        let (c, v) = (
+                            s.channel,
+                            if s.game_version == 0 {
+                                "latest".to_string()
                             } else {
-                                crate::game::zip_mods::disable_patch(game_dir, patches_dir, &mod_id)
+                                s.game_version.to_string()
+                            },
+                        );
+                        let (gd, pd) = (p.version_dir(&c, &v), p.core_patches_dir(&c, &v));
+                        tokio::task::spawn_blocking(move || {
+                            if en {
+                                crate::game::zip_mods::enable_patch(gd, pd, &id)
+                            } else {
+                                crate::game::zip_mods::disable_patch(gd, pd, &id)
                             }
                         })
                         .await
@@ -487,41 +417,38 @@ impl ModsState {
                     ModsMessage::PatchOperationFinished,
                 )
             }
-
-            ModsMessage::UninstallZipPatch(mod_id, settings) => {
+            ModsMessage::UninstallZipPatch(id, s) => {
                 self.loading = true;
-                let base_dir = base_dir.clone();
-
+                let bd = base_dir.clone();
                 Task::perform(
                     async move {
-                        let paths = crate::game::GamePaths::new(base_dir);
-                        let channel = settings.channel.clone();
-                        let ver = if settings.game_version == 0 {
-                            "latest".to_string()
-                        } else {
-                            settings.game_version.to_string()
-                        };
-
-                        let game_dir = paths.version_dir(&channel, &ver);
-                        let patches_dir = paths.core_patches_dir(&channel, &ver);
-
+                        let p = crate::game::GamePaths::new(bd);
+                        let (c, v) = (
+                            s.channel.clone(),
+                            if s.game_version == 0 {
+                                "latest".to_string()
+                            } else {
+                                s.game_version.to_string()
+                            },
+                        );
+                        let (gd, pd) = (p.version_dir(&c, &v), p.core_patches_dir(&c, &v));
                         tokio::task::spawn_blocking(move || {
-                            crate::game::zip_mods::uninstall_patch(game_dir, patches_dir, &mod_id)
+                            crate::game::zip_mods::uninstall_patch(gd, pd, &id)
                         })
                         .await
                         .map_err(|e| e.to_string())?
-                        .map_err(|e| e.to_string())
+                        .map_err(|e| e.to_string())?;
+                        Ok(())
                     },
                     ModsMessage::PatchOperationFinished,
                 )
             }
-
             ModsMessage::PatchOperationFinished(res) => {
                 self.loading = false;
                 match res {
                     Ok(_) => Task::done(ModsMessage::RefreshLocalBackground),
                     Err(e) => {
-                        self.error = Some(format!("Patch operation failed: {}", e));
+                        self.error = Some(format!("Failed: {}", e));
                         Task::none()
                     }
                 }
@@ -529,45 +456,41 @@ impl ModsState {
         }
     }
 
-    fn load_mods_task(
-        &self,
-        base_dir: std::path::PathBuf,
-        settings: GameSettings,
-    ) -> Task<ModsMessage> {
-        let base_dir_clone = base_dir.clone();
-        let channel = settings.channel.clone();
-        let version_str = if settings.game_version == 0 {
-            "latest".to_string()
-        } else {
-            settings.game_version.to_string()
-        };
-
+    fn load_mods_task(&self, bd: std::path::PathBuf, s: GameSettings) -> Task<ModsMessage> {
+        let (bdc, c, v) = (
+            bd.clone(),
+            s.channel.clone(),
+            if s.game_version == 0 {
+                "latest".to_string()
+            } else {
+                s.game_version.to_string()
+            },
+        );
         Task::perform(
             async move {
-                let jars = crate::game::mods::list_mods(&base_dir_clone, &channel, &version_str)
+                let j = crate::game::mods::list_mods(&bdc, &c, &v)
                     .await
                     .map_err(|e| e.to_string())?;
-
-                let paths = crate::game::GamePaths::new(base_dir_clone);
-                let patches_dir = paths.core_patches_dir(&channel, &version_str);
-                let patches =
-                    crate::game::zip_mods::list_patches(patches_dir).map_err(|e| e.to_string())?;
-
-                Ok((jars, patches))
+                let p = crate::game::zip_mods::list_patches(
+                    crate::game::GamePaths::new(bdc).core_patches_dir(&c, &v),
+                )
+                .map_err(|e| e.to_string())?;
+                Ok((j, p))
             },
             |res| ModsMessage::ModsLoadedComplex(res),
         )
     }
 
-    fn perform_search(&mut self, client: reqwest::Client) -> Task<ModsMessage> {
+    fn perform_search(&mut self, cl: reqwest::Client) -> Task<ModsMessage> {
         self.loading = true;
-        let query = self.search_query.clone();
-        let idx = self.current_page * self.page_size;
-        let limit = self.page_size;
-
+        let (q, i, l) = (
+            self.search_query.clone(),
+            self.current_page * self.page_size,
+            self.page_size,
+        );
         Task::perform(
             async move {
-                crate::game::curseforge::search_mods(&client, &query, idx, limit)
+                crate::game::curseforge::search_mods(&cl, &q, i, l)
                     .await
                     .map_err(|e| e.to_string())
             },
@@ -578,80 +501,76 @@ impl ModsState {
     pub fn view<'a>(
         &'a self,
         loc: &'a crate::lang::Localization,
-        window_size: Size,
-    ) -> Element<'a, ModsMessage> {
-        let is_compact = window_size.width < 600.0;
-
-        // --- Header ---
-        let title = text("MOD MANAGER")
-            .size(if is_compact { 16 } else { 20 })
-            .font(iced::font::Font::MONOSPACE);
-        let close_btn = button(text(loc.t("common.close").to_string()).size(12))
+        ws: Size,
+        palette: &'a theme::Palette,
+    ) -> Element<'a, ModsMessage, Theme, Renderer> {
+        let is_c = ws.width < 600.0;
+        let c_btn = button(text(loc.t("common.close").to_string()).size(12))
             .on_press(ModsMessage::Close)
-            .style(theme::secondary_button_style)
-            .padding(if is_compact { 5 } else { 10 });
-
-        let header = row![title, Space::new().width(Length::Fill), close_btn]
-            .align_y(Alignment::Center)
-            .padding(if is_compact { 10 } else { 20 });
-
-        // --- Tabs ---
-        let tabs = row![
+            .style(move |t: &Theme, s| theme::secondary_button_style(palette, t, s))
+            .padding(if is_c { 5 } else { 10 });
+        let h = row![
+            text("MOD MANAGER")
+                .size(if is_c { 16 } else { 20 })
+                .font(iced::font::Font::MONOSPACE),
+            Space::new().width(Length::Fill),
+            c_btn
+        ]
+        .align_y(Alignment::Center)
+        .padding(if is_c { 10 } else { 20 });
+        let ts = row![
             tab_btn(
                 "INSTALLED",
                 self.current_tab == ModTab::Installed,
-                is_compact
+                is_c,
+                palette
             )
             .on_press(ModsMessage::SwitchTab(ModTab::Installed)),
-            tab_btn("BROWSE", self.current_tab == ModTab::Browse, is_compact)
-                .on_press(ModsMessage::SwitchTab(ModTab::Browse)),
+            tab_btn("BROWSE", self.current_tab == ModTab::Browse, is_c, palette)
+                .on_press(ModsMessage::SwitchTab(ModTab::Browse))
         ]
         .spacing(10)
-        .padding(if is_compact { 10 } else { 20 });
-
-        // --- Content ---
-        let content = match self.current_tab {
-            ModTab::Installed => self.view_installed(loc),
-            ModTab::Browse => self.view_browse(loc, is_compact),
+        .padding(if is_c { 10 } else { 20 });
+        let cnt = match self.current_tab {
+            ModTab::Installed => self.view_installed(loc, palette),
+            ModTab::Browse => self.view_browse(loc, is_c, palette),
         };
-
-        // Dimensiones dinámicas
-        let modal_width = if window_size.width < 850.0 {
-            Length::Fill
-        } else {
-            Length::Fixed(800.0)
-        };
-        let modal_height = if window_size.height < 650.0 {
-            Length::Fill
-        } else {
-            Length::Fixed(600.0)
-        };
-        let outer_padding = if is_compact { 5 } else { 0 };
-
+        let (mw, mh) = (
+            if ws.width < 850.0 {
+                Length::Fill
+            } else {
+                Length::Fixed(800.0)
+            },
+            if ws.height < 650.0 {
+                Length::Fill
+            } else {
+                Length::Fixed(600.0)
+            },
+        );
         container(column![
-            header,
-            tabs,
-            container(content)
-                .padding(if is_compact { 10 } else { 20 })
-                .height(Length::Fill),
+            h,
+            ts,
+            container(cnt)
+                .padding(if is_c { 10 } else { 20 })
+                .height(Length::Fill)
         ])
-        .width(modal_width)
-        .height(modal_height)
-        .padding(outer_padding)
-        .style(theme::modal_container)
+        .width(mw)
+        .height(mh)
+        .padding(if is_c { 5 } else { 0 })
+        .style(move |t: &Theme| theme::modal_container(palette, t))
         .into()
     }
 
     fn view_installed<'a>(
         &'a self,
         _loc: &'a crate::lang::Localization,
-    ) -> Element<'a, ModsMessage> {
-        // Si no hay nada en absoluto
+        palette: &'a theme::Palette,
+    ) -> Element<'a, ModsMessage, Theme, Renderer> {
         if self.installed_mods.is_empty() && self.patch_mods.is_empty() {
             return container(
                 text("No mods installed")
                     .size(16)
-                    .color(Color::from_rgb(0.7, 0.7, 0.7)),
+                    .color(palette.text_secondary),
             )
             .width(Length::Fill)
             .height(Length::Fill)
@@ -659,15 +578,12 @@ impl ModsState {
             .center_y(Length::Fill)
             .into();
         }
-
-        let mut content = column![].spacing(20);
-
-        // 1. SECCIÓN PARCHES (.zip) - Mostrar primero si existen
+        let mut c = column![].spacing(20);
         if !self.patch_mods.is_empty() {
-            let header = row![
+            let h = row![
                 text("CORE PATCHES (ZIP)")
                     .size(14)
-                    .color(theme::ACCENT_ORANGE)
+                    .color(palette.accent)
                     .font(iced::font::Font::MONOSPACE),
                 Space::new().width(Length::Fill),
                 button(
@@ -675,31 +591,27 @@ impl ModsState {
                         svg(util::icons::icon(util::icons::FOLDER))
                             .width(14)
                             .height(14)
-                            .style(theme::svg_accent),
+                            .style(move |t: &Theme, s| theme::svg_accent(palette, t, s)),
                         text("Open Folder").size(10)
                     ]
                     .spacing(5)
                     .align_y(Alignment::Center)
                 )
                 .on_press(ModsMessage::OpenPatchFolder)
-                .style(theme::secondary_button_style)
+                .style(move |t: &Theme, s| theme::secondary_button_style(palette, t, s))
                 .padding(5)
             ]
             .align_y(Alignment::Center);
-
-            let mut patch_list = column![header].spacing(10);
-
-            for patch in &self.patch_mods {
-                patch_list = patch_list.push(patch_row(patch, &self.temp_settings));
+            let mut pl = column![h].spacing(10);
+            for p in &self.patch_mods {
+                pl = pl.push(patch_row(p, &self.temp_settings, palette));
             }
-            content = content.push(patch_list);
+            c = c.push(pl);
         }
-
-        // 2. SECCIÓN MODS (.jar)
-        let header_jar = row![
+        let hj = row![
             text("MODS (JAR)")
                 .size(14)
-                .color(theme::ACCENT_ORANGE)
+                .color(palette.accent)
                 .font(iced::font::Font::MONOSPACE),
             Space::new().width(Length::Fill),
             button(
@@ -707,70 +619,59 @@ impl ModsState {
                     svg(util::icons::icon(util::icons::FOLDER))
                         .width(14)
                         .height(14)
-                        .style(theme::svg_accent),
+                        .style(move |t: &Theme, s| theme::svg_accent(palette, t, s)),
                     text("Open Folder").size(10)
                 ]
                 .spacing(5)
                 .align_y(Alignment::Center)
             )
             .on_press(ModsMessage::OpenJarFolder)
-            .style(theme::secondary_button_style)
+            .style(move |t: &Theme, s| theme::secondary_button_style(palette, t, s))
             .padding(5)
         ]
         .align_y(Alignment::Center);
-
-        let mut mod_list = column![header_jar].spacing(10);
-
+        let mut ml = column![hj].spacing(10);
         if !self.installed_mods.is_empty() {
             for m in &self.installed_mods {
-                mod_list = mod_list.push(mod_row(m));
+                ml = ml.push(mod_row(m, palette));
             }
         } else if self.patch_mods.is_empty() {
-            // Solo si no hay parches tampoco mostramos un texto placeholder
-            mod_list = mod_list.push(
+            ml = ml.push(
                 text("No JAR mods installed")
                     .size(12)
-                    .color(Color::from_rgb(0.5, 0.5, 0.5)),
+                    .color(palette.text_secondary),
             );
         }
-
-        content = content.push(mod_list);
-
+        c = c.push(ml);
         container(
-            scrollable(content)
+            scrollable(c)
                 .height(Length::Fill)
-                .style(theme::scrollable_style),
+                .style(move |t: &Theme, s| theme::scrollable_style(palette, t, s)),
         )
-        .padding(iced::Padding {
-            top: 0.0,
-            right: 0.0,
-            bottom: 0.0,
-            left: 0.0,
-        })
+        .padding(0)
         .into()
     }
 
     fn view_browse<'a>(
         &'a self,
         _loc: &'a crate::lang::Localization,
-        is_compact: bool,
-    ) -> Element<'a, ModsMessage> {
-        // Barra de búsqueda
-        let search_input = text_input("Search mods...", &self.search_query)
-            .on_input(ModsMessage::SearchChanged)
-            .on_submit(ModsMessage::SearchSubmit)
-            .padding(10)
-            .style(theme::text_input_style)
-            .width(Length::Fill);
-
-        let search_btn = button(text("Search").size(14))
-            .on_press(ModsMessage::SearchSubmit)
-            .style(theme::primary_button_style)
-            .padding(10);
-
-        let search_bar = row![search_input, search_btn].spacing(10);
-
-        let content: Element<'a, ModsMessage> = if self.loading {
+        is_c: bool,
+        palette: &'a theme::Palette,
+    ) -> Element<'a, ModsMessage, Theme, Renderer> {
+        let sb = row![
+            text_input("Search mods...", &self.search_query)
+                .on_input(ModsMessage::SearchChanged)
+                .on_submit(ModsMessage::SearchSubmit)
+                .padding(10)
+                .style(move |t: &Theme, s| theme::text_input_style(palette, t, s))
+                .width(Length::Fill),
+            button(text("Search").size(14))
+                .on_press(ModsMessage::SearchSubmit)
+                .style(move |t: &Theme, s| theme::primary_button_style(palette, t, s))
+                .padding(10)
+        ]
+        .spacing(10);
+        let c: Element<'a, ModsMessage, Theme, Renderer> = if self.loading {
             container(text("Loading...").size(20))
                 .center_x(Length::Fill)
                 .center_y(Length::Fill)
@@ -781,240 +682,227 @@ impl ModsState {
                 .center_x(Length::Fill)
                 .into()
         } else {
-            let list = column(
+            let l = column(
                 self.remote_mods
                     .iter()
-                    .map(|m| self.view_remote_card(m))
+                    .map(|m| self.view_remote_card(m, palette))
                     .collect::<Vec<_>>(),
             )
             .spacing(10);
-
             container(
-                scrollable(list)
+                scrollable(l)
                     .height(Length::Fill)
-                    .style(theme::scrollable_style),
+                    .style(move |t: &Theme, s| theme::scrollable_style(palette, t, s)),
             )
-            .padding(iced::Padding {
-                top: 0.0,
-                right: 0.0, // Small padding for the scrollbar itself, but not the 25.0 from before
-                bottom: 0.0,
-                left: 0.0,
-            })
+            .padding(0)
             .into()
         };
-
-        let prev_btn = button(text("< Prev").size(if is_compact { 12 } else { 14 }))
-            .style(theme::secondary_button_style)
-            .padding(if is_compact { 6 } else { 10 });
-
-        let prev_btn = if self.current_page > 0 {
-            prev_btn.on_press(ModsMessage::PrevPage)
+        let pr = button(text("< Prev").size(if is_c { 12 } else { 14 }))
+            .style(move |t: &Theme, s| theme::secondary_button_style(palette, t, s))
+            .padding(if is_c { 6 } else { 10 });
+        let pr = if self.current_page > 0 {
+            pr.on_press(ModsMessage::PrevPage)
         } else {
-            prev_btn // Sin on_press = disabled
+            pr
         };
-
-        // Paginación
-        let pagination = row![
-            prev_btn,
-            text(format!("Page {}", self.current_page + 1)).size(if is_compact { 12 } else { 14 }),
-            button(text("Next >").size(if is_compact { 12 } else { 14 }))
+        let pg = row![
+            pr,
+            text(format!("Page {}", self.current_page + 1)).size(if is_c { 12 } else { 14 }),
+            button(text("Next >").size(if is_c { 12 } else { 14 }))
                 .on_press(ModsMessage::NextPage)
-                .style(theme::secondary_button_style)
-                .padding(if is_compact { 6 } else { 10 }),
+                .style(move |t: &Theme, s| theme::secondary_button_style(palette, t, s))
+                .padding(if is_c { 6 } else { 10 })
         ]
-        .spacing(if is_compact { 10 } else { 20 })
+        .spacing(if is_c { 10 } else { 20 })
         .align_y(Alignment::Center)
         .width(Length::Fill);
-
-        column![search_bar, content, pagination].spacing(15).into()
+        column![sb, c, pg].spacing(15).into()
     }
 
     fn view_remote_card<'a>(
         &'a self,
-        cf_mod: &'a crate::game::curseforge::CfMod,
-    ) -> Element<'a, ModsMessage> {
-        let is_installing = self.installing_ids.contains(&cf_mod.id);
-        let is_installed = self.installed_ids.contains(&cf_mod.id);
-
-        let action_btn = if is_installing {
-            button(text("Downloading...").size(12)).style(theme::ghost_button_style)
-        } else if is_installed {
-            button(text("Installed").size(12)).style(theme::success_button_style)
+        cf: &'a CfMod,
+        palette: &'a theme::Palette,
+    ) -> Element<'a, ModsMessage, Theme, Renderer> {
+        let (isi, isin) = (
+            self.installing_ids.contains(&cf.id),
+            self.installed_ids.contains(&cf.id),
+        );
+        let ab = if isi {
+            button(text("Downloading...").size(12))
+                .style(move |t: &Theme, s| theme::ghost_button_style(palette, t, s))
+        } else if isin {
+            button(text("Installed").size(12))
+                .style(move |t: &Theme, s| theme::success_button_style(palette, t, s))
         } else {
             button(text("Install").size(12))
-                .on_press(ModsMessage::InstallMod(cf_mod.clone()))
-                .style(theme::primary_button_style)
+                .on_press(ModsMessage::InstallMod(cf.clone()))
+                .style(move |t: &Theme, s| theme::primary_button_style(palette, t, s))
         }
         .padding(8);
-
-        let thumb: Element<'a, ModsMessage> = if let Some(handle) = self.thumbnails.get(&cf_mod.id)
-        {
-            image(handle.clone())
-                .width(50)
-                .height(50)
-                .content_fit(ContentFit::Cover)
-                .into()
-        } else {
-            container(Space::new())
-                .width(50)
-                .height(50)
-                .style(|_t: &iced::Theme| container::Style {
-                    background: Some(iced::Background::Color(Color::from_rgb(0.2, 0.2, 0.2))),
-                    ..Default::default()
-                })
-                .into()
-        };
-
+        let th: Element<'a, ModsMessage, Theme, Renderer> =
+            if let Some(h) = self.thumbnails.get(&cf.id) {
+                image(h.clone())
+                    .width(50)
+                    .height(50)
+                    .content_fit(ContentFit::Cover)
+                    .into()
+            } else {
+                container(Space::new())
+                    .width(50)
+                    .height(50)
+                    .style(move |t: &Theme| theme::card_style(palette, t))
+                    .into()
+            };
         container(
             row![
-                thumb,
+                th,
                 column![
-                    text(&cf_mod.name).size(16).color(Color::WHITE),
-                    text(&cf_mod.summary)
+                    text(&cf.name).size(16).color(palette.text_primary),
+                    text(&cf.summary)
                         .size(12)
-                        .color(Color::from_rgb(0.7, 0.7, 0.7))
+                        .color(palette.text_secondary)
                         .width(Length::Fill),
-                    text(format!("Downloads: {:.0}", cf_mod.download_count))
+                    text(format!("Downloads: {:.0}", cf.download_count))
                         .size(10)
-                        .color(theme::ACCENT_ORANGE),
+                        .color(palette.accent)
                 ]
                 .spacing(4)
                 .width(Length::Fill),
-                action_btn
+                ab
             ]
             .spacing(15)
             .align_y(Alignment::Center),
         )
-        .padding(iced::Padding {
-            top: 10.0,
-            right: 20.0, // Extra separation for the button
-            bottom: 10.0,
-            left: 10.0,
-        })
-        .style(theme::card_style)
+        .padding(10)
+        .style(move |t: &Theme| theme::card_style(palette, t))
         .into()
     }
 }
 
-pub fn mod_row<'a>(mod_info: &'a ModInfo) -> Element<'a, ModsMessage> {
-    let status_color = if mod_info.enabled {
+pub fn mod_row<'a>(
+    mi: &'a ModInfo,
+    palette: &'a theme::Palette,
+) -> Element<'a, ModsMessage, Theme, Renderer> {
+    let sc = if mi.enabled {
         theme::ACCENT_GREEN
     } else {
-        Color::from_rgb(0.5, 0.5, 0.5)
+        palette.text_secondary
     };
-
-    let toggle_btn = if mod_info.enabled {
-        button(text("DISABLE")).style(theme::secondary_button_style)
+    let tb = if mi.enabled {
+        button(text("DISABLE"))
+            .style(move |t: &Theme, s| theme::secondary_button_style(palette, t, s))
     } else {
-        button(text("ENABLE")).style(theme::primary_button_style)
+        button(text("ENABLE")).style(move |t: &Theme, s| theme::primary_button_style(palette, t, s))
     }
-    .on_press(ModsMessage::ToggleLocal(mod_info.clone()));
-
-    use iced::widget::svg;
-    let delete_btn = button(
+    .on_press(ModsMessage::ToggleLocal(mi.clone()));
+    let db = button(
         svg(util::icons::icon(util::icons::TRASH))
             .width(14)
             .height(14)
-            .style(|_t, _s| iced::widget::svg::Style {
+            .style(|_, _| iced::widget::svg::Style {
                 color: Some(Color::BLACK),
             }),
     )
-    .on_press(ModsMessage::DeleteLocal(mod_info.clone()))
-    .style(theme::danger_button_style)
+    .on_press(ModsMessage::DeleteLocal(mi.clone()))
+    .style(move |t: &Theme, s| theme::danger_button_style(palette, t, s))
     .padding(8);
-
     container(
         row![
-            text(&mod_info.name).size(14).width(Length::Fill),
-            text(if mod_info.enabled {
-                "ACTIVE"
-            } else {
-                "DISABLED"
-            })
-            .size(12)
-            .color(status_color),
-            toggle_btn,
-            delete_btn
+            text(&mi.name).size(14).width(Length::Fill),
+            text(if mi.enabled { "ACTIVE" } else { "DISABLED" })
+                .size(12)
+                .color(sc),
+            tb,
+            db
         ]
         .spacing(10)
         .align_y(Alignment::Center),
     )
     .padding(10)
-    .style(theme::card_style)
+    .style(move |t: &Theme| theme::card_style(palette, t))
     .into()
 }
 
-// Helper para botones de tab
-fn tab_btn<'a>(label: &'a str, active: bool, compact: bool) -> button::Button<'a, ModsMessage> {
+fn tab_btn<'a>(
+    l: &'a str,
+    a: bool,
+    c: bool,
+    palette: &'a theme::Palette,
+) -> button::Button<'a, ModsMessage, Theme, Renderer> {
     button(
-        text(label)
-            .size(if compact { 10 } else { 12 })
+        text(l)
+            .size(if c { 10 } else { 12 })
             .align_x(iced::alignment::Horizontal::Center),
     )
     .width(Length::Fill)
-    .padding(if compact { 6 } else { 8 })
-    .style(if active {
-        theme::active_tab_style
-    } else {
-        theme::ghost_button_style
+    .padding(if c { 6 } else { 8 })
+    .style(move |t: &Theme, s| {
+        if a {
+            theme::active_tab_style(palette, t, s)
+        } else {
+            theme::ghost_button_style(palette, t, s)
+        }
     })
 }
-fn patch_row<'a>(patch: &'a PatchManifest, _curr: &GameSettings) -> Element<'a, ModsMessage> {
-    let status_color = if patch.enabled {
+
+fn patch_row<'a>(
+    p: &'a PatchManifest,
+    _curr: &'a GameSettings,
+    palette: &'a theme::Palette,
+) -> Element<'a, ModsMessage, Theme, Renderer> {
+    let sc = if p.enabled {
         theme::ACCENT_GREEN
     } else {
-        Color::from_rgb(0.5, 0.5, 0.5)
+        palette.text_secondary
     };
-
-    let toggle_btn = if patch.enabled {
+    let tb = if p.enabled {
         button(text("DISABLE"))
-            .style(theme::secondary_button_style)
-            .on_press(ModsMessage::ToggleZipPatch(patch.mod_id.clone(), false))
+            .style(move |t: &Theme, s| theme::secondary_button_style(palette, t, s))
+            .on_press(ModsMessage::ToggleZipPatch(p.mod_id.clone(), false))
     } else {
         button(text("ENABLE"))
-            .style(theme::primary_button_style)
-            .on_press(ModsMessage::ToggleZipPatch(patch.mod_id.clone(), true))
+            .style(move |t: &Theme, s| theme::primary_button_style(palette, t, s))
+            .on_press(ModsMessage::ToggleZipPatch(p.mod_id.clone(), true))
     };
-
-    let delete_btn = button(
+    let db = button(
         svg(util::icons::icon(util::icons::TRASH))
             .width(14)
             .height(14)
-            .style(|_t, _s| iced::widget::svg::Style {
+            .style(|_, _| iced::widget::svg::Style {
                 color: Some(Color::BLACK),
             }),
     )
     .on_press(ModsMessage::UninstallZipPatch(
-        patch.mod_id.clone(),
+        p.mod_id.clone(),
         _curr.clone(),
     ))
-    .style(theme::danger_button_style)
+    .style(move |t: &Theme, s| theme::danger_button_style(palette, t, s))
     .padding(5);
-
     container(
         row![
             text("📦").size(20),
             column![
-                text(&patch.mod_name).size(14),
+                text(&p.mod_name).size(14),
                 row![
-                    text(if patch.enabled { "ACTIVE" } else { "DISABLED" })
+                    text(if p.enabled { "ACTIVE" } else { "DISABLED" })
                         .size(10)
-                        .color(status_color),
+                        .color(sc),
                     text("|").size(10).color(Color::from_rgb(0.3, 0.3, 0.3)),
-                    text(patch.install_date.format("%Y-%m-%d").to_string())
+                    text(p.install_date.format("%Y-%m-%d").to_string())
                         .size(10)
-                        .color(Color::from_rgb(0.5, 0.5, 0.5))
+                        .color(palette.text_secondary)
                 ]
                 .spacing(5)
             ]
             .width(Length::Fill),
-            toggle_btn,
-            delete_btn
+            tb,
+            db
         ]
         .spacing(10)
         .align_y(Alignment::Center),
     )
     .padding(10)
-    .style(theme::card_style)
+    .style(move |t: &Theme| theme::card_style(palette, t))
     .into()
 }

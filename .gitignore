@@ -6,3 +6,4 @@ target/
 TODO.md
 *.exe
 *.rc
+.vscode/settings.json

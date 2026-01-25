@@ -315,6 +315,7 @@ struct RusTale {
     mods_state: ModsState,                  // Modal state
     local_server_stop_tx: Option<tokio::sync::oneshot::Sender<()>>,
     cancellation_token: Arc<AtomicBool>,
+    palette: theme::Palette,
 }
 
 impl RusTale {
@@ -378,7 +379,7 @@ impl RusTale {
                 settings: initial_settings.clone(),
                 status: LauncherStatus::Checking,
                 news_section: NewsSection::new(),
-                settings_state: SettingsState::new(initial_settings),
+                settings_state: SettingsState::new(initial_settings.clone()),
                 download_progress: 0.0,
                 sub_progress: 0.0,
                 status_text: "Initializing...".to_string(),
@@ -401,6 +402,7 @@ impl RusTale {
                 mods_state: ModsState::new(),
                 local_server_stop_tx: None,
                 cancellation_token: Arc::new(AtomicBool::new(false)),
+                palette: theme::generate_palette(&initial_settings.theme),
             },
             Task::batch(vec![
                 Task::done(Message::Initialize),
@@ -1029,6 +1031,7 @@ impl RusTale {
             Message::SaveSettings(new_settings) => {
                 let old_settings = self.settings.clone();
                 self.settings = new_settings.clone();
+                self.palette = crate::theme::generate_palette(&self.settings.theme);
                 let s = new_settings.clone();
 
                 // Reload paths in case bootstrap was changed
@@ -1082,8 +1085,12 @@ impl RusTale {
             ),
             Message::Settings(msg) => {
                 if let Some(m) = self.settings_state.update(msg) {
+                    self.palette =
+                        crate::theme::generate_palette(&self.settings_state.temp_settings.theme);
                     Task::done(m)
                 } else {
+                    self.palette =
+                        crate::theme::generate_palette(&self.settings_state.temp_settings.theme);
                     Task::none()
                 }
             }
@@ -1580,6 +1587,8 @@ impl RusTale {
     }
 
     fn view(&self) -> Element<'_, Message> {
+        let palette = &self.palette;
+
         let is_interaction_disabled = self.settings_state.is_open || self.mods_state.is_open;
 
         let left_column_content = column![
@@ -1589,6 +1598,7 @@ impl RusTale {
                 &self.editing_uuid,
                 self.profile_dropdown_open && !is_interaction_disabled,
                 &self.localization,
+                &palette,
             ),
             Space::new().height(Length::Fill),
             control_section::view(
@@ -1600,6 +1610,7 @@ impl RusTale {
                 &self.status_text,
                 &self.localization,
                 is_interaction_disabled,
+                &palette,
             ),
         ]
         .spacing(20);
@@ -1611,11 +1622,11 @@ impl RusTale {
                 .width(Length::FillPortion(1))
                 .height(Length::Fill)
                 .padding(30)
-                .style(theme::glass_container);
+                .style(move |t| theme::glass_container(&palette, t));
 
             let right_column = container(
                 self.news_section
-                    .view(&self.localization, is_interaction_disabled)
+                    .view(&self.localization, is_interaction_disabled, &palette)
                     .map(Message::News),
             )
             .width(Length::FillPortion(2))
@@ -1642,7 +1653,7 @@ impl RusTale {
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .padding(padding) // Padding dinámico
-                .style(theme::glass_container);
+                .style(move |t| theme::glass_container(&palette, t));
 
             // Centramos la columna si hay mucho espacio, o la llenamos si es pequeña
             if self.window_size.width > 500.0 {
@@ -1686,13 +1697,13 @@ impl RusTale {
         let overlay = if self.settings_state.is_open {
             Some(container(
                 self.settings_state
-                    .view(&self.localization, self.window_size)
+                    .view(&self.localization, self.window_size, &palette)
                     .map(Message::Settings),
             ))
         } else if self.mods_state.is_open {
             Some(container(
                 self.mods_state
-                    .view(&self.localization, self.window_size)
+                    .view(&self.localization, self.window_size, &palette)
                     .map(Message::Mods),
             ))
         } else {

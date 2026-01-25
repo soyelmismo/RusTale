@@ -86,6 +86,10 @@
         "jvm_args_placeholder": "JVM Args",
         "move_to": "Move to...",
         "open_folder": "Open Folder",
+        "theme": "Theme",
+        "theme_preset": "Color Preset",
+        "saturation": "Saturation",
+        "contrast": "Contrast",
         "save": "Save",
         "cancel": "Cancel"
     },

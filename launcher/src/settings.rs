@@ -8,6 +8,46 @@ use iced::widget::{
 use iced::{Alignment, Color, Element, Length, Size};
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum ThemePreset {
+    Rustale,
+    Crimson,
+    Emerald,
+    Sky,
+    Amethyst,
+    Custom,
+}
+
+impl ThemePreset {
+    pub fn color(&self) -> &'static str {
+        match self {
+            Self::Rustale => "#FFA845",
+            Self::Crimson => "#FF4545",
+            Self::Emerald => "#45FF88",
+            Self::Sky => "#45A8FF",
+            Self::Amethyst => "#A845FF",
+            Self::Custom => "",
+        }
+    }
+
+    pub fn all() -> Vec<ThemePreset> {
+        vec![
+            Self::Rustale,
+            Self::Crimson,
+            Self::Emerald,
+            Self::Sky,
+            Self::Amethyst,
+            Self::Custom,
+        ]
+    }
+}
+
+impl std::fmt::Display for ThemePreset {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Tab {
     Launcher,
     Game,
@@ -61,6 +101,11 @@ pub enum SettingsMessage {
     UpdateResult(Result<Option<crate::updater::ReleaseInfo>, String>),
     ResetUpdateStatus,
     WaitAndReset,
+    // Theme
+    ThemePresetSelected(ThemePreset),
+    ThemeHexChanged(String),
+    ThemeSaturationChanged(f32),
+    ThemeContrastChanged(f32),
     None,
 }
 
@@ -140,6 +185,7 @@ impl SettingsState {
         &'a self,
         localization: &'a crate::lang::Localization,
         _is_compact: bool, // Recibimos el parámetro
+        palette: &'a theme::Palette,
     ) -> Element<'a, SettingsMessage> {
         // --- Language Picker ---
         let selected_language = localization
@@ -157,13 +203,13 @@ impl SettingsState {
         .placeholder(localization.t("settings.language_placeholder"))
         .padding(10)
         .width(150)
-        .style(theme::pick_list_style)
-        .menu_style(theme::menu_style);
+        .style(move |t, status| theme::pick_list_style(palette, t, status))
+        .menu_style(move |t| theme::menu_style(palette, t));
 
         let news_checkbox = row![
             checkbox(self.temp_settings.enable_news)
                 .on_toggle(SettingsMessage::EnableNewsToggled)
-                .style(theme::checkbox_style),
+                .style(move |t, s| theme::checkbox_style(palette, t, s)),
             text(localization.t("settings.enable_news")).size(14),
         ]
         .spacing(10)
@@ -172,7 +218,7 @@ impl SettingsState {
         let minimize_tray_chk = row![
             checkbox(self.temp_settings.minimize_to_tray)
                 .on_toggle(SettingsMessage::ToggleMinimizeTray)
-                .style(theme::checkbox_style),
+                .style(move |t, s| theme::checkbox_style(palette, t, s)),
             text(localization.t("settings.minimize_to_tray")).size(14)
         ]
         .spacing(10)
@@ -181,7 +227,7 @@ impl SettingsState {
         let minimize_play_chk = row![
             checkbox(self.temp_settings.minimize_on_play)
                 .on_toggle(SettingsMessage::ToggleMinimizePlay)
-                .style(theme::checkbox_style),
+                .style(move |t, s| theme::checkbox_style(palette, t, s)),
             text(localization.t("settings.minimize_on_play")).size(14)
         ]
         .spacing(10)
@@ -190,7 +236,7 @@ impl SettingsState {
         let auto_update_chk = row![
             checkbox(self.temp_settings.enable_auto_update)
                 .on_toggle(SettingsMessage::AutoUpdateToggled)
-                .style(theme::checkbox_style),
+                .style(move |t, s| theme::checkbox_style(palette, t, s)),
             text(localization.t("settings.auto_update")).size(14),
         ]
         .spacing(10)
@@ -199,7 +245,7 @@ impl SettingsState {
         let quickplay_chk = row![
             checkbox(self.temp_settings.quickplay)
                 .on_toggle(SettingsMessage::QuickplayToggled)
-                .style(theme::checkbox_style),
+                .style(move |t, s| theme::checkbox_style(palette, t, s)),
             column![
                 text(localization.t("settings.quickplay")).size(14),
                 text(localization.t("settings.quickplay_desc"))
@@ -210,8 +256,69 @@ impl SettingsState {
         .spacing(10)
         .align_y(Alignment::Center);
 
+        // --- NUEVO: Tema Dinámico ---
+        let presets = ThemePreset::all();
+        let current_preset = presets
+            .iter()
+            .find(|p| p.color() == self.temp_settings.theme.accent_hex)
+            .cloned()
+            .unwrap_or(ThemePreset::Custom);
+
+        let theme_section = column![
+            section_title(localization.t("settings.theme"), palette),
+            row![
+                text(localization.t("settings.theme_preset"))
+                    .size(12)
+                    .width(100),
+                pick_list(
+                    presets,
+                    Some(current_preset),
+                    SettingsMessage::ThemePresetSelected
+                )
+                .width(150)
+                .style(move |t, s| theme::pick_list_style(palette, t, s))
+                .menu_style(move |t| theme::menu_style(palette, t))
+            ]
+            .spacing(10)
+            .align_y(Alignment::Center),
+            row![
+                text("Hex").size(12).width(100),
+                text_input("#RRGGBB", &self.temp_settings.theme.accent_hex)
+                    .on_input(SettingsMessage::ThemeHexChanged)
+                    .width(100)
+                    .style(move |t, s| theme::text_input_style(palette, t, s))
+            ]
+            .spacing(10)
+            .align_y(Alignment::Center),
+            // Saturación
+            column![
+                text(localization.t("settings.saturation")).size(12),
+                slider(
+                    0.0..=2.0,
+                    self.temp_settings.theme.saturation,
+                    SettingsMessage::ThemeSaturationChanged
+                )
+                .step(0.1)
+                .style(move |t, s| theme::slider_style(palette, t, s))
+            ]
+            .spacing(5),
+            // Contraste
+            column![
+                text(localization.t("settings.contrast")).size(12),
+                slider(
+                    0.5..=1.5,
+                    self.temp_settings.theme.contrast,
+                    SettingsMessage::ThemeContrastChanged
+                )
+                .step(0.1)
+                .style(move |t, s| theme::slider_style(palette, t, s))
+            ]
+            .spacing(5),
+        ]
+        .spacing(10);
+
         column![
-            section_title(localization.t("settings.tabs.launcher")),
+            section_title(localization.t("settings.tabs.launcher"), palette),
             column![
                 text(localization.t("settings.language"))
                     .size(12)
@@ -220,9 +327,11 @@ impl SettingsState {
             ]
             .spacing(5),
             Space::new().height(10),
+            theme_section,
+            Space::new().height(10),
             news_checkbox,
             auto_update_chk,
-            self.view_update_check_button(localization, _is_compact),
+            self.view_update_check_button(localization, _is_compact, palette),
             minimize_tray_chk,
             minimize_play_chk,
             quickplay_chk,
@@ -236,6 +345,7 @@ impl SettingsState {
         &'a self,
         localization: &'a crate::lang::Localization,
         is_compact: bool,
+        palette: &'a theme::Palette,
     ) -> Element<'a, SettingsMessage> {
         let content = match &self.update_btn_status {
             UpdateStatus::Idle => localization.t("settings.check_updates").to_string(),
@@ -247,7 +357,11 @@ impl SettingsState {
             UpdateStatus::Error(_) => localization.t("settings.check_failed").to_string(),
         };
 
-        let style = match &self.update_btn_status {
+        let style: fn(
+            &theme::Palette,
+            &iced::Theme,
+            iced::widget::button::Status,
+        ) -> iced::widget::button::Style = match &self.update_btn_status {
             UpdateStatus::Found(_) => theme::primary_button_style,
             UpdateStatus::Error(_) => theme::danger_button_style,
             _ => theme::secondary_button_style,
@@ -259,7 +373,7 @@ impl SettingsState {
                     svg(util::icons::icon(util::icons::REFRESH))
                         .width(14)
                         .height(14)
-                        .style(theme::svg_accent),
+                        .style(move |t, s| theme::svg_accent(palette, t, s)),
                     text(content).size(14)
                 ]
                 .spacing(8)
@@ -272,7 +386,7 @@ impl SettingsState {
             btn = btn.on_press(SettingsMessage::CheckForLauncherUpdates);
         }
 
-        btn.style(style)
+        btn.style(move |t, s| style(palette, t, s))
             .width(if is_compact {
                 Length::Fill
             } else {
@@ -286,37 +400,38 @@ impl SettingsState {
         &'a self,
         localization: &'a crate::lang::Localization,
         is_compact: bool,
+        palette: &'a theme::Palette,
     ) -> Element<'a, SettingsMessage> {
         // --- 1. Installation Path Selector ---
         let current_path_display = crate::config::get_app_dir().to_string_lossy().to_string();
 
         let path_selector = column![
-            section_title(localization.t("settings.install_path")),
+            section_title(localization.t("settings.install_path"), palette),
             row![
                 text_input(
                     localization.t("settings.game.path_field"),
                     &current_path_display
                 )
                 .size(14)
-                .style(theme::text_input_style)
+                .style(move |t, s| theme::text_input_style(palette, t, s))
                 .width(Length::Fill),
                 button(
                     row![
                         svg(util::icons::icon(util::icons::FOLDER))
                             .width(14)
                             .height(14)
-                            .style(theme::svg_accent),
+                            .style(move |t, s| theme::svg_accent(palette, t, s)),
                         text("Open").size(14)
                     ]
                     .spacing(5)
                     .align_y(Alignment::Center)
                 )
                 .on_press(SettingsMessage::OpenCurrentDataDir)
-                .style(theme::secondary_button_style)
+                .style(move |t, s| theme::secondary_button_style(palette, t, s))
                 .padding(10),
                 button(text("Move to...").size(14))
                     .on_press(SettingsMessage::PickMoveLocation)
-                    .style(theme::primary_button_style)
+                    .style(move |t, s| theme::primary_button_style(palette, t, s))
                     .padding(10),
                 Space::new().width(10)
             ]
@@ -344,8 +459,8 @@ impl SettingsState {
             } else {
                 Length::Fixed(150.0)
             })
-            .style(theme::pick_list_style)
-            .menu_style(theme::menu_style)
+            .style(move |t, s| theme::pick_list_style(palette, t, s))
+            .menu_style(move |t| theme::menu_style(palette, t))
         ]
         .spacing(5)
         .width(if is_compact {
@@ -424,8 +539,8 @@ impl SettingsState {
             } else {
                 Length::Fixed(150.0)
             })
-            .style(theme::pick_list_style)
-            .menu_style(theme::menu_style)
+            .style(move |t, s| theme::pick_list_style(palette, t, s))
+            .menu_style(move |t| theme::menu_style(palette, t))
         ]
         .spacing(5)
         .width(if is_compact {
@@ -448,13 +563,13 @@ impl SettingsState {
         .text_size(14)
         .padding(5)
         .width(150)
-        .style(theme::pick_list_style)
-        .menu_style(theme::menu_style);
+        .style(move |t, status| theme::pick_list_style(palette, t, status))
+        .menu_style(move |t| theme::menu_style(palette, t));
 
         let online_fix_checkbox = row![
             checkbox(self.temp_settings.enable_online_fix)
                 .on_toggle(SettingsMessage::EnableOnlineFixToggled)
-                .style(theme::checkbox_style),
+                .style(move |t, s| theme::checkbox_style(palette, t, s)),
             column![
                 text(localization.t("settings.enable_online_fix")).size(14),
                 text(localization.t("settings.online_fix_desc"))
@@ -498,7 +613,7 @@ impl SettingsState {
         };
 
         let game_config = column![
-            section_title(localization.t("settings.game_config")),
+            section_title(localization.t("settings.game_config"), palette),
             online_fix_section,
             Space::new().height(5),
             version_controls,
@@ -535,56 +650,60 @@ impl SettingsState {
                             button(
                                 container(
                                     svg(util::icons::icon(util::icons::FOLDER))
-                                        .style(theme::svg_accent),
+                                        .style(move |t, s| theme::svg_accent(palette, t, s)),
                                 )
                                 .center_x(Length::Fill)
                                 .center_y(Length::Fill)
                             )
                             .on_press(SettingsMessage::OpenVersionFolder(version_val))
-                            .style(theme::secondary_button_style),
+                            .style(move |t, s| theme::secondary_button_style(palette, t, s)),
                             Space::new().width(5),
                             button(
                                 container(
                                     svg(util::icons::icon(util::icons::WRENCH))
-                                        .style(theme::svg_accent),
+                                        .style(move |t, s| theme::svg_accent(palette, t, s)),
                                 )
                                 .center_x(Length::Fill)
                                 .center_y(Length::Fill)
                             )
                             .on_press(SettingsMessage::RepairVersion(version_val))
-                            .style(theme::secondary_button_style),
+                            .style(move |t, s| theme::secondary_button_style(palette, t, s)),
                             Space::new().width(5),
                             button(
                                 container(
                                     svg(util::icons::icon(util::icons::TRASH))
-                                        .style(theme::svg_accent),
+                                        .style(move |t, s| theme::svg_accent(palette, t, s)),
                                 )
                                 .center_x(Length::Fill)
                                 .center_y(Length::Fill)
                             )
                             .on_press(SettingsMessage::DeleteVersion(version_val))
-                            .style(theme::secondary_button_style),
+                            .style(move |t, s| theme::secondary_button_style(palette, t, s)),
                         ]
                         .align_y(Alignment::Center),
                     )
                     .padding(5)
-                    .style(theme::sidebar_style)
+                    .style(move |t| theme::sidebar_style(palette, t))
                     .width(Length::Fill)
                     .height(40),
                 );
             }
-            container(scrollable(list).height(120).style(theme::scrollable_style))
-                .padding(iced::Padding {
-                    top: 0.0,
-                    right: 10.0,
-                    bottom: 0.0,
-                    left: 0.0,
-                })
-                .into()
+            container(
+                scrollable(list)
+                    .height(120)
+                    .style(move |t, s| theme::scrollable_style(palette, t, s)),
+            )
+            .padding(iced::Padding {
+                top: 0.0,
+                right: 10.0,
+                bottom: 0.0,
+                left: 0.0,
+            })
+            .into()
         };
 
         let installed_manager = column![
-            section_title(localization.t("settings.storage.title")),
+            section_title(localization.t("settings.storage.title"), palette),
             text(localization.t("settings.storage.desc"))
                 .size(12)
                 .color(Color::from_rgb(0.5, 0.5, 0.5)),
@@ -741,6 +860,30 @@ impl SettingsState {
                 None
             }
             SettingsMessage::WaitAndReset => None,
+            SettingsMessage::ThemePresetSelected(preset) => {
+                if let ThemePreset::Custom = preset {
+                    // Do nothing, let them edit manually
+                } else {
+                    self.temp_settings.theme.accent_hex = preset.color().to_string();
+                    self.temp_settings.theme.saturation = 1.0;
+                    self.temp_settings.theme.contrast = 1.0;
+                }
+                None
+            }
+            SettingsMessage::ThemeHexChanged(val) => {
+                if val.len() <= 7 {
+                    self.temp_settings.theme.accent_hex = val;
+                }
+                None
+            }
+            SettingsMessage::ThemeSaturationChanged(val) => {
+                self.temp_settings.theme.saturation = val;
+                None
+            }
+            SettingsMessage::ThemeContrastChanged(val) => {
+                self.temp_settings.theme.contrast = val;
+                None
+            }
             SettingsMessage::None => None,
         }
     }
@@ -749,6 +892,7 @@ impl SettingsState {
         &'a self,
         localization: &'a crate::lang::Localization,
         window_size: Size,
+        palette: &'a theme::Palette,
     ) -> Element<'a, SettingsMessage> {
         // Detectar modo compacto
         let is_compact = window_size.width < 650.0;
@@ -760,48 +904,54 @@ impl SettingsState {
                 util::icons::SETTINGS,
                 Tab::Launcher,
                 &self.current_tab,
-                is_compact
+                is_compact,
+                palette,
             ),
             tab_button(
                 &localization.t("settings.tabs.game"),
                 util::icons::GAMEPAD,
                 Tab::Game,
                 &self.current_tab,
-                is_compact
+                is_compact,
+                palette,
             ),
             tab_button(
                 &localization.t("settings.tabs.video"),
                 util::icons::MONITOR,
                 Tab::Video,
                 &self.current_tab,
-                is_compact
+                is_compact,
+                palette,
             ),
             tab_button(
                 &localization.t("settings.tabs.java"),
                 util::icons::COFFEE,
                 Tab::Java,
                 &self.current_tab,
-                is_compact
+                is_compact,
+                palette,
             )
         ]
         .spacing(5)
         .width(tab_width);
 
         let content = match self.current_tab {
-            Tab::Launcher => self.view_launcher_tab(localization, is_compact),
-            Tab::Game => self.view_game_tab(localization, is_compact),
+            Tab::Launcher => self.view_launcher_tab(localization, is_compact, palette),
+            Tab::Game => self.view_game_tab(localization, is_compact, palette),
             Tab::Video => column![
-                section_title(localization.t("settings.display")),
+                section_title(localization.t("settings.display"), palette),
                 row![
                     input_group(
                         localization.t("settings.width"),
                         &self.temp_settings.width.to_string(),
-                        SettingsMessage::WidthChanged
+                        SettingsMessage::WidthChanged,
+                        palette
                     ),
                     input_group(
                         localization.t("settings.height"),
                         &self.temp_settings.height.to_string(),
-                        SettingsMessage::HeightChanged
+                        SettingsMessage::HeightChanged,
+                        palette
                     ),
                 ]
                 .spacing(20),
@@ -809,7 +959,7 @@ impl SettingsState {
                 row![
                     checkbox(self.temp_settings.fullscreen)
                         .on_toggle(SettingsMessage::FullscreenToggled)
-                        .style(theme::checkbox_style),
+                        .style(move |t, s| theme::checkbox_style(palette, t, s)),
                     text(localization.t("settings.fullscreen")).size(14)
                 ]
                 .spacing(10)
@@ -818,7 +968,7 @@ impl SettingsState {
             .spacing(15)
             .into(),
             Tab::Java => column![
-                section_title(localization.t("settings.java_memory")),
+                section_title(localization.t("settings.java_memory"), palette),
                 text(format!(
                     "{}: {} GB",
                     localization.t("settings.min"),
@@ -831,7 +981,7 @@ impl SettingsState {
                     SettingsMessage::MinMemoryChanged
                 )
                 .step(1.0)
-                .style(theme::slider_style),
+                .style(move |t, s| theme::slider_style(palette, t, s)),
                 Space::new().height(10),
                 text(format!(
                     "{}: {} GB",
@@ -845,16 +995,16 @@ impl SettingsState {
                     SettingsMessage::MaxMemoryChanged
                 )
                 .step(1.0)
-                .style(theme::slider_style),
+                .style(move |t, s| theme::slider_style(palette, t, s)),
                 Space::new().height(20),
-                section_title(localization.t("settings.jvm_args")),
+                section_title(localization.t("settings.jvm_args"), palette),
                 text_input(
                     localization.t("settings.jvm_args_placeholder"),
                     &self.temp_settings.java_args
                 )
                 .on_input(SettingsMessage::JavaArgsChanged)
                 .padding(10)
-                .style(theme::text_input_style),
+                .style(move |t, status| theme::text_input_style(palette, t, status)),
             ]
             .spacing(15)
             .into(),
@@ -863,12 +1013,12 @@ impl SettingsState {
         let footer = row![
             button(text(localization.t("settings.cancel")).size(14))
                 .on_press(SettingsMessage::CloseModal)
-                .style(theme::secondary_button_style)
+                .style(move |t, s| theme::secondary_button_style(palette, t, s))
                 .padding(10), // Reduced visible scaling by keeping padding reasonable but text small
             Space::new().width(10),
             button(text(localization.t("settings.save")).size(14))
                 .on_press(SettingsMessage::SaveSettings)
-                .style(theme::primary_button_style)
+                .style(move |t, status| theme::primary_button_style(palette, t, status))
                 .padding(10)
         ]
         .align_y(Alignment::Center)
@@ -896,39 +1046,47 @@ impl SettingsState {
             ]
             .padding(20),
             row![
-                container(tabs).padding(10).style(theme::sidebar_style),
-                container(scrollable(content).style(theme::scrollable_style))
-                    .padding(20)
-                    .width(Length::Fill),
+                container(tabs)
+                    .padding(10)
+                    .style(move |t| theme::sidebar_style(palette, t)),
+                container(
+                    scrollable(content)
+                        .style(move |t, status| theme::scrollable_style(palette, t, status))
+                )
+                .padding(20)
+                .width(Length::Fill),
             ]
             .height(Length::Fill),
-            container(footer).padding(10).style(theme::footer_style),
+            container(footer)
+                .padding(10)
+                .style(move |t| theme::footer_style(palette, t)),
         ])
         .width(modal_width)
         .height(modal_height)
         .padding(padding_outer)
-        .style(theme::modal_container)
+        .style(move |t| theme::modal_container(palette, t))
         .into()
     }
 }
 
 // Helpers que aceptan Strings y hacen to_string() para ser 'static
-fn tab_button(
+fn tab_button<'a>(
     label: &str,
     icon_data: &'static str,
     tab: Tab,
     current: &Tab,
     compact: bool,
-) -> Element<'static, SettingsMessage> {
+    palette: &'a theme::Palette,
+) -> Element<'a, SettingsMessage> {
     let is_active = tab == *current;
 
-    let content: Element<'static, SettingsMessage> = if compact {
+    let content: Element<'a, SettingsMessage> = if compact {
         // Solo icono, centrado
         row![
             svg(util::icons::icon(icon_data))
                 .width(16)
                 .height(16)
-                .style(theme::svg_accent),
+                .style(move |t, status| theme::svg_accent(palette, t, status)),
         ]
         .align_y(Alignment::Center)
         .padding(0)
@@ -939,7 +1097,7 @@ fn tab_button(
             svg(util::icons::icon(icon_data))
                 .width(16)
                 .height(16)
-                .style(theme::svg_accent),
+                .style(move |t, status| theme::svg_accent(palette, t, status)),
             text(label.to_string()).size(14)
         ]
         .spacing(10)
@@ -955,26 +1113,29 @@ fn tab_button(
     )
     .on_press(SettingsMessage::TabSelected(tab))
     .width(Length::Fill)
-    .style(if is_active {
-        theme::active_tab_style
-    } else {
-        theme::ghost_button_style
+    .style(move |t, status| {
+        if is_active {
+            theme::active_tab_style(palette, t, status)
+        } else {
+            theme::ghost_button_style(palette, t, status)
+        }
     })
     .into()
 }
 
-fn section_title(label: impl Into<String>) -> Element<'static, SettingsMessage> {
-    text(label.into())
-        .size(16)
-        .color(theme::ACCENT_ORANGE)
-        .into()
+fn section_title<'a>(
+    label: impl Into<String>,
+    palette: &'a theme::Palette,
+) -> Element<'a, SettingsMessage> {
+    text(label.into()).size(16).color(palette.accent).into()
 }
 
-fn input_group(
+fn input_group<'a>(
     label: impl Into<String>,
     value: &str,
     on_change: fn(String) -> SettingsMessage,
-) -> Element<'static, SettingsMessage> {
+    palette: &'a theme::Palette,
+) -> Element<'a, SettingsMessage> {
     column![
         text(label.into())
             .size(12)
@@ -982,7 +1143,7 @@ fn input_group(
         text_input("", value)
             .on_input(on_change)
             .padding(8)
-            .style(theme::text_input_style)
+            .style(move |t, status| theme::text_input_style(palette, t, status))
             .width(100)
     ]
     .spacing(5)

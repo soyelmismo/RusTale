@@ -2,7 +2,7 @@ use crate::config::GameSettings;
 use crate::game::LauncherStatus;
 use crate::{Message, theme, util};
 use iced::widget::{ProgressBar, Space, button, column, container, row, svg, text};
-use iced::{Alignment, Color, Element, Font, Length};
+use iced::{Alignment, Element, Font, Length};
 
 pub fn view<'a>(
     status: &'a LauncherStatus,
@@ -13,6 +13,7 @@ pub fn view<'a>(
     status_text: &'a str,
     localization: &'a crate::lang::Localization,
     is_disabled: bool,
+    palette: &'a theme::Palette,
 ) -> Element<'a, Message> {
     let play_button_text = match status {
         LauncherStatus::Playing => localization.t("launcher.stop"),
@@ -32,9 +33,9 @@ pub fn view<'a>(
 
     let is_long_text = play_button_text.len() > 9;
     let (font_size, icon_size, spacing_val) = if is_long_text {
-        (13, 16.0, 6) // Compact
+        (13, 16.0, 6)
     } else {
-        (16, 20.0, 10) // Normal
+        (16, 20.0, 10)
     };
 
     let version_display = if settings.game_version == 0 {
@@ -50,17 +51,17 @@ pub fn view<'a>(
         row![
             text(localization.t("launcher.info.channel"))
                 .size(10)
-                .color(Color::from_rgb(0.5, 0.5, 0.5)),
+                .color(palette.text_secondary),
             Space::new().width(Length::Fill),
-            text(&settings.channel).size(12).color(Color::WHITE),
+            text(&settings.channel).size(12).color(palette.text_primary)
         ]
         .width(Length::Fill),
         row![
             text(localization.t("launcher.info.version"))
                 .size(10)
-                .color(Color::from_rgb(0.5, 0.5, 0.5)),
+                .color(palette.text_secondary),
             Space::new().width(Length::Fill),
-            text(version_display).size(12).color(Color::WHITE),
+            text(version_display).size(12).color(palette.text_primary)
         ]
         .width(Length::Fill),
     ]
@@ -72,7 +73,7 @@ pub fn view<'a>(
                 svg(util::icons::icon(play_icon))
                     .width(icon_size)
                     .height(icon_size)
-                    .style(theme::svg_accent),
+                    .style(move |t, s| theme::svg_accent(palette, t, s)),
                 text(play_button_text)
                     .size(font_size + 4)
                     .font(Font::MONOSPACE)
@@ -86,81 +87,79 @@ pub fn view<'a>(
         .center_x(Length::Fill)
         .center_y(Length::Fill),
     )
-    .style(match status {
-        _ if is_disabled => theme::play_button_style,
-        LauncherStatus::Playing => theme::play_button_style_active,
-        LauncherStatus::Downloading | LauncherStatus::Migrating => theme::danger_button_style,
-        LauncherStatus::NeedsUpdate => theme::update_button_style,
-        _ => theme::play_button_style,
+    .style(move |t, bs| match status {
+        _ if is_disabled => theme::play_button_style(palette, t, bs),
+        LauncherStatus::Playing => theme::play_button_style_active(palette, t, bs),
+        LauncherStatus::Downloading | LauncherStatus::Migrating => {
+            theme::danger_button_style(palette, t, bs)
+        }
+        LauncherStatus::NeedsUpdate => theme::update_button_style(palette, t, bs),
+        _ => theme::play_button_style(palette, t, bs),
     })
     .width(Length::Fill)
-    .height(Length::Fill); // Llena la altura definida en el row 'actions'
+    .height(Length::Fill);
 
     if !is_disabled {
-        match status {
+        play_btn = match status {
             LauncherStatus::Downloading | LauncherStatus::Migrating => {
-                play_btn = play_btn.on_press(Message::CancelAction);
+                play_btn.on_press(Message::CancelAction)
             }
-            LauncherStatus::Checking | LauncherStatus::Busy => {
-                // BLOCKED
-            }
-            _ => {
-                play_btn = play_btn.on_press(Message::StartGame);
-            }
-        }
+            LauncherStatus::Checking | LauncherStatus::Busy => play_btn,
+            _ => play_btn.on_press(Message::StartGame),
+        };
     }
 
-    let mut settings_btn = button(
+    let settings_btn = button(
         container(
-            row![
-                svg(util::icons::icon(util::icons::SETTINGS))
-                    .width(18)
-                    .height(18)
-                    .style(theme::svg_accent)
-            ]
-            .spacing(10)
-            .align_y(Alignment::Center),
+            svg(util::icons::icon(util::icons::SETTINGS))
+                .width(18)
+                .height(18)
+                .style(move |t, s| theme::svg_accent(palette, t, s)),
         )
         .width(Length::Fill)
         .height(Length::Fill)
         .center_x(Length::Fill)
         .center_y(Length::Fill),
     )
-    .style(theme::secondary_button_style)
+    .style(move |t, s| theme::secondary_button_style(palette, t, s))
     .width(Length::Fill)
     .height(Length::Fill);
+    let settings_btn = if !is_disabled {
+        settings_btn.on_press(Message::OpenSettings)
+    } else {
+        settings_btn
+    };
 
-    if !is_disabled {
-        settings_btn = settings_btn.on_press(Message::OpenSettings);
-    }
-
-    let mut mods_btn = button(
+    let mods_btn = button(
         container(
             svg(util::icons::icon(util::icons::PUZZLE))
                 .width(18)
                 .height(18)
-                .style(theme::svg_accent),
+                .style(move |t, s| theme::svg_accent(palette, t, s)),
         )
         .width(Length::Fill)
         .height(Length::Fill)
         .center_x(Length::Fill)
         .center_y(Length::Fill),
     )
-    .style(theme::secondary_button_style)
+    .style(move |t, s| theme::secondary_button_style(palette, t, s))
     .width(Length::Fill)
     .height(Length::Fill);
-
-    if !is_disabled {
-        mods_btn = mods_btn.on_press(Message::Mods(
+    let mods_btn = if !is_disabled {
+        mods_btn.on_press(Message::Mods(
             crate::ui::mods_modal::ModsMessage::RefreshLocal,
-        ));
-    }
+        ))
+    } else {
+        mods_btn
+    };
 
-    let side_buttons = column![settings_btn, mods_btn].width(45).spacing(8);
+    let actions = row![
+        play_btn,
+        column![settings_btn, mods_btn].width(45).spacing(8)
+    ]
+    .spacing(10)
+    .height(90);
 
-    let actions = row![play_btn, side_buttons].spacing(10).height(90);
-
-    // --- ENSAMBLAJE FINAL ---
     column![
         info_section,
         if *status == LauncherStatus::Downloading || *status == LauncherStatus::Migrating {
@@ -173,18 +172,18 @@ pub fn view<'a>(
                             localization.t("launcher.status.general")
                         })
                         .size(11)
-                        .color(Color::from_rgb(0.7, 0.7, 0.7)),
+                        .color(palette.text_secondary),
                         Space::new().width(Length::Fill),
                         text(format!("{:.0}%", download_progress))
                             .size(11)
-                            .color(Color::WHITE),
+                            .color(palette.text_primary)
                     ],
                     container(
                         ProgressBar::new(0.0..=100.0, download_progress)
-                            .style(theme::orange_bar_style)
+                            .style(move |t| theme::orange_bar_style(palette, t))
                     )
                     .height(6)
-                    .width(Length::Fill),
+                    .width(Length::Fill)
                 ]
                 .spacing(3),
                 if *status == LauncherStatus::Migrating {
@@ -195,18 +194,18 @@ pub fn view<'a>(
                             row![
                                 text(localization.t("launcher.status.step"))
                                     .size(10)
-                                    .color(Color::from_rgb(0.5, 0.5, 0.5)),
+                                    .color(palette.text_secondary),
                                 Space::new().width(Length::Fill),
                                 text(format!("{:.0}%", sub_progress))
                                     .size(10)
-                                    .color(Color::from_rgb(0.8, 0.8, 0.8)),
+                                    .color(palette.text_secondary)
                             ],
                             container(
                                 ProgressBar::new(0.0..=100.0, sub_progress)
-                                    .style(theme::sub_bar_style)
+                                    .style(move |t| theme::sub_bar_style(palette, t))
                             )
                             .height(3)
-                            .width(Length::Fill),
+                            .width(Length::Fill)
                         ]
                         .spacing(2),
                     )
@@ -216,7 +215,7 @@ pub fn view<'a>(
         } else {
             column![]
         },
-        text(status_text).size(14).color(Color::WHITE),
+        text(status_text).size(14).color(palette.text_primary),
         actions
     ]
     .spacing(15)

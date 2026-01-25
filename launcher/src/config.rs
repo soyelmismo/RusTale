@@ -111,9 +111,34 @@ impl std::fmt::Display for OnlineFixMode {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct ThemeConfig {
+    pub accent_hex: String,
+    pub saturation: f32, // 0.0 to 2.0 (1.0 is default)
+    pub contrast: f32,   // 0.0 to 2.0 (1.0 is default)
+}
+
+impl Default for ThemeConfig {
+    fn default() -> Self {
+        Self {
+            accent_hex: "#FFA845".to_string(), // RusTale Orange
+            saturation: 1.0,
+            contrast: 1.0,
+        }
+    }
+}
+
+impl std::hash::Hash for ThemeConfig {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.accent_hex.hash(state);
+        ((self.saturation * 1000.0) as i32).hash(state);
+        ((self.contrast * 1000.0) as i32).hash(state);
+    }
+}
+
 // File: settings.toml
 // Added 'Hash' and 'Eq' to allow usage in Iced Subscriptions
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Hash)]
 #[serde(default)]
 pub struct GameSettings {
     #[serde(rename = "minMemory")]
@@ -148,6 +173,8 @@ pub struct GameSettings {
     pub quickplay: bool,
     #[serde(default = "default_true")]
     pub enable_auto_update: bool,
+    #[serde(default)]
+    pub theme: ThemeConfig,
 }
 
 fn default_lang() -> String {
@@ -178,6 +205,7 @@ impl Default for GameSettings {
             minimize_on_play: false,
             quickplay: false,
             enable_auto_update: true,
+            theme: ThemeConfig::default(),
         }
     }
 }
