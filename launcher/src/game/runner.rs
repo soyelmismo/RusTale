@@ -393,6 +393,46 @@ impl Recipe for Runner {
                     ]);
                 }
 
+                // --- PHASE 4.5: MODS SYNC ---
+                // Synchronize the current version's jar mods to UserData/mods
+                {
+                    let version_mods_src = paths.mods_dir(&settings.channel, &version_str);
+                    let global_mods_target = user_data_dir.join("mods");
+
+                    println!("[Runner] Syncing mods to UserData/mods...");
+
+                    // 1. Clean destination folder (avoid mixing mods from other versions)
+                    if global_mods_target.exists() {
+                        if let Err(e) = tokio::fs::remove_dir_all(&global_mods_target).await {
+                            eprintln!("[Runner] Warning: Failed to clean UserData/mods: {}", e);
+                        }
+                    }
+                    if let Err(e) = tokio::fs::create_dir_all(&global_mods_target).await {
+                        eprintln!("[Runner] Error creating UserData/mods: {}", e);
+                    }
+
+                    // 2. Copy enabled mods
+                    if version_mods_src.exists() {
+                        if let Ok(mut entries) = tokio::fs::read_dir(&version_mods_src).await {
+                            while let Ok(Some(entry)) = entries.next_entry().await {
+                                let path = entry.path();
+                                if path.is_file() {
+                                    if let Some(name) = path.file_name() {
+                                        let dest_path = global_mods_target.join(name);
+                                        // Simple copy
+                                        if let Err(e) = tokio::fs::copy(&path, &dest_path).await {
+                                            eprintln!(
+                                                "[Runner] Failed to copy mod {:?}: {}",
+                                                name, e
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // --- PHASE 5: LAUNCH ---
                 let _ = output.send(Message::GameLaunched(Ok(()))).await;
 
