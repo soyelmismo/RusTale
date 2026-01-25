@@ -40,19 +40,14 @@ pub async fn check_for_updates(client: &Client) -> Result<Option<ReleaseInfo>> {
     let release: ReleaseInfo = response.json().await?;
     let current_version = env!("CARGO_PKG_VERSION");
 
-    // Limpieza de versiones para comparación (v0.0.1 -> 0.0.1)
-    let remote_ver_str = release.tag_name.trim_start_matches('v');
-    let current_ver_str = current_version.trim_start_matches('v');
+    let remote_ver = release.tag_name.trim_start_matches('v');
 
     println!(
-        "[Updater] Local: {}, Remote: {}",
-        current_ver_str, remote_ver_str
+        "[Updater] Local: v{}, Remote: v{}",
+        current_version, remote_ver
     );
 
-    // Lógica simple: Si son diferentes y el remoto no es vacío, actualizamos.
-    // Esto permite que builds tipo "nightly-build-123" disparen actualización sobre "0.0.1".
-    if remote_ver_str != current_ver_str {
-        // Verificar que existe un asset para nuestro sistema operativo antes de notificar
+    if remote_ver != current_version {
         if get_asset_url(&release).is_some() {
             return Ok(Some(release));
         }
@@ -61,22 +56,20 @@ pub async fn check_for_updates(client: &Client) -> Result<Option<ReleaseInfo>> {
     Ok(None)
 }
 
-// Función auxiliar para obtener la URL correcta según el SO
 pub fn get_asset_url(info: &ReleaseInfo) -> Option<String> {
-    let target_substring = if cfg!(windows) {
-        "windows" // Buscaremos 'rustale-windows.exe'
+    let target = if cfg!(windows) {
+        "windows.exe"
     } else {
-        "linux" // Buscaremos 'rustale-linux'
+        "linux"
     };
 
     info.assets
         .iter()
-        .find(|a| a.name.to_lowercase().contains(target_substring))
+        .find(|a| a.name.to_lowercase().contains(target))
         .map(|a| a.browser_download_url.clone())
 }
 
 pub async fn perform_update(client: Client, asset_url: String) -> Result<()> {
-    // 1. Determine temporary file path
     let current_exe = env::current_exe()?;
     let current_dir = current_exe.parent().context("No parent dir")?;
 
@@ -87,69 +80,62 @@ pub async fn perform_update(client: Client, asset_url: String) -> Result<()> {
     };
     let temp_path = current_dir.join(temp_name);
 
-    // 2. Download
+    println!("[Updater] Downloading from: {}", asset_url);
+
     let response = client.get(&asset_url).send().await?;
     if !response.status().is_success() {
-        return Err(anyhow::anyhow!("Failed to download update"));
+        anyhow::bail!("Download failed: {}", response.status());
     }
 
     let content = response.bytes().await?;
     tokio::fs::write(&temp_path, content).await?;
 
-    // 3. Make executable on Unix
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if let Ok(file) = std::fs::File::open(&temp_path) {
-            let mut perms = file.metadata()?.permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(&temp_path, perms)?;
-        }
+        let file = std::fs::File::open(&temp_path)?;
+        let mut perms = file.metadata()?.permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&temp_path, perms)?;
     }
 
-    // 4. Spawn updater script/process
     spawn_update_process(&current_exe, &temp_path)?;
-
     Ok(())
 }
 
-fn spawn_update_process(current_exe: &Path, new_exe: &Path) -> Result<()> {
-    let current_exe_name = current_exe.file_name().unwrap().to_string_lossy();
-    let new_exe_name = new_exe.file_name().unwrap().to_string_lossy();
+fn spawn_update_process(current: &Path, new: &Path) -> Result<()> {
+    let cur_name = current.file_name().unwrap().to_string_lossy();
+    let new_name = new.file_name().unwrap().to_string_lossy();
 
     if cfg!(windows) {
-        // Windows: Script batch mejorado
-        // El ping es un truco para esperar (timeout no siempre está en PATH)
-        let script_content = format!(
+        // Script batch robusto con delay para Windows
+        let script = format!(
             "@echo off\r\n\
-             ping 127.0.0.1 -n 2 > nul\r\n\
+             timeout /t 1 /nobreak >nul\r\n\
              del /F \"{}\"\r\n\
              move /Y \"{}\" \"{}\"\r\n\
              start \"\" \"{}\"\r\n\
-             (goto) 2>nul & del \"%~f0\"\r\n",
-            current_exe_name, new_exe_name, current_exe_name, current_exe_name
+             del \"%~f0\"\r\n",
+            cur_name, new_name, cur_name, cur_name
         );
-
-        let script_path = current_exe.parent().unwrap().join("update_launcher.bat");
-        std::fs::write(&script_path, script_content)?;
+        let script_path = current.parent().unwrap().join("update.bat");
+        std::fs::write(&script_path, script)?;
 
         std::process::Command::new("cmd")
             .args(["/C", &script_path.to_string_lossy()])
             .spawn()?;
     } else {
-        // Linux: shell script
-        let script_content = format!(
+        // Script sh para Linux (permite sobrescribir binario en ejecución, pero mejor reiniciar)
+        let script = format!(
             "sleep 1; mv -f \"{}\" \"{}\"; \"{}\" &",
-            new_exe_name,
-            current_exe_name,
-            current_exe.to_string_lossy()
+            new_name,
+            cur_name,
+            current.to_string_lossy()
         );
-
         std::process::Command::new("sh")
             .arg("-c")
-            .arg(script_content)
+            .arg(script)
             .spawn()?;
     }
-
     Ok(())
 }

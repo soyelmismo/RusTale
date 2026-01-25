@@ -1,4 +1,4 @@
-name: Build & Release
+name: Build & Auto-Release
 
 on:
   push:
@@ -8,8 +8,13 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+permissions:
+  contents: write
+
 jobs:
-  # 1. Compilación para Windows
+  # ---------------------------------------------------
+  # 1. JOB DE COMPILACIÓN WINDOWS
+  # ---------------------------------------------------
   build-windows:
     runs-on: windows-latest
     steps:
@@ -24,25 +29,27 @@ jobs:
     - name: Build Release
       run: cargo build --release --verbose
 
-    - name: Prepare Artifacts
+    # Renombramos para que el updater lo detecte fácilmente
+    - name: Rename Binary
       run: |
         cd target/release
-        echo '.\rustale.exe --dedicated-server --online-mode=local --branch=release --game-version=5' > start_server.bat
-        Compress-Archive -Path rustale.exe, start_server.bat -DestinationPath rustale-windows.zip
+        mv rustale.exe RusTale-windows.exe
 
-    - name: Upload Windows Artifact
+    - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: rustale-windows
-        path: target/release/rustale-windows.zip
+        name: binary-windows
+        path: target/release/RusTale-windows.exe
 
-  # 2. Compilación para Linux
+  # ---------------------------------------------------
+  # 2. JOB DE COMPILACIÓN LINUX
+  # ---------------------------------------------------
   build-linux:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
 
-    - name: Install Dependencies
+    - name: Install System Dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y pkg-config libfreetype6-dev libexpat1-dev libxcb-composite0-dev libasound2-dev libglib2.0-dev libgtk-3-dev libxdo-dev
@@ -53,89 +60,88 @@ jobs:
     - name: Build Release
       run: cargo build --release --verbose
 
-    - name: Prepare Artifacts
+    # Renombramos el binario sin extensión
+    - name: Rename Binary
       run: |
         cd target/release
-        echo '#!/bin/bash' > start_server.sh
-        echo './rustale --dedicated-server --online-mode=local --branch=release --game-version=5' >> start_server.sh
-        chmod +x start_server.sh
-        
-        cp ../../scripts/install_deps.sh .
-        chmod +x install_deps.sh
+        mv rustale RusTale-linux
 
-        zip rustale-linux.zip rustale start_server.sh install_deps.sh
-
-    - name: Upload Linux Artifact
+    - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: rustale-linux
-        path: target/release/rustale-linux.zip
+        name: binary-linux
+        path: target/release/RusTale-linux
 
-  # 3. Crear Release y Changelog
+  # ---------------------------------------------------
+  # 3. JOB DE RELEASE Y CHANGELOG
+  # ---------------------------------------------------
   release:
     needs: [build-windows, build-linux]
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
     - uses: actions/checkout@v4
       with:
-        fetch-depth: 0 # Importante para el git log
+        fetch-depth: 0 # Necesario para leer el historial de git
 
-    - name: Download Windows Artifact
+    - name: Download Windows Binary
       uses: actions/download-artifact@v4
       with:
-        name: rustale-windows
-        path: artifacts
+        name: binary-windows
+        path: release_assets
 
-    - name: Download Linux Artifact
+    - name: Download Linux Binary
       uses: actions/download-artifact@v4
       with:
-        name: rustale-linux
-        path: artifacts
+        name: binary-linux
+        path: release_assets
 
+    # GENERACIÓN DE CHANGELOG
     - name: Generate Changelog
       id: changelog
       run: |
-        # Obtener el último tag para saber desde dónde listar commits
+        # Busca el último tag. Si no existe, usa el hash inicial.
         LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
         
-        echo "Generating changelog since $LAST_TAG"
+        echo "Generating changelog since: $LAST_TAG"
         
         if [ -z "$LAST_TAG" ]; then
-          # Si no hay tags, listar los últimos 10 commits
-          LOG=$(git log -n 10 --pretty=format:"- %s (%h)")
+          # Si es el primer release, toma los últimos 20 commits
+          CHANGES=$(git log --pretty=format:"- %s (%h)" -n 20)
         else
-          # Listar commits desde el último tag hasta HEAD
-          LOG=$(git log "$LAST_TAG"..HEAD --pretty=format:"- %s (%h)")
+          # Si hay tag previo, toma los cambios desde ese tag hasta HEAD
+          CHANGES=$(git log "$LAST_TAG"..HEAD --pretty=format:"- %s (%h)")
         fi
         
-        # Escapar saltos de línea para GitHub Actions output
-        echo "changelog<<EOF" >> $GITHUB_OUTPUT
-        echo "$LOG" >> $GITHUB_OUTPUT
+        # Guardar en output multilinea para el siguiente paso
+        echo "changes<<EOF" >> $GITHUB_OUTPUT
+        echo "$CHANGES" >> $GITHUB_OUTPUT
         echo "EOF" >> $GITHUB_OUTPUT
 
-    - name: Create Tag Name
+    # GENERACIÓN DE VERSIÓN (Fecha + Hash Corto)
+    - name: Generate Version Tag
       id: tagger
       run: |
-        # Generar versión basada en fecha y short-sha para que sea única
         DATE=$(date +'%Y.%m.%d')
         SHA=$(git rev-parse --short HEAD)
-        echo "tag_name=v$DATE-$SHA" >> $GITHUB_OUTPUT
+        TAG="v$DATE-$SHA"
+        echo "tag=$TAG" >> $GITHUB_OUTPUT
 
-    - name: Create Release
+    - name: Publish GitHub Release
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: ${{ steps.tagger.outputs.tag_name }}
-        name: RusTale Build ${{ steps.tagger.outputs.tag_name }}
+        tag_name: ${{ steps.tagger.outputs.tag }}
+        name: Build ${{ steps.tagger.outputs.tag }}
         body: |
-          ## 🚀 Auto-generated Release
+          ## 🚀 New Update
           
           **Changelog:**
-          ${{ steps.changelog.outputs.changelog }}
+          ${{ steps.changelog.outputs.changes }}
+          
+          ---
+          *Auto-generated by RusTale CI*
         files: |
-          artifacts/rustale-windows.zip
-          artifacts/rustale-linux.zip
+          release_assets/RusTale-windows.exe
+          release_assets/RusTale-linux
         token: ${{ secrets.GITHUB_TOKEN }}
         prerelease: false
         make_latest: true

@@ -61,20 +61,32 @@ pub fn launch_game(
         cmd.env(key, value);
     }
 
-    // Set SDL video driver for Wayland on Linux
     #[cfg(target_os = "linux")]
     {
+        // 1. SDL Video Driver (Wayland/X11)
         if is_wayland() {
             cmd.env("SDL_VIDEODRIVER", "wayland");
         }
+
+        if let Some(parent) = executable_path.parent() {
+            let current_ld_path = std::env::var("LD_LIBRARY_PATH").unwrap_or_default();
+
+            let new_ld_path = format!(
+                "{}:{}:{}",
+                parent.to_string_lossy(),
+                game_working_dir.to_string_lossy(),
+                current_ld_path
+            );
+
+            cmd.env("LD_LIBRARY_PATH", new_ld_path);
+            println!("[Linux] Injected LD_LIBRARY_PATH fixes.");
+        }
     }
 
-    // Spawn the process
-    cmd.kill_on_drop(true) // Force game closure if launcher closes
+    cmd.kill_on_drop(true)
         .spawn()
         .context("Failed to start game process")
 }
-
 #[cfg(target_os = "linux")]
 fn is_wayland() -> bool {
     std::env::var("WAYLAND_DISPLAY").is_ok()
