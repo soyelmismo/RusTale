@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use tokio::fs;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -24,7 +23,7 @@ impl Default for ServerConfig {
 }
 
 pub async fn load_or_create(args: &crate::Args) -> ServerConfig {
-    let path = PathBuf::from("server_config.toml");
+    let path = crate::config::get_server_root_dir().join("server_config.toml");
 
     // 1. Cargar existente
     let mut config = if path.exists() {

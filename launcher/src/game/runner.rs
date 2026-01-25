@@ -209,8 +209,12 @@ impl Recipe for Runner {
                 if settings.enable_online_fix {
                     auth_mode = "authenticated".to_string();
 
-                    // Write the port to a file for the proxy
-                    let port_file = user_data_dir.join("server.port");
+                    let server_root_dir = crate::config::get_server_root_dir();
+                    if !server_root_dir.exists() {
+                        let _ = std::fs::create_dir_all(&server_root_dir);
+                    }
+
+                    let port_file = server_root_dir.join("server.port");
                     if let Ok(mut f) = std::fs::File::create(&port_file) {
                         let _ = write!(f, "{}", server_port);
                     }
@@ -403,14 +407,8 @@ impl Recipe for Runner {
                     // --- NEW: Pass the port to Aurora ---
                     // Aurora will read this to know how to replace the string
                     envs.insert("AURORA_PORT".to_string(), server_port.to_string());
-                    let logs_dir = base_dir.join("logs");
-                    envs.insert(
-                        "RUSTALE_LOGS_DIR".to_string(),
-                        logs_dir.to_string_lossy().to_string(),
-                    );
 
-                    // Pass the logs dir to Aurora
-                    let logs_dir = user_data_dir.join("logs");
+                    let logs_dir = base_dir.join("logs");
                     if !logs_dir.exists() {
                         let _ = std::fs::create_dir_all(&logs_dir);
                     }

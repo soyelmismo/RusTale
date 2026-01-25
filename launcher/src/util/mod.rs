@@ -68,10 +68,12 @@ pub fn find_free_port() -> u16 {
 }
 
 pub fn get_saved_port() -> u16 {
+    let server_root = crate::config::get_server_root_dir();
+    let primary_path = server_root.join("server.port");
+
     let possible_paths = vec![
-        crate::config::get_server_root_dir().join("server.port"), // Nueva ruta principal
+        primary_path,
         crate::config::get_app_dir().join("server.port"),
-        std::path::PathBuf::from("../../UserData/server.port"),
         std::path::PathBuf::from("server.port"),
     ];
 
@@ -84,6 +86,7 @@ pub fn get_saved_port() -> u16 {
             }
         }
     }
+
     59313
 }
 

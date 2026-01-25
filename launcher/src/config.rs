@@ -189,9 +189,13 @@ pub struct LauncherConfig {
     pub data_dir: Option<PathBuf>,
 }
 
-fn get_bootstrap_path() -> PathBuf {
-    if let Some(proj_dirs) = directories::ProjectDirs::from("com", "soyelmismo", "RusTale") {
-        return proj_dirs.config_local_dir().join("launcher.toml");
+pub fn get_bootstrap_path() -> PathBuf {
+    if let Some(base_dirs) = directories::BaseDirs::new() {
+        let config_dir = base_dirs.config_dir().join("RusTale");
+        if !config_dir.exists() {
+            let _ = std::fs::create_dir_all(&config_dir);
+        }
+        return config_dir.join("launcher.toml");
     }
     PathBuf::from("launcher.toml")
 }
@@ -209,17 +213,14 @@ pub fn get_app_dir() -> PathBuf {
         }
     }
 
-    let default_path = if let Some(base_dirs) = directories::BaseDirs::new() {
+    if let Some(base_dirs) = directories::BaseDirs::new() {
         base_dirs.config_dir().join("RusTale")
     } else if let Ok(mut exe_path) = std::env::current_exe() {
         exe_path.pop();
         exe_path.join("RusTale_Data")
     } else {
         PathBuf::from("C:\\RusTale")
-    };
-
-    let _ = save_bootstrap_path(&default_path);
-    default_path
+    }
 }
 
 pub fn get_server_root_dir() -> PathBuf {
