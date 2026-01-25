@@ -573,9 +573,13 @@ impl SettingsState {
                     .height(40),
                 );
             }
-            scrollable(list)
-                .height(120)
-                .style(theme::scrollable_style)
+            container(scrollable(list).height(120).style(theme::scrollable_style))
+                .padding(iced::Padding {
+                    top: 0.0,
+                    right: 10.0,
+                    bottom: 0.0,
+                    left: 0.0,
+                })
                 .into()
         };
 

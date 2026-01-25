@@ -736,14 +736,18 @@ impl ModsState {
 
         content = content.push(mod_list);
 
-        container(scrollable(content).height(Length::Fill))
-            .padding(iced::Padding {
-                top: 0.0,
-                right: 15.0,
-                bottom: 0.0,
-                left: 0.0,
-            })
-            .into()
+        container(
+            scrollable(content)
+                .height(Length::Fill)
+                .style(theme::scrollable_style),
+        )
+        .padding(iced::Padding {
+            top: 0.0,
+            right: 0.0,
+            bottom: 0.0,
+            left: 0.0,
+        })
+        .into()
     }
 
     fn view_browse<'a>(
@@ -784,14 +788,19 @@ impl ModsState {
                     .collect::<Vec<_>>(),
             )
             .spacing(10);
-            container(scrollable(list).height(Length::Fill))
-                .padding(iced::Padding {
-                    top: 0.0,
-                    right: 15.0,
-                    bottom: 0.0,
-                    left: 0.0,
-                })
-                .into()
+
+            container(
+                scrollable(list)
+                    .height(Length::Fill)
+                    .style(theme::scrollable_style),
+            )
+            .padding(iced::Padding {
+                top: 0.0,
+                right: 0.0, // Small padding for the scrollbar itself, but not the 25.0 from before
+                bottom: 0.0,
+                left: 0.0,
+            })
+            .into()
         };
 
         let prev_btn = button(text("< Prev").size(if is_compact { 12 } else { 14 }))
@@ -876,7 +885,12 @@ impl ModsState {
             .spacing(15)
             .align_y(Alignment::Center),
         )
-        .padding(10)
+        .padding(iced::Padding {
+            top: 10.0,
+            right: 20.0, // Extra separation for the button
+            bottom: 10.0,
+            left: 10.0,
+        })
         .style(theme::card_style)
         .into()
     }
@@ -901,7 +915,9 @@ pub fn mod_row<'a>(mod_info: &'a ModInfo) -> Element<'a, ModsMessage> {
         svg(util::icons::icon(util::icons::TRASH))
             .width(14)
             .height(14)
-            .style(theme::svg_accent),
+            .style(|_t, _s| iced::widget::svg::Style {
+                color: Some(Color::BLACK),
+            }),
     )
     .on_press(ModsMessage::DeleteLocal(mod_info.clone()))
     .style(theme::danger_button_style)
@@ -964,7 +980,9 @@ fn patch_row<'a>(patch: &'a PatchManifest, _curr: &GameSettings) -> Element<'a, 
         svg(util::icons::icon(util::icons::TRASH))
             .width(14)
             .height(14)
-            .style(theme::svg_accent),
+            .style(|_t, _s| iced::widget::svg::Style {
+                color: Some(Color::BLACK),
+            }),
     )
     .on_press(ModsMessage::UninstallZipPatch(
         patch.mod_id.clone(),
