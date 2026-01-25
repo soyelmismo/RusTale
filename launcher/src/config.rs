@@ -190,6 +190,16 @@ pub struct LauncherConfig {
 }
 
 pub fn get_bootstrap_path() -> PathBuf {
+    // 1. Search launcher.toml next to the executable (Portable / Server Mode)
+    if let Ok(mut exe_path) = std::env::current_exe() {
+        exe_path.pop(); // Remove the exe name
+        let local_config = exe_path.join("launcher.toml");
+        if local_config.exists() {
+            return local_config;
+        }
+    }
+
+    // 2. DEFAULT
     if let Some(base_dirs) = directories::BaseDirs::new() {
         let config_dir = base_dirs.config_dir().join("RusTale");
         if !config_dir.exists() {
@@ -197,12 +207,20 @@ pub fn get_bootstrap_path() -> PathBuf {
         }
         return config_dir.join("launcher.toml");
     }
+
+    // Fallback
     PathBuf::from("launcher.toml")
 }
 
 pub fn get_app_dir() -> PathBuf {
+    // 0. MAXIMUM PRIORITY: Environment variable (Useful for server scripts or docker)
+    if let Ok(env_dir) = std::env::var("RUSTALE_DATA_DIR") {
+        return PathBuf::from(env_dir);
+    }
+
     let bootstrap_path = get_bootstrap_path();
 
+    // 1. If launcher.toml exists (either local or in AppData), we read it
     if bootstrap_path.exists() {
         if let Ok(content) = std::fs::read_to_string(&bootstrap_path) {
             if let Ok(cfg) = toml::from_str::<LauncherConfig>(&content) {
@@ -213,6 +231,22 @@ pub fn get_app_dir() -> PathBuf {
         }
     }
 
+    // 2. If no configuration exists, we decide the default:
+    // If we are in the user's folder (appdata), we use that.
+    // BUT, if we want default portable behavior for the server,
+    // we could check if "server_config.toml" exists locally.
+
+    if let Ok(mut exe_path) = std::env::current_exe() {
+        exe_path.pop();
+        // If we detect a local server config, we stay here
+        if exe_path.join("server_config.toml").exists()
+            || exe_path.join("start_server.bat").exists()
+        {
+            return exe_path;
+        }
+    }
+
+    // 3. Fallback to standard system (Client normal)
     if let Some(base_dirs) = directories::BaseDirs::new() {
         base_dirs.config_dir().join("RusTale")
     } else if let Ok(mut exe_path) = std::env::current_exe() {
