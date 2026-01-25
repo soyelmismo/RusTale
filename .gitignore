@@ -4,3 +4,5 @@ target/
 *.txt
 *.log
 TODO.md
+*.exe
+*.rc

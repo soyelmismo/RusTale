@@ -8,6 +8,7 @@ pub struct ServerConfig {
     pub game_version: String, // "latest", "5", "12", etc.
     pub server_args: String,
     pub java_exec_args: String,
+    pub tunnel_provider: Option<String>,
 }
 
 impl Default for ServerConfig {
@@ -18,6 +19,7 @@ impl Default for ServerConfig {
             game_version: "latest".to_string(),
             java_exec_args: "-Xms1G -Xmx4G -XX:+UseG1GC".to_string(),
             server_args: "--auth-mode insecure --assets Assets.zip".to_string(),
+            tunnel_provider: None,
         }
     }
 }
@@ -50,6 +52,9 @@ pub async fn load_or_create(args: &crate::Args) -> ServerConfig {
     }
     if let Some(a) = &args.server_args {
         config.server_args = a.clone();
+    }
+    if let Some(t) = &args.tunnel {
+        config.tunnel_provider = Some(t.clone());
     }
 
     // 3. Guardar cambios inmediatamente para "inicio rápido" futuro

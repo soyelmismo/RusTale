@@ -205,6 +205,25 @@ pub async fn run_server_flow(config: ServerConfig) -> Result<()> {
 
     crate::util::make_executable(&PathBuf::from(&java_exec)).await?;
 
+    // -----------------------------------------------------------------------
+    // INICIAR TÚNEL (Si está configurado)
+    // -----------------------------------------------------------------------
+    if let Some(provider) = &config.tunnel_provider {
+        if provider == "playit" {
+            let root_clone = root_dir.clone();
+            let client_clone = client.clone();
+
+            // Lanzamos el túnel en background, vivirá tanto como el proceso principal
+            tokio::spawn(async move {
+                if let Err(e) =
+                    crate::server::tunnel::start_playit(&root_clone, &client_clone).await
+                {
+                    eprintln!("Tunnel Error: {}", e);
+                }
+            });
+        }
+    }
+
     // 6. Ejecutar
     println!("[5/5] Launching Server on port 5520!");
     println!("---------------------------------------------------");

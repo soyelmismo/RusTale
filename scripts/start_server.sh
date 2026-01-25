@@ -3,7 +3,7 @@
 SCRIPTPATH=$(readlink -f "$0")
 DIR=$(dirname "$SCRIPTPATH")
 EXE="./rustale"
-ARGS="--dedicated-server --online-mode=local --branch=release --game-version=5"
+ARGS="--dedicated-server --online-mode=local --branch=release --game-version=5 --tunnel playit"
 
 FINAL_CMD="cd '$DIR' && $EXE $ARGS"
 

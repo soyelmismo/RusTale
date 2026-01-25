@@ -70,6 +70,10 @@ pub struct Args {
     /// Java Exec Args
     #[arg(long)]
     java_exec_args: Option<String>,
+
+    /// Tunnel Provider
+    #[arg(long)]
+    tunnel: Option<String>,
 }
 
 // Add this function to detect if we are the proxy
