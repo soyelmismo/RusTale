@@ -11,6 +11,7 @@ pub fn view<'a>(
     sub_progress: f32,
     status_text: &'a str,
     localization: &'a crate::lang::Localization,
+    is_disabled: bool,
 ) -> Element<'a, Message> {
     let play_button_text = match status {
         LauncherStatus::Playing => localization.t("launcher.stop"),
@@ -45,6 +46,7 @@ pub fn view<'a>(
         .center_y(Length::Fill),
     )
     .style(match status {
+        _ if is_disabled => theme::play_button_style,
         LauncherStatus::Playing => theme::play_button_style_active,
         LauncherStatus::NeedsUpdate => theme::update_button_style,
         _ => theme::play_button_style,
@@ -52,17 +54,19 @@ pub fn view<'a>(
     .width(Length::Fill)
     .height(50);
 
-    if !matches!(
-        status,
-        LauncherStatus::Downloading
-            | LauncherStatus::Checking
-            | LauncherStatus::Busy
-            | LauncherStatus::Migrating
-    ) {
+    if !is_disabled
+        && !matches!(
+            status,
+            LauncherStatus::Downloading
+                | LauncherStatus::Checking
+                | LauncherStatus::Busy
+                | LauncherStatus::Migrating
+        )
+    {
         play_btn = play_btn.on_press(Message::StartGame);
     }
 
-    let settings_btn = button(
+    let mut settings_btn = button(
         container(
             row![
                 svg(util::icons::icon(util::icons::SETTINGS))
@@ -78,9 +82,12 @@ pub fn view<'a>(
         .center_x(Length::Fill)
         .center_y(Length::Fill),
     )
-    .on_press(Message::OpenSettings)
     .style(theme::secondary_button_style)
     .height(50);
+
+    if !is_disabled {
+        settings_btn = settings_btn.on_press(Message::OpenSettings);
+    }
 
     let info_section = column![
         row![
@@ -104,7 +111,7 @@ pub fn view<'a>(
     ]
     .spacing(5);
 
-    let mods_btn = button(
+    let mut mods_btn = button(
         container(
             svg(util::icons::icon(util::icons::PUZZLE))
                 .width(16)
@@ -116,11 +123,14 @@ pub fn view<'a>(
         .center_x(Length::Fill)
         .center_y(Length::Fill),
     )
-    .on_press(Message::Mods(
-        crate::ui::mods_modal::ModsMessage::RefreshLocal,
-    ))
     .style(theme::secondary_button_style)
     .height(50);
+
+    if !is_disabled {
+        mods_btn = mods_btn.on_press(Message::Mods(
+            crate::ui::mods_modal::ModsMessage::RefreshLocal,
+        ));
+    }
 
     let actions = row![play_btn, settings_btn, mods_btn].spacing(10);
 

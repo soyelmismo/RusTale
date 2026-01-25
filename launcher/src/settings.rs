@@ -265,7 +265,8 @@ impl SettingsState {
                 button(text("Move to...").size(14))
                     .on_press(SettingsMessage::PickMoveLocation)
                     .style(theme::primary_button_style)
-                    .padding(10)
+                    .padding(10),
+                Space::new().width(10)
             ]
             .spacing(10)
             .align_y(Alignment::Center)

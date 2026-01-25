@@ -2,8 +2,10 @@ use crate::config::GameSettings;
 use crate::game::curseforge::{CfMod, SearchResult};
 use crate::game::mods::ModInfo;
 use crate::game::zip_mods::PatchManifest;
-use crate::theme;
-use iced::widget::{Space, button, column, container, image, row, scrollable, text, text_input};
+use crate::{theme, util};
+use iced::widget::{
+    Space, button, column, container, image, row, scrollable, svg, text, text_input,
+};
 use iced::{Alignment, Color, ContentFit, Element, Length, Size, Task};
 use std::collections::{HashMap, HashSet};
 
@@ -24,6 +26,8 @@ pub enum ModsMessage {
     ToggleLocal(ModInfo),
     DeleteLocal(ModInfo),
     OpenFolder,
+    OpenPatchFolder,
+    OpenJarFolder,
     ModsLoaded(Result<Vec<ModInfo>, String>),
 
     // Remote
@@ -204,6 +208,30 @@ impl ModsState {
                 };
                 let mods_path = paths.mods_dir(&settings.channel, &ver);
                 crate::util::open_path(mods_path);
+                Task::none()
+            }
+
+            ModsMessage::OpenPatchFolder => {
+                let paths = crate::game::GamePaths::new(base_dir);
+                let ver = if settings.game_version == 0 {
+                    "latest".to_string()
+                } else {
+                    settings.game_version.to_string()
+                };
+                let dir = paths.core_patches_dir(&settings.channel, &ver);
+                crate::util::open_path(dir);
+                Task::none()
+            }
+
+            ModsMessage::OpenJarFolder => {
+                let paths = crate::game::GamePaths::new(base_dir);
+                let ver = if settings.game_version == 0 {
+                    "latest".to_string()
+                } else {
+                    settings.game_version.to_string()
+                };
+                let dir = paths.mods_dir(&settings.channel, &ver);
+                crate::util::open_path(dir);
                 Task::none()
             }
 
@@ -635,13 +663,30 @@ impl ModsState {
 
         // 1. SECCIÓN PARCHES (.zip) - Mostrar primero si existen
         if !self.patch_mods.is_empty() {
-            let mut patch_list = column![
+            let header = row![
                 text("CORE PATCHES (ZIP)")
                     .size(14)
                     .color(theme::ACCENT_ORANGE)
-                    .font(iced::font::Font::MONOSPACE)
+                    .font(iced::font::Font::MONOSPACE),
+                Space::new().width(Length::Fill),
+                button(
+                    row![
+                        svg(util::icons::icon(util::icons::FOLDER))
+                            .width(14)
+                            .height(14)
+                            .style(theme::svg_accent),
+                        text("Open Folder").size(10)
+                    ]
+                    .spacing(5)
+                    .align_y(Alignment::Center)
+                )
+                .on_press(ModsMessage::OpenPatchFolder)
+                .style(theme::secondary_button_style)
+                .padding(5)
             ]
-            .spacing(10);
+            .align_y(Alignment::Center);
+
+            let mut patch_list = column![header].spacing(10);
 
             for patch in &self.patch_mods {
                 patch_list = patch_list.push(patch_row(patch, &self.temp_settings));
@@ -650,30 +695,54 @@ impl ModsState {
         }
 
         // 2. SECCIÓN MODS (.jar)
-        if !self.installed_mods.is_empty() {
-            let mut mod_list = column![
-                text("MODS (JAR)")
-                    .size(14)
-                    .color(theme::ACCENT_ORANGE)
-                    .font(iced::font::Font::MONOSPACE)
-            ]
-            .spacing(10);
+        let header_jar = row![
+            text("MODS (JAR)")
+                .size(14)
+                .color(theme::ACCENT_ORANGE)
+                .font(iced::font::Font::MONOSPACE),
+            Space::new().width(Length::Fill),
+            button(
+                row![
+                    svg(util::icons::icon(util::icons::FOLDER))
+                        .width(14)
+                        .height(14)
+                        .style(theme::svg_accent),
+                    text("Open Folder").size(10)
+                ]
+                .spacing(5)
+                .align_y(Alignment::Center)
+            )
+            .on_press(ModsMessage::OpenJarFolder)
+            .style(theme::secondary_button_style)
+            .padding(5)
+        ]
+        .align_y(Alignment::Center);
 
+        let mut mod_list = column![header_jar].spacing(10);
+
+        if !self.installed_mods.is_empty() {
             for m in &self.installed_mods {
                 mod_list = mod_list.push(mod_row(m));
             }
-            content = content.push(mod_list);
+        } else if self.patch_mods.is_empty() {
+            // Solo si no hay parches tampoco mostramos un texto placeholder
+            mod_list = mod_list.push(
+                text("No JAR mods installed")
+                    .size(12)
+                    .color(Color::from_rgb(0.5, 0.5, 0.5)),
+            );
         }
 
-        column![
-            scrollable(content).height(Length::Fill),
-            button(text("Open Mods Folder"))
-                .on_press(ModsMessage::OpenFolder)
-                .style(theme::secondary_button_style)
-                .width(Length::Fill)
-        ]
-        .spacing(10)
-        .into()
+        content = content.push(mod_list);
+
+        container(scrollable(content).height(Length::Fill))
+            .padding(iced::Padding {
+                top: 0.0,
+                right: 15.0,
+                bottom: 0.0,
+                left: 0.0,
+            })
+            .into()
     }
 
     fn view_browse<'a>(
@@ -714,7 +783,14 @@ impl ModsState {
                     .collect::<Vec<_>>(),
             )
             .spacing(10);
-            scrollable(list).height(Length::Fill).into()
+            container(scrollable(list).height(Length::Fill))
+                .padding(iced::Padding {
+                    top: 0.0,
+                    right: 15.0,
+                    bottom: 0.0,
+                    left: 0.0,
+                })
+                .into()
         };
 
         let prev_btn = button(text("< Prev").size(if is_compact { 12 } else { 14 }))
@@ -819,10 +895,16 @@ pub fn mod_row<'a>(mod_info: &'a ModInfo) -> Element<'a, ModsMessage> {
     }
     .on_press(ModsMessage::ToggleLocal(mod_info.clone()));
 
-    let delete_btn = button(text("DEL").size(12))
-        .on_press(ModsMessage::DeleteLocal(mod_info.clone()))
-        .style(theme::danger_button_style)
-        .padding(5);
+    use iced::widget::svg;
+    let delete_btn = button(
+        svg(util::icons::icon(util::icons::TRASH))
+            .width(14)
+            .height(14)
+            .style(theme::svg_accent),
+    )
+    .on_press(ModsMessage::DeleteLocal(mod_info.clone()))
+    .style(theme::danger_button_style)
+    .padding(8);
 
     container(
         row![
@@ -877,13 +959,18 @@ fn patch_row<'a>(patch: &'a PatchManifest, _curr: &GameSettings) -> Element<'a, 
             .on_press(ModsMessage::ToggleZipPatch(patch.mod_id.clone(), true))
     };
 
-    let delete_btn = button(text("DEL").size(12))
-        .on_press(ModsMessage::UninstallZipPatch(
-            patch.mod_id.clone(),
-            _curr.clone(),
-        ))
-        .style(theme::danger_button_style)
-        .padding(5);
+    let delete_btn = button(
+        svg(util::icons::icon(util::icons::TRASH))
+            .width(14)
+            .height(14)
+            .style(theme::svg_accent),
+    )
+    .on_press(ModsMessage::UninstallZipPatch(
+        patch.mod_id.clone(),
+        _curr.clone(),
+    ))
+    .style(theme::danger_button_style)
+    .padding(5);
 
     container(
         row![

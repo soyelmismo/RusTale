@@ -114,15 +114,16 @@ impl NewsSection {
     pub fn view<'a>(
         &'a self,
         localization: &'a crate::lang::Localization,
+        is_disabled: bool,
     ) -> Element<'a, NewsMessage> {
         let content: Element<'a, NewsMessage> = if self.loading {
-            self.view_loading(localization)
+            self.view_loading(localization, is_disabled)
         } else if let Some(error) = &self.error {
-            self.view_error(error, localization)
+            self.view_error(error, localization, is_disabled)
         } else if self.posts.is_empty() {
-            self.view_empty(localization)
+            self.view_empty(localization, is_disabled)
         } else {
-            self.view_posts(localization)
+            self.view_posts(localization, is_disabled)
         };
 
         container(content)
@@ -135,9 +136,10 @@ impl NewsSection {
     fn view_loading<'a>(
         &'a self,
         localization: &'a crate::lang::Localization,
+        is_disabled: bool,
     ) -> Element<'a, NewsMessage> {
         column![
-            header_section(true, localization),
+            header_section(true, localization, is_disabled),
             container(
                 column![
                     text(localization.t("news.loading"))
@@ -163,19 +165,25 @@ impl NewsSection {
         &self,
         error: &'a str,
         localization: &'a crate::lang::Localization,
+        is_disabled: bool,
     ) -> Element<'a, NewsMessage> {
         column![
-            header_section(false, localization),
+            header_section(false, localization, is_disabled),
             container(
                 column![
                     text(localization.t("news.failed"))
                         .size(16)
                         .color(Color::from_rgb(1.0, 0.5, 0.5)),
                     text(error).size(12).color(Color::from_rgb(0.7, 0.7, 0.7)),
-                    button(text(localization.t("news.retry")).size(14))
-                        .on_press(NewsMessage::LoadNews)
-                        .padding(8)
-                        .style(theme::primary_button_style)
+                    {
+                        let mut retry_btn = button(text(localization.t("news.retry")).size(14))
+                            .style(theme::primary_button_style)
+                            .padding(8);
+                        if !is_disabled {
+                            retry_btn = retry_btn.on_press(NewsMessage::LoadNews);
+                        }
+                        retry_btn
+                    }
                 ]
                 .spacing(10)
                 .align_x(Alignment::Center)
@@ -191,9 +199,10 @@ impl NewsSection {
     fn view_empty<'a>(
         &'a self,
         localization: &'a crate::lang::Localization,
+        is_disabled: bool,
     ) -> Element<'a, NewsMessage> {
         column![
-            header_section(false, localization),
+            header_section(false, localization, is_disabled),
             container(
                 text(localization.t("news.empty"))
                     .size(14)
@@ -210,14 +219,15 @@ impl NewsSection {
     fn view_posts<'a>(
         &'a self,
         localization: &'a crate::lang::Localization,
+        is_disabled: bool,
     ) -> Element<'a, NewsMessage> {
         let posts_view = column![
-            header_section(false, localization),
+            header_section(false, localization, is_disabled),
             scrollable(
                 column(
                     self.posts
                         .iter()
-                        .map(|post| self.view_post(post, localization))
+                        .map(|post| self.view_post(post, localization, is_disabled))
                         .collect::<Vec<_>>()
                 )
                 .spacing(8)
@@ -230,12 +240,15 @@ impl NewsSection {
         if self.error.is_some() {
             column![
                 posts_view,
-                container(
-                    button(text(localization.t("news.retry")).size(12))
-                        .on_press(NewsMessage::LoadNews)
-                        .padding(4)
+                container({
+                    let mut retry_btn = button(text(localization.t("news.retry")).size(12))
                         .style(theme::secondary_button_style)
-                )
+                        .padding(4);
+                    if !is_disabled {
+                        retry_btn = retry_btn.on_press(NewsMessage::LoadNews);
+                    }
+                    retry_btn
+                })
                 .width(Length::Fill)
                 .center_x(Length::Fill)
             ]
@@ -250,6 +263,7 @@ impl NewsSection {
         &'a self,
         post: &'a BlogPost,
         localization: &'a crate::lang::Localization,
+        is_disabled: bool,
     ) -> Element<'a, NewsMessage> {
         // Obtenemos la imagen del HashMap en lugar de bloquear el hilo
         let image_content: Element<'a, NewsMessage> = if let Some(cover) = &post.cover_image {
@@ -271,7 +285,7 @@ impl NewsSection {
             .as_deref()
             .unwrap_or_else(|| localization.t("news.no_desc"));
 
-        button(
+        let mut btn = button(
             row![
                 container(image_content).style(|_: &Theme| container::Style {
                     border: Border {
@@ -301,12 +315,16 @@ impl NewsSection {
             ]
             .spacing(12)
             .align_y(Alignment::Center),
-        )
-        .on_press(NewsMessage::OpenPost(post.get_post_url()))
-        .style(theme::ghost_button_style)
-        .width(Length::Fill)
-        .padding(8)
-        .into()
+        );
+
+        if !is_disabled {
+            btn = btn.on_press(NewsMessage::OpenPost(post.get_post_url()));
+        }
+
+        btn.style(theme::ghost_button_style)
+            .width(Length::Fill)
+            .padding(8)
+            .into()
     }
 }
 
@@ -322,6 +340,7 @@ fn placeholder_image<'a>() -> Element<'a, NewsMessage> {
 fn header_section<'a>(
     loading: bool,
     localization: &'a crate::lang::Localization,
+    is_disabled: bool,
 ) -> Element<'a, NewsMessage> {
     row![
         row![
@@ -348,22 +367,27 @@ fn header_section<'a>(
         .padding(5)
         .align_y(Alignment::Center),
         Space::new().width(Length::Fill),
-        button(
-            row![
-                text(localization.t("news.browse_all"))
-                    .size(10)
-                    .color(Color::from_rgb(0.5, 0.5, 0.5)),
-                svg(util::icons::icon(util::icons::CHEVRON_RIGHT))
-                    .width(10)
-                    .height(10)
-                    .style(theme::svg_muted),
-            ]
-            .spacing(2)
-            .align_y(Alignment::Center)
-        )
-        .on_press(NewsMessage::OpenAllNews)
-        .style(theme::ghost_button_style)
-        .padding(4),
+        {
+            let mut browse_btn = button(
+                row![
+                    text(localization.t("news.browse_all"))
+                        .size(10)
+                        .color(Color::from_rgb(0.5, 0.5, 0.5)),
+                    svg(util::icons::icon(util::icons::CHEVRON_RIGHT))
+                        .width(10)
+                        .height(10)
+                        .style(theme::svg_muted),
+                ]
+                .spacing(2)
+                .align_y(Alignment::Center),
+            );
+
+            if !is_disabled {
+                browse_btn = browse_btn.on_press(NewsMessage::OpenAllNews);
+            }
+
+            browse_btn.style(theme::ghost_button_style).padding(4)
+        },
     ]
     .align_y(Alignment::Center)
     .width(Length::Fill)

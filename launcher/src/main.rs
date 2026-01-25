@@ -1481,12 +1481,14 @@ impl RusTale {
     }
 
     fn view(&self) -> Element<'_, Message> {
+        let is_interaction_disabled = self.settings_state.is_open || self.mods_state.is_open;
+
         let left_column_content = column![
             profile_card::view(
                 &self.profiles,
                 &self.editing_profile,
                 &self.editing_uuid,
-                self.profile_dropdown_open,
+                self.profile_dropdown_open && !is_interaction_disabled,
                 &self.localization,
             ),
             Space::new().height(Length::Fill),
@@ -1497,6 +1499,7 @@ impl RusTale {
                 self.sub_progress,
                 &self.status_text,
                 &self.localization,
+                is_interaction_disabled,
             ),
         ]
         .spacing(20);
@@ -1512,7 +1515,7 @@ impl RusTale {
 
             let right_column = container(
                 self.news_section
-                    .view(&self.localization)
+                    .view(&self.localization, is_interaction_disabled)
                     .map(Message::News),
             )
             .width(Length::FillPortion(2))
