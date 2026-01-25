@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::{fs, io};
 use zip::ZipArchive;
 
@@ -9,225 +9,310 @@ pub struct PatchManifest {
     pub mod_id: String,
     pub mod_name: String,
     pub install_date: chrono::DateTime<chrono::Utc>,
-    /// Archivos que fueron reemplazados (ruta relativa -> ruta backup relativa)
-    pub backups: Vec<(String, String)>,
-    /// Archivos nuevos que no existían antes (para borrarlos al desinstalar)
-    pub added_files: Vec<String>,
+    pub enabled: bool,
+    pub backups: Vec<(String, String)>, // (game path, relative backup path)
+    pub added_files: Vec<String>,       // New files added
 }
 
-/// Escanea el ZIP para encontrar la carpeta base que contiene "Client" o "Server".
-/// Retorna el prefijo dentro del ZIP que se debe ignorar.
-fn find_zip_root(archive: &mut ZipArchive<fs::File>) -> Option<String> {
-    let mut shortest_prefix: Option<String> = None;
-
-    for i in 0..archive.len() {
-        if let Ok(file) = archive.by_index(i) {
-            let name = file.name();
-            // Buscamos patrones como ".../Client/" o ".../Server/" o justo al inicio "Client/"
-            if let Some(idx) = name.find("Client/") {
-                let prefix = name[..idx].to_string();
-                if shortest_prefix
-                    .as_ref()
-                    .map_or(true, |p| prefix.len() < p.len())
-                {
-                    shortest_prefix = Some(prefix);
-                }
-            } else if let Some(idx) = name.find("Server/") {
-                let prefix = name[..idx].to_string();
-                if shortest_prefix
-                    .as_ref()
-                    .map_or(true, |p| prefix.len() < p.len())
-                {
-                    shortest_prefix = Some(prefix);
-                }
-            }
-        }
-    }
-    shortest_prefix
-}
-
-/// Instala un mod .zip parcheando los archivos del juego
-pub fn install_patch_mod(
-    zip_path: PathBuf,
-    game_root_dir: PathBuf,   // .../release/game/latest/
-    backup_root_dir: PathBuf, // .../UserData/PatchBackups/
+/// Install a new ZIP patch (Initial phase)
+pub fn install_new_patch(
+    zip_source_path: PathBuf,
+    game_root_dir: PathBuf,     // .../latest/
+    core_patches_root: PathBuf, // .../latest/CorePatches/
     mod_name: String,
 ) -> Result<()> {
-    let file = fs::File::open(&zip_path).context("Failed to open zip file")?;
-    let mut archive = ZipArchive::new(file).context("Failed to read zip archive")?;
-
-    // 1. Detectar raíz
-    let prefix = find_zip_root(&mut archive)
-        .ok_or_else(|| anyhow::anyhow!("Structure 'Client' or 'Server' not found in zip"))?;
-
     let mod_id = uuid::Uuid::new_v4().to_string();
-    let mod_backup_dir = backup_root_dir.join(&mod_id);
-    fs::create_dir_all(&mod_backup_dir).context("Failed to create backup dir")?;
+    let patch_dir = core_patches_root.join(&mod_id);
+    let backup_dir = patch_dir.join("backup");
+    let stored_zip_path = patch_dir.join("source.zip");
+
+    fs::create_dir_all(&backup_dir).context("Creating patch backup dir")?;
+
+    // 1. Store the source ZIP for future activations
+    fs::copy(&zip_source_path, &stored_zip_path).context("Storing source zip")?;
+
+    // 2. Apply patch logic
+    apply_patch_logic(
+        &stored_zip_path,
+        &game_root_dir,
+        &backup_dir,
+        &patch_dir,
+        mod_id,
+        mod_name,
+    )?;
+
+    Ok(())
+}
+
+/// Internal logic to find "Client/" or "Server/" deep within the ZIP and extract it
+fn apply_patch_logic(
+    zip_path: &Path,
+    game_root_dir: &Path,
+    backup_dir: &Path,
+    patch_dir: &Path,
+    mod_id: String,
+    mod_name: String,
+) -> Result<()> {
+    let file = fs::File::open(zip_path)?;
+    let mut archive = ZipArchive::new(file)?;
+
+    // 1. Find prefix (where game folders start)
+    let prefix = find_smart_prefix(&mut archive).unwrap_or_default();
+    println!("[ZipMods] Base prefix detected: '{}'", prefix);
 
     let mut backups = Vec::new();
     let mut added_files = Vec::new();
 
-    println!(
-        "[ZipMod] Installing '{}' (ID: {}) using prefix: '{}'",
-        mod_name, mod_id, prefix
-    );
-
-    // 2. Fase de Backup y Clasificación
+    // Phase 1: Identification and Backup
     for i in 0..archive.len() {
         let file = archive.by_index(i)?;
-        let full_name = file.name();
+        let raw_name = file.name();
 
-        if !full_name.starts_with(&prefix) {
+        // CRITICAL: Get clean path relative to the game
+        // If prefix is "install/", and file is "install/manifest.json", relative is "manifest.json"
+        // If prefix is "" and file is "manifest.json", relative is "manifest.json"
+        let relative_path_str = if prefix.is_empty() {
+            raw_name
+        } else if raw_name.starts_with(&prefix) {
+            &raw_name[prefix.len()..]
+        } else {
+            continue; // Not under the detected prefix
+        };
+
+        // STRICT FILTER: Only allow files that start with known game folders
+        // This discards "manifest.json", "README.md", "icon.png" at the mod root.
+        if !is_game_file(relative_path_str) {
+            // println!("[ZipMods] Ignoring non-relevant file: {}", relative_path_str);
             continue;
         }
 
-        // Eliminar el prefijo para obtener la ruta relativa al juego (ej: "Client/HytaleClient.exe")
-        let relative_path_str = &full_name[prefix.len()..];
+        // Ignore empty folders/root
         if relative_path_str.is_empty() || relative_path_str.ends_with('/') {
-            continue; // Es un directorio o la raiz misma
+            continue;
         }
 
         let target_path = game_root_dir.join(relative_path_str);
 
-        // Si el archivo ya existe, lo respaldamos
+        // Backup if exists
         if target_path.exists() {
-            let backup_rel_path = relative_path_str; // Usamos la misma estructura en backup
-            let backup_full_path = mod_backup_dir.join(backup_rel_path);
-
-            if let Some(parent) = backup_full_path.parent() {
-                fs::create_dir_all(parent)?;
+            let backup_target = backup_dir.join(relative_path_str);
+            if let Some(p) = backup_target.parent() {
+                fs::create_dir_all(p)?;
             }
-
-            fs::copy(&target_path, &backup_full_path)?;
-            backups.push((relative_path_str.to_string(), relative_path_str.to_string()));
+            if target_path.is_file() {
+                fs::copy(&target_path, &backup_target)?;
+                backups.push((relative_path_str.to_string(), relative_path_str.to_string()));
+            }
         } else {
             added_files.push(relative_path_str.to_string());
         }
     }
 
-    // 3. Fase de Extracción (Sobreescritura)
+    // Phase 2: Real Installation
     for i in 0..archive.len() {
         let mut file = archive.by_index(i)?;
-        let full_name = file.name();
+        let raw_name = file.name();
 
-        if !full_name.starts_with(&prefix) {
+        let relative_path_str = if prefix.is_empty() {
+            raw_name
+        } else if raw_name.starts_with(&prefix) {
+            &raw_name[prefix.len()..]
+        } else {
             continue;
-        }
+        };
 
-        let relative_path_str = &full_name[prefix.len()..];
-        if relative_path_str.is_empty() {
+        if !is_game_file(relative_path_str) || relative_path_str.ends_with('/') {
             continue;
         }
 
         let target_path = game_root_dir.join(relative_path_str);
 
-        if file.is_dir() {
-            fs::create_dir_all(&target_path)?;
-        } else {
-            if let Some(p) = target_path.parent() {
-                fs::create_dir_all(p)?;
-            }
+        if let Some(p) = target_path.parent() {
+            fs::create_dir_all(p)?;
+        }
+
+        // We only extract files, folders are created implicitly above
+        if file.is_file() {
             let mut outfile = fs::File::create(&target_path)?;
             io::copy(&mut file, &mut outfile)?;
         }
     }
 
-    // 4. Guardar Manifiesto
+    // Save Manifest
     let manifest = PatchManifest {
         mod_id,
         mod_name,
         install_date: chrono::Utc::now(),
+        enabled: true,
         backups,
         added_files,
     };
 
-    let manifest_path = mod_backup_dir.join("manifest.json");
     let json = serde_json::to_string_pretty(&manifest)?;
-    fs::write(manifest_path, json)?;
+    fs::write(patch_dir.join("manifest.json"), json)?;
 
-    println!("[ZipMod] Installation complete.");
     Ok(())
 }
 
-/// Desinstala un mod parcheado restaurando los archivos originales
-pub fn uninstall_patch_mod(
+/// Critical helper function to filter out garbage
+fn is_game_file(path: &str) -> bool {
+    // Only accept paths that explicitly start with known game folders
+    path.starts_with("Client/") || path.starts_with("Server/") || path.starts_with("Shared/")
+}
+
+/// Disable a patch: Restore backups and delete new files. DOES NOT DELETE the source ZIP.
+pub fn disable_patch(
     game_root_dir: PathBuf,
-    backup_root_dir: PathBuf,
+    core_patches_root: PathBuf,
     mod_id: &str,
 ) -> Result<()> {
-    let mod_backup_dir = backup_root_dir.join(mod_id);
-    let manifest_path = mod_backup_dir.join("manifest.json");
+    let patch_dir = core_patches_root.join(mod_id);
+    let manifest_path = patch_dir.join("manifest.json");
+    let backup_dir = patch_dir.join("backup");
 
     if !manifest_path.exists() {
-        anyhow::bail!("Mod manifest not found for ID: {}", mod_id);
+        anyhow::bail!("Manifest missing for {}", mod_id);
     }
 
-    let content = fs::read_to_string(&manifest_path)?;
-    let manifest: PatchManifest = serde_json::from_str(&content)?;
+    let mut manifest: PatchManifest = serde_json::from_str(&fs::read_to_string(&manifest_path)?)?;
+    if !manifest.enabled {
+        return Ok(());
+    }
 
-    println!("[ZipMod] Uninstalling '{}'...", manifest.mod_name);
-
-    // 1. Eliminar archivos que el mod añadió (que no existían antes)
-    for added_file in &manifest.added_files {
-        let target_path = game_root_dir.join(added_file);
-        if target_path.exists() {
-            fs::remove_file(&target_path).ok(); // Ignorar error si no se puede borrar
+    // 1. Delete added files
+    for added in &manifest.added_files {
+        let p = game_root_dir.join(added);
+        if p.exists() && p.is_file() {
+            fs::remove_file(p).ok();
         }
-        // Nota: No borramos directorios vacíos recursivamente para simplificar,
-        // pero se podría añadir limpieza.
     }
 
-    // 2. Restaurar copias de seguridad
-    for (rel_path, backup_rel) in &manifest.backups {
-        let backup_source = mod_backup_dir.join(backup_rel);
-        let target_path = game_root_dir.join(rel_path);
+    // 2. Restore backups
+    for (rel_game, rel_backup) in &manifest.backups {
+        let source = backup_dir.join(rel_backup);
+        let target = game_root_dir.join(rel_game);
 
-        if backup_source.exists() {
-            if let Some(parent) = target_path.parent() {
-                fs::create_dir_all(parent)?;
+        if source.exists() {
+            if let Some(p) = target.parent() {
+                fs::create_dir_all(p)?;
             }
-            // Sobreescribir el archivo modificado con el original
-            fs::copy(&backup_source, &target_path)?;
+            fs::copy(&source, &target)?;
         }
     }
 
-    // 3. Eliminar carpeta de backup y manifiesto
-    fs::remove_dir_all(&mod_backup_dir).context("Failed to clean up backup directory")?;
+    // 3. Update manifest
+    manifest.enabled = false;
+    fs::write(manifest_path, serde_json::to_string_pretty(&manifest)?)?;
 
-    println!("[ZipMod] Uninstallation complete.");
     Ok(())
 }
 
-/// Lista los mods parcheados instalados actualmente
-pub fn list_installed_patch_mods(backup_root_dir: PathBuf) -> Result<Vec<PatchManifest>> {
+/// Reactivate a patch using the stored source.zip
+pub fn enable_patch(
+    game_root_dir: PathBuf,
+    core_patches_root: PathBuf,
+    mod_id: &str,
+) -> Result<()> {
+    let patch_dir = core_patches_root.join(mod_id);
+    let manifest_path = patch_dir.join("manifest.json");
+    let source_zip = patch_dir.join("source.zip");
+    let backup_dir = patch_dir.join("backup");
+
+    if !manifest_path.exists() || !source_zip.exists() {
+        anyhow::bail!("Corrupted folder for {}", mod_id);
+    }
+
+    let manifest: PatchManifest = serde_json::from_str(&fs::read_to_string(&manifest_path)?)?;
+    if manifest.enabled {
+        return Ok(());
+    }
+
+    // Clean old backups
+    if backup_dir.exists() {
+        fs::remove_dir_all(&backup_dir)?;
+    }
+    fs::create_dir_all(&backup_dir)?;
+
+    // Re-apply (will generate new backups of the current state)
+    apply_patch_logic(
+        &source_zip,
+        &game_root_dir,
+        &backup_dir,
+        &patch_dir,
+        manifest.mod_id,
+        manifest.mod_name,
+    )?;
+
+    Ok(())
+}
+
+pub fn uninstall_patch(
+    game_root_dir: PathBuf,
+    core_patches_root: PathBuf,
+    mod_id: &str,
+) -> Result<()> {
+    disable_patch(game_root_dir.clone(), core_patches_root.clone(), mod_id)?;
+    let patch_dir = core_patches_root.join(mod_id);
+    if patch_dir.exists() {
+        fs::remove_dir_all(patch_dir)?;
+    }
+    Ok(())
+}
+
+pub fn list_patches(core_patches_root: PathBuf) -> Result<Vec<PatchManifest>> {
     let mut mods = Vec::new();
-    if !backup_root_dir.exists() {
-        // Si no existe la carpeta, simplemente no hay parches, no es un error.
+    if !core_patches_root.exists() {
         return Ok(mods);
     }
 
-    for entry in fs::read_dir(backup_root_dir)? {
+    for entry in fs::read_dir(core_patches_root)? {
         let entry = entry?;
         if entry.path().is_dir() {
             let manifest_path = entry.path().join("manifest.json");
             if manifest_path.exists() {
-                let content = fs::read_to_string(manifest_path)?;
-                if let Ok(manifest) = serde_json::from_str::<PatchManifest>(&content) {
-                    mods.push(manifest);
+                if let Ok(content) = fs::read_to_string(manifest_path) {
+                    if let Ok(m) = serde_json::from_str::<PatchManifest>(&content) {
+                        mods.push(m);
+                    }
                 }
             }
         }
     }
-    // Ordenar: lo más nuevo arriba
+    // Sort by date
     mods.sort_by(|a, b| b.install_date.cmp(&a.install_date));
     Ok(mods)
 }
 
-pub fn is_patch_mod(zip_path: &std::path::Path) -> bool {
+/// Recursively searches for where "Client" or "Server" folders begin
+fn find_smart_prefix(archive: &mut ZipArchive<fs::File>) -> Option<String> {
+    for i in 0..archive.len() {
+        if let Ok(file) = archive.by_index(i) {
+            let name = file.name();
+
+            // Priority: Detect deep nested folders
+            if let Some(idx) = name.find("/Client/") {
+                return Some(name[..idx + 1].to_string());
+            }
+            if let Some(idx) = name.find("/Server/") {
+                return Some(name[..idx + 1].to_string());
+            }
+
+            // Simple root
+            if name.starts_with("Client/") || name.starts_with("Server/") {
+                return Some("".to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Verifies if a ZIP is a valid patch
+pub fn is_patch_mod(zip_path: &Path) -> bool {
     let file = fs::File::open(zip_path).ok();
     if let Some(f) = file {
-        if let Ok(mut archive) = zip::ZipArchive::new(f) {
-            return find_zip_root(&mut archive).is_some();
+        if let Ok(mut archive) = ZipArchive::new(f) {
+            // A ZIP is a patch if it contains Client/ or Server/ somewhere
+            return find_smart_prefix(&mut archive).is_some();
         }
     }
     false

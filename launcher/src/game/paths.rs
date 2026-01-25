@@ -72,6 +72,26 @@ impl GamePaths {
             .join(name)
     }
 
+    // --- ISOLATED MOD MANAGEMENT ---
+
+    /// Mods (.jar/.zip) for this version
+    /// Path: RusTale/{channel}/{version}/Mods
+    pub fn mods_dir(&self, channel: &str, version_str: &str) -> PathBuf {
+        self.version_dir(channel, version_str).join("Mods")
+    }
+
+    /// Disabled Mods for this version
+    /// Path: RusTale/{channel}/{version}/DisabledMods
+    pub fn disabled_mods_dir(&self, channel: &str, version_str: &str) -> PathBuf {
+        self.version_dir(channel, version_str).join("DisabledMods")
+    }
+
+    /// Core Patches directory
+    /// Path: RusTale/{channel}/{version}/CorePatches/{ModID}/
+    pub fn core_patches_dir(&self, channel: &str, version_str: &str) -> PathBuf {
+        self.version_dir(channel, version_str).join("CorePatches")
+    }
+
     /// Returns the UserData directory
     pub fn user_data(&self) -> PathBuf {
         self.root.join("UserData")

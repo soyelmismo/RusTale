@@ -36,6 +36,7 @@ pub enum ModsMessage {
     ModInstalled(Result<String, String>), // Nombre del archivo instalado
     OpenModPage(String),
     InstallZipPatch(std::path::PathBuf, GameSettings), // Ruta del archivo ZIP seleccionado
+    ToggleZipPatch(String, bool),                      // ID, nuevo estado (true=activar)
     UninstallZipPatch(String, GameSettings),           // Mod ID
     PatchOperationFinished(Result<(), String>),
     ModsLoadedComplex(Result<(Vec<ModInfo>, Vec<crate::game::zip_mods::PatchManifest>), String>),
@@ -121,19 +122,26 @@ impl ModsState {
                 self.patch_mods.clear();
 
                 let base_dir_clone = base_dir.clone();
+                let channel = settings.channel.clone();
+                let version_str = if settings.game_version == 0 {
+                    "latest".to_string()
+                } else {
+                    settings.game_version.to_string()
+                };
 
                 // USAMOS LA CARGA COMPLEJA (JARS + PATCHES)
                 Task::perform(
                     async move {
                         // 1. Carga JARs/ZIPs en carpeta Mods
-                        let jars = crate::game::mods::list_mods(&base_dir_clone)
-                            .await
-                            .map_err(|e| e.to_string())?;
+                        let jars =
+                            crate::game::mods::list_mods(&base_dir_clone, &channel, &version_str)
+                                .await
+                                .map_err(|e| e.to_string())?;
 
                         // 2. Carga Parches instalados (manifests)
-                        let paths = crate::game::GamePaths::new(base_dir_clone.clone());
-                        let backup_dir = paths.user_data().join("PatchBackups");
-                        let patches = crate::game::zip_mods::list_installed_patch_mods(backup_dir)
+                        let paths = crate::game::GamePaths::new(base_dir_clone);
+                        let patches_dir = paths.core_patches_dir(&channel, &version_str);
+                        let patches = crate::game::zip_mods::list_patches(patches_dir)
                             .map_err(|e| e.to_string())?;
 
                         Ok((jars, patches))
@@ -171,24 +179,38 @@ impl ModsState {
             ModsMessage::ToggleLocal(mod_info) => {
                 self.loading = true;
                 let base_dir = base_dir.clone();
+                let channel = settings.channel.clone();
+                let ver = if settings.game_version == 0 {
+                    "latest".to_string()
+                } else {
+                    settings.game_version.to_string()
+                };
+
                 Task::perform(
                     async move {
-                        let _ = crate::game::mods::toggle_mod(&base_dir, &mod_info).await;
-                        crate::game::mods::list_mods(&base_dir)
+                        crate::game::mods::toggle_mod(&base_dir, &channel, &ver, &mod_info)
                             .await
-                            .map_err(|e| e.to_string())
+                            .unwrap();
+                        Ok::<(), String>(())
                     },
-                    ModsMessage::ModsLoaded,
+                    |_| ModsMessage::RefreshLocal,
                 )
             }
 
             ModsMessage::DeleteLocal(mod_info) => {
                 self.loading = true;
                 let base_dir = base_dir.clone();
+                let channel = settings.channel.clone();
+                let ver = if settings.game_version == 0 {
+                    "latest".to_string()
+                } else {
+                    settings.game_version.to_string()
+                };
+
                 Task::perform(
                     async move {
                         let _ = crate::game::mods::delete_mod(&mod_info).await;
-                        crate::game::mods::list_mods(&base_dir)
+                        crate::game::mods::list_mods(&base_dir, &channel, &ver)
                             .await
                             .map_err(|e| e.to_string())
                     },
@@ -198,7 +220,12 @@ impl ModsState {
 
             ModsMessage::OpenFolder => {
                 let paths = crate::game::GamePaths::new(base_dir);
-                let mods_path = paths.user_data().join("Mods");
+                let ver = if settings.game_version == 0 {
+                    "latest".to_string()
+                } else {
+                    settings.game_version.to_string()
+                };
+                let mods_path = paths.mods_dir(&settings.channel, &ver);
                 crate::util::open_path(mods_path);
                 Task::none()
             }
@@ -290,8 +317,19 @@ impl ModsState {
 
                         return Task::perform(
                             async move {
-                                let (mods_dir, _) =
-                                    crate::game::mods::get_mods_dirs(&base_dir_clone).await;
+                                let channel = settings.channel.clone();
+                                let ver = if settings.game_version == 0 {
+                                    "latest".to_string()
+                                } else {
+                                    settings.game_version.to_string()
+                                };
+
+                                let (mods_dir, _) = crate::game::mods::ensure_mod_dirs(
+                                    &base_dir_clone,
+                                    &channel,
+                                    &ver,
+                                )
+                                .await;
                                 let dest = mods_dir.join(&file_name);
 
                                 // 1. Descargar
@@ -336,10 +374,19 @@ impl ModsState {
                 match res {
                     Ok(file_name) => {
                         let base_dir_clone = base_dir.clone();
+                        let channel = settings.channel.clone();
+                        let ver = if settings.game_version == 0 {
+                            "latest".to_string()
+                        } else {
+                            settings.game_version.to_string()
+                        };
+
                         // Comprobar si es un parche
                         let (mods_dir, _) = tokio::task::block_in_place(|| {
-                            futures::executor::block_on(crate::game::mods::get_mods_dirs(
+                            futures::executor::block_on(crate::game::mods::ensure_mod_dirs(
                                 &base_dir_clone,
+                                &channel,
+                                &ver,
                             ))
                         });
                         let full_path = mods_dir.join(&file_name);
@@ -368,10 +415,16 @@ impl ModsState {
 
                 Task::perform(
                     async move {
-                        let paths = crate::game::GamePaths::new(base_dir.clone());
-                        let game_dir = paths
-                            .version_dir(&settings.channel, &settings.game_version.to_string());
-                        let backup_dir = paths.user_data().join("PatchBackups");
+                        let paths = crate::game::GamePaths::new(base_dir);
+                        let channel = settings.channel.clone();
+                        let ver = if settings.game_version == 0 {
+                            "latest".to_string()
+                        } else {
+                            settings.game_version.to_string()
+                        };
+
+                        let game_dir = paths.version_dir(&channel, &ver);
+                        let patches_dir = paths.core_patches_dir(&channel, &ver);
                         let mod_name = zip_path
                             .file_stem()
                             .unwrap_or_default()
@@ -380,8 +433,11 @@ impl ModsState {
                         let zip_path_to_clean = zip_path.clone();
 
                         tokio::task::spawn_blocking(move || {
-                            crate::game::zip_mods::install_patch_mod(
-                                zip_path, game_dir, backup_dir, mod_name,
+                            crate::game::zip_mods::install_new_patch(
+                                zip_path,
+                                game_dir,
+                                patches_dir,
+                                mod_name,
                             )
                         })
                         .await
@@ -395,21 +451,58 @@ impl ModsState {
                 )
             }
 
+            ModsMessage::ToggleZipPatch(mod_id, enable) => {
+                self.loading = true;
+                let base_dir = base_dir.clone();
+                let settings = settings.clone();
+
+                Task::perform(
+                    async move {
+                        let paths = crate::game::GamePaths::new(base_dir);
+                        let channel = settings.channel;
+                        let ver = if settings.game_version == 0 {
+                            "latest".to_string()
+                        } else {
+                            settings.game_version.to_string()
+                        };
+
+                        let game_dir = paths.version_dir(&channel, &ver);
+                        let patches_dir = paths.core_patches_dir(&channel, &ver);
+
+                        tokio::task::spawn_blocking(move || {
+                            if enable {
+                                crate::game::zip_mods::enable_patch(game_dir, patches_dir, &mod_id)
+                            } else {
+                                crate::game::zip_mods::disable_patch(game_dir, patches_dir, &mod_id)
+                            }
+                        })
+                        .await
+                        .unwrap()
+                        .map_err(|e| e.to_string())
+                    },
+                    ModsMessage::PatchOperationFinished,
+                )
+            }
+
             ModsMessage::UninstallZipPatch(mod_id, settings) => {
                 self.loading = true;
                 let base_dir = base_dir.clone();
 
                 Task::perform(
                     async move {
-                        let paths = crate::game::GamePaths::new(base_dir.clone());
-                        let game_dir = paths
-                            .version_dir(&settings.channel, &settings.game_version.to_string());
-                        let backup_dir = paths.user_data().join("PatchBackups");
+                        let paths = crate::game::GamePaths::new(base_dir);
+                        let channel = settings.channel.clone();
+                        let ver = if settings.game_version == 0 {
+                            "latest".to_string()
+                        } else {
+                            settings.game_version.to_string()
+                        };
+
+                        let game_dir = paths.version_dir(&channel, &ver);
+                        let patches_dir = paths.core_patches_dir(&channel, &ver);
 
                         tokio::task::spawn_blocking(move || {
-                            crate::game::zip_mods::uninstall_patch_mod(
-                                game_dir, backup_dir, &mod_id,
-                            )
+                            crate::game::zip_mods::uninstall_patch(game_dir, patches_dir, &mod_id)
                         })
                         .await
                         .map_err(|e| e.to_string())?
@@ -757,32 +850,49 @@ fn tab_btn<'a>(label: &'a str, active: bool, compact: bool) -> button::Button<'a
         theme::ghost_button_style
     })
 }
-fn patch_row<'a>(
-    patch: &'a PatchManifest,
-    current_settings: &GameSettings,
-) -> Element<'a, ModsMessage> {
-    let delete_btn = button(text("UNINSTALL").size(12))
+fn patch_row<'a>(patch: &'a PatchManifest, _curr: &GameSettings) -> Element<'a, ModsMessage> {
+    let status_color = if patch.enabled {
+        theme::ACCENT_GREEN
+    } else {
+        Color::from_rgb(0.5, 0.5, 0.5)
+    };
+
+    let toggle_btn = if patch.enabled {
+        button(text("DISABLE"))
+            .style(theme::secondary_button_style)
+            .on_press(ModsMessage::ToggleZipPatch(patch.mod_id.clone(), false))
+    } else {
+        button(text("ENABLE"))
+            .style(theme::primary_button_style)
+            .on_press(ModsMessage::ToggleZipPatch(patch.mod_id.clone(), true))
+    };
+
+    let delete_btn = button(text("DEL").size(12))
         .on_press(ModsMessage::UninstallZipPatch(
             patch.mod_id.clone(),
-            current_settings.clone(), // Pasamos los settings actuales
+            _curr.clone(),
         ))
         .style(theme::danger_button_style)
         .padding(5);
 
     container(
         row![
-            // Icono distintivo
             text("📦").size(20),
             column![
                 text(&patch.mod_name).size(14),
-                text(format!(
-                    "Installed: {}",
-                    patch.install_date.format("%Y-%m-%d")
-                ))
-                .size(10)
-                .color(Color::from_rgb(0.5, 0.5, 0.5))
+                row![
+                    text(if patch.enabled { "ACTIVE" } else { "DISABLED" })
+                        .size(10)
+                        .color(status_color),
+                    text("|").size(10).color(Color::from_rgb(0.3, 0.3, 0.3)),
+                    text(patch.install_date.format("%Y-%m-%d").to_string())
+                        .size(10)
+                        .color(Color::from_rgb(0.5, 0.5, 0.5))
+                ]
+                .spacing(5)
             ]
             .width(Length::Fill),
+            toggle_btn,
             delete_btn
         ]
         .spacing(10)
