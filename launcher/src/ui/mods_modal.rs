@@ -344,6 +344,7 @@ impl ModsState {
                                     &url_clone,
                                     &dest,
                                     |_, _| {},
+                                    None,
                                 )
                                 .await
                                 {

@@ -16,9 +16,9 @@ pub fn view<'a>(
 ) -> Element<'a, Message> {
     let play_button_text = match status {
         LauncherStatus::Playing => localization.t("launcher.stop"),
-        LauncherStatus::Downloading => localization.t("launcher.status.downloading"),
+        LauncherStatus::Downloading => localization.t("launcher.status.cancel"),
         LauncherStatus::Checking => localization.t("launcher.status.checking"),
-        LauncherStatus::Migrating => localization.t("launcher.status.migrating"),
+        LauncherStatus::Migrating => localization.t("launcher.status.cancel"),
         LauncherStatus::NeedsInstall => localization.t("launcher.play"),
         LauncherStatus::NeedsUpdate => localization.t("launcher.update"),
         _ => localization.t("launcher.play"),
@@ -26,6 +26,7 @@ pub fn view<'a>(
 
     let play_icon = match status {
         LauncherStatus::Playing => util::icons::STOP,
+        LauncherStatus::Downloading | LauncherStatus::Migrating => util::icons::X,
         _ => util::icons::PLAY,
     };
 
@@ -59,22 +60,25 @@ pub fn view<'a>(
     .style(match status {
         _ if is_disabled => theme::play_button_style,
         LauncherStatus::Playing => theme::play_button_style_active,
+        LauncherStatus::Downloading | LauncherStatus::Migrating => theme::danger_button_style,
         LauncherStatus::NeedsUpdate => theme::update_button_style,
         _ => theme::play_button_style,
     })
     .width(Length::Fill)
     .height(50);
 
-    if !is_disabled
-        && !matches!(
-            status,
-            LauncherStatus::Downloading
-                | LauncherStatus::Checking
-                | LauncherStatus::Busy
-                | LauncherStatus::Migrating
-        )
-    {
-        play_btn = play_btn.on_press(Message::StartGame);
+    if !is_disabled {
+        match status {
+            LauncherStatus::Downloading | LauncherStatus::Migrating => {
+                play_btn = play_btn.on_press(Message::CancelAction);
+            }
+            LauncherStatus::Checking | LauncherStatus::Busy => {
+                // BLOCKED
+            }
+            _ => {
+                play_btn = play_btn.on_press(Message::StartGame);
+            }
+        }
     }
 
     let mut settings_btn = button(

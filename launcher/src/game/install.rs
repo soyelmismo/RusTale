@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
+use std::sync::{Arc, atomic::AtomicBool};
 use tokio::fs;
 
 use crate::game::patcher::get_version_manifest;
@@ -152,6 +153,7 @@ pub async fn ensure_installed(
     target_version: Option<i32>,
     policy: InstallPolicy,
     progress_callback: impl Fn(&str, f64, &str),
+    cancel_token: Option<Arc<AtomicBool>>,
 ) -> Result<()> {
     progress_callback("check", 0.0, "Checking installation...");
 
@@ -192,10 +194,16 @@ pub async fn ensure_installed(
     // --- NETWORK PATH: Full Update/Install ---
 
     // 1. Download JRE if needed
-    crate::java::download_jre(client, base_dir, &progress_callback).await?;
+    crate::java::download_jre(client, base_dir, &progress_callback, cancel_token.clone()).await?;
 
     // 2. Install Butler if needed
-    crate::game::patcher::install_butler(client, base_dir, &progress_callback).await?;
+    crate::game::patcher::install_butler(
+        client,
+        base_dir,
+        &progress_callback,
+        cancel_token.clone(),
+    )
+    .await?;
 
     // 3. Find latest version or use target
     progress_callback("version", 0.0, "Checking for game updates...");
@@ -244,9 +252,15 @@ pub async fn ensure_installed(
             &format!("Installing game version {}...", target_ver),
         );
 
-        let pwr_path =
-            crate::game::patcher::download_pwr(client, channel, 0, target_ver, &progress_callback)
-                .await?;
+        let pwr_path = crate::game::patcher::download_pwr(
+            client,
+            channel,
+            0,
+            target_ver,
+            &progress_callback,
+            cancel_token.clone(),
+        )
+        .await?;
 
         // Apply patch (install)
         progress_callback("install", 0.0, "Installing game files...");
@@ -301,6 +315,7 @@ pub async fn ensure_installed(
                 current_ver,
                 *next_ver,
                 &progress_callback,
+                cancel_token.clone(),
             )
             .await?;
 

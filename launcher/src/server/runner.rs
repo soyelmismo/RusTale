@@ -120,8 +120,9 @@ pub async fn run_server_flow(config: ServerConfig) -> Result<()> {
         }
     };
 
-    crate::java::download_jre(&client, &root_dir, &callback).await?;
-    let _butler_path = crate::game::patcher::install_butler(&client, &root_dir, &callback).await?;
+    crate::java::download_jre(&client, &root_dir, &callback, None).await?;
+    let _butler_path =
+        crate::game::patcher::install_butler(&client, &root_dir, &callback, None).await?;
 
     // 3. Resolver Versión y Descargar Servidor
     println!("[2/5] Checking Game Server files...");
@@ -155,7 +156,8 @@ pub async fn run_server_flow(config: ServerConfig) -> Result<()> {
                 os, arch, config.branch, target_ver_num
             );
             println!("Downloading Patch: {}", url);
-            crate::game::downloader::download_file(&client, &url, &pwr_path, |_, _| {}).await?;
+            crate::game::downloader::download_file(&client, &url, &pwr_path, |_, _| {}, None)
+                .await?;
         }
 
         println!("Applying patch via Butler...");

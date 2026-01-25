@@ -1,6 +1,10 @@
 use anyhow::Result;
 use futures::StreamExt;
 use std::path::PathBuf;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 
@@ -11,6 +15,7 @@ pub async fn download_file(
     url: &str,
     destination: &PathBuf,
     progress_callback: impl Fn(f32, String),
+    cancel_token: Option<Arc<AtomicBool>>,
 ) -> Result<()> {
     let temp_destination = destination.with_extension("downloading");
 
@@ -29,6 +34,12 @@ pub async fn download_file(
     let mut attempt = 0;
 
     loop {
+        if let Some(token) = &cancel_token {
+            if token.load(Ordering::Relaxed) {
+                return Err(anyhow::anyhow!("Cancelled by user"));
+            }
+        }
+
         attempt += 1;
 
         let mut downloaded_len = 0u64;
@@ -93,6 +104,13 @@ pub async fn download_file(
                     let mut stream_failed = false;
 
                     while let Some(chunk_result) = stream.next().await {
+                        if let Some(token) = &cancel_token {
+                            if token.load(Ordering::Relaxed) {
+                                let _ = file.flush().await;
+                                return Err(anyhow::anyhow!("Cancelled by user"));
+                            }
+                        }
+
                         match chunk_result {
                             Ok(chunk) => {
                                 if let Err(e) = file.write_all(&chunk).await {

@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use std::io::{BufReader, BufWriter, Read, Write};
+use std::sync::{Arc, atomic::AtomicBool};
 use std::{path::PathBuf, process::Stdio};
 use tokio::io::AsyncBufReadExt;
 use zip::write::SimpleFileOptions;
@@ -46,6 +47,7 @@ pub async fn install_butler(
     client: &reqwest::Client,
     base_dir: &PathBuf,
     progress_callback: impl Fn(&str, f64, &str),
+    cancel_token: Option<Arc<AtomicBool>>,
 ) -> Result<PathBuf> {
     let paths = crate::game::paths::GamePaths::new(base_dir.clone());
     let tools_dir = base_dir.join("tools").join("butler");
@@ -72,13 +74,19 @@ pub async fn install_butler(
     let zip_path = tools_dir.join("butler.zip");
 
     // Download using downloader utility with progress
-    crate::game::downloader::download_file(client, url, &zip_path, |pct, speed| {
-        progress_callback(
-            "butler",
-            pct as f64,
-            &format!("Downloading Butler... ({})", speed),
-        );
-    })
+    crate::game::downloader::download_file(
+        client,
+        url,
+        &zip_path,
+        |pct, speed| {
+            progress_callback(
+                "butler",
+                pct as f64,
+                &format!("Downloading Butler... ({})", speed),
+            );
+        },
+        cancel_token,
+    )
     .await?;
 
     progress_callback("butler", 70.0, "Extracting Butler...");
@@ -180,6 +188,7 @@ pub async fn download_pwr(
     prev_version: i32,
     target_version: i32,
     progress_callback: &impl Fn(&str, f64, &str),
+    cancel_token: Option<Arc<AtomicBool>>,
 ) -> Result<PathBuf> {
     let cache_dir = crate::config::get_cache_dir("game_patches").await;
 
@@ -210,13 +219,19 @@ pub async fn download_pwr(
     );
 
     // Download file with progress
-    crate::game::downloader::download_file(client, &url_remote, &dest, |pct, speed| {
-        progress_callback(
-            "download",
-            pct as f64,
-            &format!("Downloading patch... ({})", speed),
-        );
-    })
+    crate::game::downloader::download_file(
+        client,
+        &url_remote,
+        &dest,
+        |pct, speed| {
+            progress_callback(
+                "download",
+                pct as f64,
+                &format!("Downloading patch... ({})", speed),
+            );
+        },
+        cancel_token,
+    )
     .await?;
 
     progress_callback("download", 40.0, "PWR file downloaded");

@@ -12,6 +12,7 @@
             "playing": "Playing",
             "busy": "Busy...",
             "downloading": "Downloading...",
+            "cancel": "Cancel",
             "patching": "Patching...",
             "general": "General",
             "migrating": "Migrating...",

@@ -6,6 +6,10 @@ use iced::{
     Color, ContentFit, Element, Length, Size, Subscription, Task, Theme, clipboard, window,
 };
 use single_instance::SingleInstance;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use tray_icon::{
     TrayIconBuilder,
     menu::{Menu, MenuItem},
@@ -275,6 +279,7 @@ pub enum Message {
     DataMoveFinished(Result<std::path::PathBuf, String>),
     MigrationProgress(f32),
     StartMigrationActual(std::path::PathBuf, std::path::PathBuf),
+    CancelAction,
 }
 
 struct RusTale {
@@ -304,6 +309,7 @@ struct RusTale {
     tray_icon: Option<tray_icon::TrayIcon>, // Store tray icon to rebuild menu dynamically
     mods_state: ModsState,                  // Modal state
     local_server_stop_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    cancellation_token: Arc<AtomicBool>,
 }
 
 impl RusTale {
@@ -389,6 +395,7 @@ impl RusTale {
                 tray_icon,
                 mods_state: ModsState::new(),
                 local_server_stop_tx: None,
+                cancellation_token: Arc::new(AtomicBool::new(false)),
             },
             Task::batch(vec![
                 Task::done(Message::Initialize),
@@ -427,6 +434,7 @@ impl RusTale {
                     self.download_client.clone(),
                     *target_ver,
                     policy,
+                    self.cancellation_token.clone(),
                 )
             } else {
                 Subscription::none()
@@ -709,6 +717,8 @@ impl RusTale {
             Message::StartGame => {
                 let mut tasks = Vec::new();
 
+                self.cancellation_token.store(false, Ordering::Relaxed);
+
                 if self.status == LauncherStatus::Playing {
                     self.running_game = None;
                     self.status = LauncherStatus::Ready;
@@ -966,24 +976,22 @@ impl RusTale {
             Message::OpenSettings => {
                 self.settings_state.open(self.settings.clone());
 
-                // CAMBIO IMPORTANTE:
-                // 1. No llamamos a RequestVersionCheck (evita HTTP).
-                // 2. Inyectamos las versiones cacheadas directamente.
-                self.settings_state.available_versions = self.available_versions.clone();
-                self.settings_state.is_loading_versions = false;
+                self.settings_state.is_loading_versions = true;
+                self.settings_state.available_versions.clear();
 
                 let channel = self.settings.channel.clone();
-                Task::perform(
-                    async move {
-                        let base_dir = config::get_app_dir();
-                        game::install::get_installed_versions(&base_dir, &channel).await
-                    },
-                    Message::InstalledVersionsReceived,
-                )
+                Task::done(Message::RequestVersionCheck(channel))
             }
             Message::CloseSettings => {
                 self.settings_state.is_open = false;
-                Task::none()
+
+                // Si por alguna razón el estado quedó en "Checking" (aunque con la corrección
+                // anterior no debería), esto fuerza una re-evaluación con los settings actuales (no guardados).
+                if self.status == LauncherStatus::Checking {
+                    Task::done(Message::CheckStatus)
+                } else {
+                    Task::none()
+                }
             }
             Message::SaveSettings(new_settings) => {
                 let old_settings = self.settings.clone();
@@ -1188,14 +1196,25 @@ impl RusTale {
                 )
             }
             Message::VersionsReceived(v) => {
+                // Actualizamos el estado del modal (lo que ve el usuario ahora)
                 self.settings_state.available_versions = v.clone();
 
+                // LÓGICA IMPORTANTE:
+                // Si el canal que estamos viendo en el modal (temp_settings) es igual
+                // al canal guardado globalmente (settings), actualizamos la caché global.
+                // Esto arregla el bug de que al volver a abrir se vean versiones viejas.
                 if self.settings_state.temp_settings.channel == self.settings.channel {
                     self.available_versions = v;
+
+                    // Si tenemos una versión más reciente detectada, actualizamos latest_version
+                    if let Some(first) = self.available_versions.first() {
+                        self.latest_version = Some(*first);
+                    }
                 }
 
                 self.settings_state.is_loading_versions = false;
 
+                // Actualizar lista de instalados (lógica visual)
                 let channel = self.settings_state.temp_settings.channel.clone();
                 Task::perform(
                     async move {
@@ -1306,12 +1325,14 @@ impl RusTale {
                 Task::none()
             }
             Message::DownloadError(err) => {
-                self.status = LauncherStatus::Ready;
-                self.error = Some(err);
-
-                self.running_game = None;
-
-                Task::none()
+                if err.contains("Cancelled by user") {
+                    Task::none()
+                } else {
+                    self.status = LauncherStatus::Ready;
+                    self.error = Some(err);
+                    self.running_game = None;
+                    Task::none()
+                }
             }
             Message::OpenFolder => {
                 util::open_game_folder();
@@ -1446,6 +1467,14 @@ impl RusTale {
                 Task::none()
             }
             Message::AppExit => self.save_and_exit(),
+            Message::CancelAction => {
+                self.cancellation_token.store(true, Ordering::Relaxed);
+                self.status = LauncherStatus::Ready;
+                self.status_text = self.localization.t("launcher.status.ready").to_string();
+                self.running_game = None;
+                self.download_progress = 0.0;
+                Task::none()
+            }
             Message::None => Task::none(),
         }
     }

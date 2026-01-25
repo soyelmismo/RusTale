@@ -8,6 +8,7 @@ use iced::{Subscription, stream};
 use std::hash::Hash;
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::{Arc, atomic::AtomicBool};
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::task;
@@ -38,6 +39,7 @@ pub fn run(
     client: reqwest::Client,
     target_version: Option<i32>,
     install_policy: InstallPolicy,
+    cancel_token: Arc<AtomicBool>,
 ) -> Subscription<Message> {
     subscription::from_recipe(Runner {
         settings,
@@ -46,6 +48,7 @@ pub fn run(
         client,
         target_version,
         install_policy,
+        cancel_token,
     })
 }
 
@@ -56,6 +59,7 @@ struct Runner {
     client: reqwest::Client,
     target_version: Option<i32>,
     install_policy: InstallPolicy,
+    cancel_token: Arc<AtomicBool>,
 }
 
 impl Recipe for Runner {
@@ -68,6 +72,7 @@ impl Recipe for Runner {
         self.player_uuid.hash(state);
         self.target_version.hash(state);
         self.install_policy.hash(state);
+        // cancel_token is not hashed as it's a dynamic signal
     }
 
     fn stream(
@@ -79,6 +84,7 @@ impl Recipe for Runner {
         let player_uuid = self.player_uuid;
         let client = self.client;
         let install_policy = self.install_policy;
+        let cancel_token = self.cancel_token;
 
         let s = stream::channel::<Message>(
             100,
@@ -124,6 +130,7 @@ impl Recipe for Runner {
                                 speed: msg.to_string(),
                             });
                         },
+                        Some(cancel_token),
                     )
                     .await;
 

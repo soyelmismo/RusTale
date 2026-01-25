@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
+use std::sync::{Arc, atomic::AtomicBool};
 
 #[derive(Debug, serde::Deserialize)]
 struct JREPlatform {
@@ -19,6 +20,7 @@ pub async fn download_jre(
     client: &reqwest::Client,
     base_dir: &PathBuf,
     progress_callback: impl Fn(&str, f64, &str),
+    cancel_token: Option<Arc<AtomicBool>>,
 ) -> Result<()> {
     // Define the persistent tools directory
     let tools_dir = base_dir.join("tools");
@@ -67,13 +69,19 @@ pub async fn download_jre(
     if !cache_file.exists() {
         progress_callback("jre", 10.0, &format!("Downloading {}...", file_name));
 
-        crate::game::downloader::download_file(client, &platform.url, &cache_file, |pct, speed| {
-            progress_callback(
-                "jre",
-                pct as f64,
-                &format!("Downloading {}... ({})", file_name, speed),
-            );
-        })
+        crate::game::downloader::download_file(
+            client,
+            &platform.url,
+            &cache_file,
+            |pct, speed| {
+                progress_callback(
+                    "jre",
+                    pct as f64,
+                    &format!("Downloading {}... ({})", file_name, speed),
+                );
+            },
+            cancel_token,
+        )
         .await?;
     }
 

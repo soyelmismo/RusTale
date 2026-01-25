@@ -627,7 +627,7 @@ impl SettingsState {
             }
             SettingsMessage::VersionSelected(version) => {
                 self.temp_settings.game_version = version;
-                Some(Message::CheckStatus)
+                None
             }
             SettingsMessage::CloseModal => {
                 self.is_open = false;
