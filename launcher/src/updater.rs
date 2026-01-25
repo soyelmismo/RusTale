@@ -58,9 +58,9 @@ pub async fn check_for_updates(client: &Client) -> Result<Option<ReleaseInfo>> {
 
 pub fn get_asset_url(info: &ReleaseInfo) -> Option<String> {
     let target = if cfg!(windows) {
-        "windows.exe"
+        "windows.zip"
     } else {
-        "linux"
+        "linux.zip"
     };
 
     info.assets
@@ -71,75 +71,99 @@ pub fn get_asset_url(info: &ReleaseInfo) -> Option<String> {
 
 pub async fn perform_update(client: Client, asset_url: String) -> Result<()> {
     let current_exe = env::current_exe()?;
-    let current_dir = current_exe.parent().context("No parent dir")?;
+    let app_dir = current_exe.parent().context("No parent dir")?;
 
-    let temp_name = if cfg!(windows) {
-        "rustale_new.exe"
-    } else {
-        "rustale_new"
-    };
-    let temp_path = current_dir.join(temp_name);
+    let update_dir = app_dir.join("update_temp");
+    if update_dir.exists() {
+        tokio::fs::remove_dir_all(&update_dir).await?;
+    }
+    tokio::fs::create_dir_all(&update_dir).await?;
 
-    println!("[Updater] Downloading from: {}", asset_url);
+    let zip_path = update_dir.join("update.zip");
+
+    println!("[Updater] Downloading ZIP from: {}", asset_url);
 
     let response = client.get(&asset_url).send().await?;
     if !response.status().is_success() {
         anyhow::bail!("Download failed: {}", response.status());
     }
-
     let content = response.bytes().await?;
-    tokio::fs::write(&temp_path, content).await?;
+    tokio::fs::write(&zip_path, content).await?;
 
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let file = std::fs::File::open(&temp_path)?;
-        let mut perms = file.metadata()?.permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&temp_path, perms)?;
-    }
+    println!("[Updater] Extracting ZIP...");
 
-    spawn_update_process(&current_exe, &temp_path)?;
+    let update_dir_clone = update_dir.clone();
+    let zip_path_clone = zip_path.clone();
+
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        let file = std::fs::File::open(&zip_path_clone)?;
+        let mut archive = zip::ZipArchive::new(file)?;
+        archive.extract(&update_dir_clone)?;
+        Ok(())
+    })
+    .await??;
+
+    tokio::fs::remove_file(&zip_path).await?;
+
+    println!("[Updater] Spawning update script...");
+    spawn_update_script(&current_exe, &update_dir)?;
+
     Ok(())
 }
 
-fn spawn_update_process(current: &Path, new: &Path) -> Result<()> {
-    let current_abs = std::fs::canonicalize(current)?;
-    let new_abs = std::fs::canonicalize(new)?;
-    let current_dir = current_abs.parent().unwrap();
+fn spawn_update_script(current_exe: &Path, update_dir: &Path) -> Result<()> {
+    let app_dir = current_exe.parent().unwrap();
 
     if cfg!(windows) {
-        let script = format!(
+        let script_content = format!(
             "@echo off\r\n\
-             timeout /t 1 /nobreak >nul\r\n\
-             del /F \"{}\"\r\n\
-             move /Y \"{}\" \"{}\"\r\n\
+             title RusTale Updating...\r\n\
+             timeout /t 2 /nobreak >nul\r\n\
+             echo Installing updates...\r\n\
+             xcopy /s /y \"{}\\*\" \"{}\\\"\r\n\
+             rmdir /s /q \"{}\"\r\n\
              start \"\" \"{}\"\r\n\
              del \"%~f0\"\r\n",
-            current_abs.display(),
-            new_abs.display(),
-            current_abs.display(),
-            current_abs.display()
+            update_dir.display(),
+            app_dir.display(),
+            update_dir.display(),
+            current_exe.display()
         );
-        let script_path = current_dir.join("update.bat");
-        std::fs::write(&script_path, script)?;
+
+        let script_path = app_dir.join("updater.bat");
+        std::fs::write(&script_path, script_content)?;
 
         std::process::Command::new("cmd")
             .args(["/C", &script_path.to_string_lossy()])
             .spawn()?;
     } else {
-        // En Linux usamos rutas absolutas para el mv y el reinicio
-        let script = format!(
-            "sleep 1; chmod +x \"{}\"; mv -f \"{}\" \"{}\"; \"{}\" &",
-            new_abs.display(),
-            new_abs.display(),
-            current_abs.display(),
-            current_abs.display()
+        let script_content = format!(
+            "#!/bin/sh\n\
+             sleep 2\n\
+             cp -rf \"{}/.\" \"{}/\"\n\
+             rm -rf \"{}\"\n\
+             chmod +x \"{}\"\n\
+             \"{}\" &\n",
+            update_dir.display(),
+            app_dir.display(),
+            update_dir.display(),
+            current_exe.display(),
+            current_exe.display()
         );
-        std::process::Command::new("sh")
-            .arg("-c")
-            .arg(script)
-            .spawn()?;
+
+        let script_path = app_dir.join("updater.sh");
+        std::fs::write(&script_path, script_content)?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&script_path)?.permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&script_path, perms)?;
+        }
+
+        std::process::Command::new("sh").arg(&script_path).spawn()?;
     }
+
     Ok(())
 }
