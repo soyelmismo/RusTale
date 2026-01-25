@@ -69,7 +69,7 @@ pub struct Args {
 
 // Add this function to detect if we are the proxy
 fn is_running_as_java_proxy() -> bool {
-    // 0. Safe fallback: Environment variable
+    // 0. Safe fallback: Environment variable (Set by Runner)
     if std::env::var("RUSTALE_IS_PROXY").is_ok() {
         return true;
     }
@@ -103,11 +103,39 @@ fn is_running_as_java_proxy() -> bool {
 }
 
 pub fn main() -> iced::Result {
+    // -----------------------------------------------------------------------
+    // 1. PROXY MODE CHECK (MUST BE FIRST)
+    // -----------------------------------------------------------------------
+    // We check this BEFORE parsing args with Clap, because Clap will panic
+    // if it receives JVM arguments (like -Xms, -jar) that are not defined in Args.
+    if is_running_as_java_proxy() {
+        // Read the mode from the environment variable set by the Runner
+        let mode_env = std::env::var("AURORA_MODE").unwrap_or_default();
+        let mode = match mode_env.as_str() {
+            "sanasol" => config::OnlineFixMode::Sanasol,
+            _ => config::OnlineFixMode::Local,
+        };
+
+        if let Err(e) = util::run_java_proxy_logic(mode) {
+            // Write to a panic log file just in case stdout is swallowed
+            if let Ok(mut f) = std::fs::File::create("proxy_panic.log") {
+                use std::io::Write;
+                let _ = writeln!(f, "Proxy Critical Error: {}", e);
+            }
+            eprintln!("Java Proxy Error: {}", e);
+            std::process::exit(1);
+        }
+        std::process::exit(0);
+    }
+
+    // -----------------------------------------------------------------------
+    // 2. WINDOWS CONSOLE ATTACHMENT
+    // -----------------------------------------------------------------------
     #[cfg(windows)]
     {
         // Si hay argumentos de consola, reconectamos la salida estándar
-        let args: Vec<String> = std::env::args().collect();
-        if args
+        let raw_args: Vec<String> = std::env::args().collect();
+        if raw_args
             .iter()
             .any(|a| a == "--dedicated-server" || a == "--help" || a == "-h")
         {
@@ -123,6 +151,7 @@ pub fn main() -> iced::Result {
             }
         }
     }
+
     #[cfg(target_os = "linux")]
     {
         if let Err(e) = gtk::init() {
@@ -130,7 +159,9 @@ pub fn main() -> iced::Result {
         }
     }
 
-    // 2. NORMAL MODE: Launcher GUI
+    // -----------------------------------------------------------------------
+    // 3. ARGUMENT PARSING (Only safe now that we know we aren't Java)
+    // -----------------------------------------------------------------------
     let args = Args::parse();
 
     // 1. Determine if we should start in Quickplay mode
@@ -138,15 +169,6 @@ pub fn main() -> iced::Result {
     let config_initialization_mode = config::load_initialization_config_sync();
     let (width, height) = config::load_width_height();
     let is_quickplay = args.quickplay || config_initialization_mode.quickplay;
-
-    // 1. PROXY MODE: Intercept server execution
-    if is_running_as_java_proxy() {
-        if let Err(e) = util::run_java_proxy_logic(config_initialization_mode.online_mode) {
-            eprintln!("Java Proxy Error: {}", e);
-            std::process::exit(1);
-        }
-        std::process::exit(0);
-    }
 
     if args.dedicated_server {
         // Inicializar runtime básico para el server (sin UI)
