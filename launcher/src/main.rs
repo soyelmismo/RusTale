@@ -906,6 +906,17 @@ impl RusTale {
                         return Task::none();
                     }
 
+                    // SAFETY CHECK 2: Do not update if Dedicated Server (separate process) is running
+                    // because it locks the executable file on Windows.
+                    let server_lock = SingleInstance::new("RusTaleServer_Lock").unwrap();
+                    if !server_lock.is_single() {
+                        println!(
+                            "Update found v{} but Dedicated Server is running. Skipping.",
+                            info.tag_name
+                        );
+                        return Task::none();
+                    }
+
                     self.status_text = format!("Update found: v{}", info.tag_name);
 
                     // Utilizar la función helper para obtener el asset correcto según el SO
