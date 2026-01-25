@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use rand::Rng;
 use std::path::PathBuf;
 use tokio::process::Command;
+use tokio::sync::mpsc;
 
 pub async fn run_server_flow(config: ServerConfig) -> Result<()> {
     println!("--- RusTale Dedicated Server ---");
@@ -205,22 +206,45 @@ pub async fn run_server_flow(config: ServerConfig) -> Result<()> {
 
     crate::util::make_executable(&PathBuf::from(&java_exec)).await?;
 
-    // -----------------------------------------------------------------------
-    // INICIAR TÚNEL (Si está configurado)
-    // -----------------------------------------------------------------------
     if let Some(provider) = &config.tunnel_provider {
         if provider == "playit" {
             let root_clone = root_dir.clone();
             let client_clone = client.clone();
 
-            // Lanzamos el túnel en background, vivirá tanto como el proceso principal
+            // Creamos un canal para esperar la señal
+            let (tx, mut rx) = mpsc::channel(1);
+
+            println!("Starting tunnel and waiting for connection details...");
+
+            // Lanzamos el túnel
             tokio::spawn(async move {
                 if let Err(e) =
-                    crate::server::tunnel::start_playit(&root_clone, &client_clone).await
+                    crate::server::tunnel::start_playit(&root_clone, &client_clone, tx).await
                 {
                     eprintln!("Tunnel Error: {}", e);
                 }
             });
+
+            // BLOQUEO: Esperamos aquí hasta que Playit diga algo
+            // Añadimos un timeout de 60 segundos para no bloquearnos eternamente
+            let timeout = tokio::time::sleep(tokio::time::Duration::from_secs(60));
+
+            tokio::select! {
+                res = rx.recv() => {
+                    match res {
+                        Some(msg) => {
+                            println!("\n---------------------------------------------------");
+                            println!("TUNNEL STATUS: {}", msg);
+                            println!("---------------------------------------------------\n");
+                            // Aquí podrías parsear la IP si la mandaste en el msg
+                        },
+                        None => println!("Tunnel closed unexpectedly."),
+                    }
+                }
+                _ = timeout => {
+                    println!("WARNING: Tunnel took too long to negotiate. Starting server anyway.");
+                }
+            }
         }
     }
 
@@ -251,6 +275,13 @@ pub async fn run_server_flow(config: ServerConfig) -> Result<()> {
             println!("Server exited with: {:?}", status?);
         }
     }
+
+    // LIMPIEZA: Matar el túnel al salir
+    // LIMPIEZA: El túnel se cerrará automáticamente al finalizar el runtime gracias a kill_on_drop
+    // if let Some(mut tp) = tunnel_process {
+    //     println!("Stopping Tunnel...");
+    //     let _ = tp.kill().await;
+    // }
 
     Ok(())
 }

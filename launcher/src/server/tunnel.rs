@@ -5,12 +5,18 @@ use std::process::Stdio;
 use tokio::fs;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
+use tokio::sync::mpsc;
 
-pub async fn start_playit(root_dir: &PathBuf, client: &reqwest::Client) -> Result<()> {
+// Añadimos un canal 'on_ready' para avisar al runner
+pub async fn start_playit(
+    root_dir: &PathBuf,
+    client: &reqwest::Client,
+    on_ready: mpsc::Sender<String>,
+) -> Result<()> {
     println!("--- Initializing Playit.gg Tunnel ---");
 
-    let tools_dir = root_dir.join("tools").join("playit");
-    fs::create_dir_all(&tools_dir).await?;
+    let playit_dir = root_dir.join("tools").join("playit");
+    fs::create_dir_all(&playit_dir).await?;
 
     // 1. Determinar ejecutable según SO
     let (binary_url, bin_name) = if cfg!(windows) {
@@ -25,7 +31,7 @@ pub async fn start_playit(root_dir: &PathBuf, client: &reqwest::Client) -> Resul
         )
     };
 
-    let bin_path = tools_dir.join(bin_name);
+    let bin_path = playit_dir.join(bin_name);
 
     // 2. Descargar si no existe
     if !bin_path.exists() {
@@ -37,7 +43,6 @@ pub async fn start_playit(root_dir: &PathBuf, client: &reqwest::Client) -> Resul
         let bytes = resp.bytes().await?;
         fs::write(&bin_path, bytes).await?;
 
-        // Permisos de ejecución en Linux
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -52,10 +57,14 @@ pub async fn start_playit(root_dir: &PathBuf, client: &reqwest::Client) -> Resul
     println!("[Tunnel] Launching agent...");
 
     let mut child = Command::new(&bin_path)
-        .current_dir(&tools_dir)
+        .arg("--stdout")
+        .arg("--secret-path")
+        .arg(&root_dir.join("tools").join("playit").join("secret.json"))
+        .current_dir(&playit_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
+        .env("TERM", "dumb")
         .spawn()
         .context("Failed to start playit agent")?;
 
@@ -63,34 +72,41 @@ pub async fn start_playit(root_dir: &PathBuf, client: &reqwest::Client) -> Resul
     let reader = BufReader::new(stdout);
     let mut lines = reader.lines();
 
-    // 4. Parsear salida en tiempo real
-    tokio::spawn(async move {
-        let re_claim = Regex::new(r"https://playit\.gg/claim/[a-zA-Z0-9]+").unwrap();
+    let re_url = Regex::new(r"https://playit\.gg/claim/[a-zA-Z0-9]+").unwrap();
+    let mut notified = false;
 
-        println!("\n=======================================================");
-        println!("           PLAYIT.GG TUNNEL STATUS");
-        println!("=======================================================\n");
+    println!("\n=== PLAYIT MONITOR ACTIVE ===\n");
 
-        while let Ok(Some(line)) = lines.next_line().await {
-            // Detectar URL de reclamación (primera vez)
-            if let Some(mat) = re_claim.find(&line) {
-                println!("\n>>> ACTION REQUIRED: Link this server to the internet:");
-                println!(">>> {}\n", mat.as_str());
-                // Opcional: Abrir navegador automáticamente
-                if let Err(e) = open::that(mat.as_str()) {
-                    eprintln!("Failed to open claim URL: {}", e);
-                }
+    while let Ok(Some(line)) = lines.next_line().await {
+        // [DEBUG] Comentado para evitar flood de la consola si Playit usa TUI
+        // println!("[Playit RAW] {}", line);
+
+        // CASO 1: Encontrar URL de reclamo
+        if let Some(mat) = re_url.find(&line) {
+            let url = mat.as_str().to_string();
+
+            if !notified {
+                println!("\n>>> ACTION REQUIRED: {}", url);
+                let _ = open::that(&url);
+                let _ = on_ready.send(format!("SETUP REQUIRED: {}", url)).await;
+                notified = true;
             }
-
-            // Detectar dirección pública (cuando ya está configurado)
-            if line.contains("tunnel running") || line.contains("allocated") {
-                println!("[Tunnel] {}", line);
-            }
-
-            // Log general para debug
-            // println!("[Playit] {}", line);
         }
-    });
+
+        // CASO 2: Túnel listo (busca palabras clave de playit v0.15+)
+        if line.contains("tunnel running")
+            || line.contains(".gl.joinmc.link")
+            || line.contains(".ply.gg")
+        {
+            if !notified {
+                let _ = on_ready.send("READY".to_string()).await;
+                notified = true;
+            }
+        }
+    }
+
+    // If loop ends, child died or stdout closed
+    let _ = child.kill().await;
 
     Ok(())
 }

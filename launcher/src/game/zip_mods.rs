@@ -293,12 +293,9 @@ fn find_smart_prefix(archive: &mut ZipArchive<fs::File>) -> Option<String> {
             if let Some(idx) = name.find("/Client/") {
                 return Some(name[..idx + 1].to_string());
             }
-            if let Some(idx) = name.find("/Server/") {
-                return Some(name[..idx + 1].to_string());
-            }
 
             // Simple root
-            if name.starts_with("Client/") || name.starts_with("Server/") {
+            if name.starts_with("Client/") {
                 return Some("".to_string());
             }
         }
