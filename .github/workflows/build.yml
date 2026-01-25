@@ -34,7 +34,7 @@ jobs:
         MONTH=$(date +'%-m')
         DAY=$(date +'%-d')
         SHA=$(git rev-parse --short HEAD)
-        echo "tag=$YEAR.$MONTH.$DAY-$SHA" >> $GITHUB_OUTPUT
+        echo "tag=$YEAR.$MONTH.$DAY-g$SHA" >> $GITHUB_OUTPUT
 
     - name: Inject version into Cargo.toml
       shell: bash
@@ -89,7 +89,7 @@ jobs:
         MONTH=$(date +'%-m')
         DAY=$(date +'%-d')
         SHA=$(git rev-parse --short HEAD)
-        echo "tag=$YEAR.$MONTH.$DAY-$SHA" >> $GITHUB_OUTPUT
+        echo "tag=$YEAR.$MONTH.$DAY-g$SHA" >> $GITHUB_OUTPUT
 
     - name: Inject version into Cargo.toml
       shell: bash
@@ -177,7 +177,7 @@ jobs:
         MONTH=$(date +'%-m')
         DAY=$(date +'%-d')
         SHA=$(git rev-parse --short HEAD)
-        TAG="v$YEAR.$MONTH.$DAY-$SHA"
+        TAG="v$YEAR.$MONTH.$DAY-g$SHA"
         echo "tag=$TAG" >> $GITHUB_OUTPUT
 
     - name: Publish GitHub Release
