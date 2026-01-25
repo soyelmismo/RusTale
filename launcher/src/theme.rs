@@ -265,6 +265,30 @@ pub fn primary_button_style(_theme: &Theme, status: button::Status) -> button::S
     }
 }
 
+pub fn success_button_style(_theme: &Theme, status: button::Status) -> button::Style {
+    let base = button::Style {
+        background: Some(Background::Color(ACCENT_GREEN)),
+        text_color: Color::BLACK,
+        border: Border {
+            radius: 6.0.into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    match status {
+        button::Status::Hovered | button::Status::Pressed => button::Style {
+            background: Some(Background::Color(Color::from_rgb(0.3, 0.9, 0.3))),
+            ..base
+        },
+        button::Status::Disabled => button::Style {
+            background: Some(Background::Color(Color::from_rgba(0.2, 0.8, 0.2, 0.5))),
+            text_color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
+            ..base
+        },
+        _ => base,
+    }
+}
+
 pub fn active_tab_style(_theme: &Theme, _status: button::Status) -> button::Style {
     button::Style {
         background: Some(Background::Color(Color::from_rgba(1.0, 0.658, 0.27, 0.15))),

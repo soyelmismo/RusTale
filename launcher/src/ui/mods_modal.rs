@@ -3,9 +3,9 @@ use crate::game::curseforge::{CfMod, SearchResult};
 use crate::game::mods::ModInfo;
 use crate::game::zip_mods::PatchManifest;
 use crate::theme;
-use iced::widget::{Space, button, column, container, image, row, scrollable, text, text_input}; // Importa image
+use iced::widget::{Space, button, column, container, image, row, scrollable, text, text_input};
 use iced::{Alignment, Color, ContentFit, Element, Length, Size, Task};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ModTab {
@@ -20,6 +20,7 @@ pub enum ModsMessage {
 
     // Local
     RefreshLocal,
+    RefreshLocalBackground,
     ToggleLocal(ModInfo),
     DeleteLocal(ModInfo),
     OpenFolder,
@@ -33,7 +34,7 @@ pub enum ModsMessage {
     SearchLoaded(Result<SearchResult, String>),
     ImageLoaded(i32, Result<image::Handle, String>), // id del mod, resultado
     InstallMod(CfMod),
-    ModInstalled(Result<String, String>), // Nombre del archivo instalado
+    ModInstalled(Result<String, String>, i32), // Nombre del archivo instalado, ID del mod
     OpenModPage(String),
     InstallZipPatch(std::path::PathBuf, GameSettings), // Ruta del archivo ZIP seleccionado
     ToggleZipPatch(String, bool),                      // ID, nuevo estado (true=activar)
@@ -59,6 +60,9 @@ pub struct ModsState {
     pub patch_mods: Vec<PatchManifest>,
     pub installed_mods: Vec<ModInfo>,
     pub temp_settings: GameSettings,
+
+    pub installing_ids: HashSet<i32>,
+    pub installed_ids: HashSet<i32>,
 }
 
 impl Default for ModsState {
@@ -77,6 +81,8 @@ impl Default for ModsState {
             installed_mods: Vec::new(),
             patch_mods: Vec::new(),
             temp_settings: GameSettings::default(),
+            installing_ids: HashSet::new(),
+            installed_ids: HashSet::new(),
         }
     }
 }
@@ -97,10 +103,11 @@ impl ModsState {
             patch_mods: Vec::new(),
             installed_mods: Vec::new(),
             temp_settings: GameSettings::default(),
+            installing_ids: HashSet::new(),
+            installed_ids: HashSet::new(),
         }
     }
 
-    // Lógica de actualización encapsulada para mantener main.rs limpio
     pub fn update(
         &mut self,
         message: ModsMessage,
@@ -120,35 +127,13 @@ impl ModsState {
                 // Limpiamos visualmente para dar feedback de carga
                 self.installed_mods.clear();
                 self.patch_mods.clear();
+                self.installing_ids.clear();
+                self.installed_ids.clear();
 
-                let base_dir_clone = base_dir.clone();
-                let channel = settings.channel.clone();
-                let version_str = if settings.game_version == 0 {
-                    "latest".to_string()
-                } else {
-                    settings.game_version.to_string()
-                };
-
-                // USAMOS LA CARGA COMPLEJA (JARS + PATCHES)
-                Task::perform(
-                    async move {
-                        // 1. Carga JARs/ZIPs en carpeta Mods
-                        let jars =
-                            crate::game::mods::list_mods(&base_dir_clone, &channel, &version_str)
-                                .await
-                                .map_err(|e| e.to_string())?;
-
-                        // 2. Carga Parches instalados (manifests)
-                        let paths = crate::game::GamePaths::new(base_dir_clone);
-                        let patches_dir = paths.core_patches_dir(&channel, &version_str);
-                        let patches = crate::game::zip_mods::list_patches(patches_dir)
-                            .map_err(|e| e.to_string())?;
-
-                        Ok((jars, patches))
-                    },
-                    |res| ModsMessage::ModsLoadedComplex(res),
-                )
+                self.load_mods_task(base_dir, settings)
             }
+
+            ModsMessage::RefreshLocalBackground => self.load_mods_task(base_dir, settings),
 
             ModsMessage::ModsLoaded(res) => {
                 self.loading = false;
@@ -160,7 +145,9 @@ impl ModsState {
             }
 
             ModsMessage::ModsLoadedComplex(res) => {
-                self.loading = false;
+                if self.loading {
+                    self.loading = false;
+                }
                 match res {
                     Ok((jars, patches)) => {
                         self.installed_mods = jars;
@@ -168,9 +155,9 @@ impl ModsState {
                         self.error = None;
                     }
                     Err(e) => {
-                        self.error = Some(format!("Error loading mods: {}", e));
-                        self.installed_mods.clear();
-                        self.patch_mods.clear();
+                        if self.is_open {
+                            self.error = Some(format!("Error loading mods: {}", e));
+                        }
                     }
                 }
                 Task::none()
@@ -193,28 +180,18 @@ impl ModsState {
                             .unwrap();
                         Ok::<(), String>(())
                     },
-                    |_| ModsMessage::RefreshLocal,
+                    |_| ModsMessage::RefreshLocalBackground,
                 )
             }
 
             ModsMessage::DeleteLocal(mod_info) => {
                 self.loading = true;
-                let base_dir = base_dir.clone();
-                let channel = settings.channel.clone();
-                let ver = if settings.game_version == 0 {
-                    "latest".to_string()
-                } else {
-                    settings.game_version.to_string()
-                };
-
                 Task::perform(
                     async move {
                         let _ = crate::game::mods::delete_mod(&mod_info).await;
-                        crate::game::mods::list_mods(&base_dir, &channel, &ver)
-                            .await
-                            .map_err(|e| e.to_string())
+                        Ok::<(), String>(())
                     },
-                    ModsMessage::ModsLoaded,
+                    |_| ModsMessage::RefreshLocalBackground,
                 )
             }
 
@@ -307,7 +284,8 @@ impl ModsState {
                 Task::none()
             }
             ModsMessage::InstallMod(cf_mod) => {
-                self.loading = true;
+                self.installing_ids.insert(cf_mod.id);
+                let mod_id = cf_mod.id;
 
                 if let Some(file) = cf_mod.latest_files.first() {
                     if let Some(url) = &file.download_url {
@@ -349,30 +327,30 @@ impl ModsState {
                                                 return Err("Downloaded file is empty (0 bytes)"
                                                     .to_string());
                                             }
-                                            // Opcional: Validar que sea un zip/jar válido si se desea más robustez
                                         }
                                         Ok(file_name)
                                     }
                                     Err(e) => Err(e.to_string()),
                                 }
                             },
-                            ModsMessage::ModInstalled,
+                            move |res| ModsMessage::ModInstalled(res, mod_id),
                         );
                     }
                 }
+                self.installing_ids.remove(&mod_id);
                 self.error = Some("No download URL available".to_string());
-                self.loading = false;
                 Task::none()
             }
             ModsMessage::OpenModPage(url) => {
-                let _ = open::that(url); // Abre la URL en el navegador predeterminado
+                let _ = open::that(url);
                 Task::none()
             }
 
-            ModsMessage::ModInstalled(res) => {
-                self.loading = false;
+            ModsMessage::ModInstalled(res, mod_id) => {
+                self.installing_ids.remove(&mod_id);
                 match res {
                     Ok(file_name) => {
+                        self.installed_ids.insert(mod_id);
                         let base_dir_clone = base_dir.clone();
                         let channel = settings.channel.clone();
                         let ver = if settings.game_version == 0 {
@@ -391,15 +369,12 @@ impl ModsState {
                         });
                         let full_path = mods_dir.join(&file_name);
 
-                        // Si es un ZIP y contiene estructura de parche, activamos la instalación especial
                         if file_name.ends_with(".zip")
                             && crate::game::zip_mods::is_patch_mod(&full_path)
                         {
-                            // Disparamos la instalación del parche
                             Task::done(ModsMessage::InstallZipPatch(full_path, settings))
                         } else {
-                            // Es un mod normal, solo refrescamos la lista
-                            Task::done(ModsMessage::RefreshLocal)
+                            Task::done(ModsMessage::RefreshLocalBackground)
                         }
                     }
                     Err(e) => {
@@ -515,10 +490,7 @@ impl ModsState {
             ModsMessage::PatchOperationFinished(res) => {
                 self.loading = false;
                 match res {
-                    Ok(_) => {
-                        // Recargar lista de mods (tanto normales como patches)
-                        Task::done(ModsMessage::RefreshLocal)
-                    }
+                    Ok(_) => Task::done(ModsMessage::RefreshLocalBackground),
                     Err(e) => {
                         self.error = Some(format!("Patch operation failed: {}", e));
                         Task::none()
@@ -526,6 +498,36 @@ impl ModsState {
                 }
             }
         }
+    }
+
+    fn load_mods_task(
+        &self,
+        base_dir: std::path::PathBuf,
+        settings: GameSettings,
+    ) -> Task<ModsMessage> {
+        let base_dir_clone = base_dir.clone();
+        let channel = settings.channel.clone();
+        let version_str = if settings.game_version == 0 {
+            "latest".to_string()
+        } else {
+            settings.game_version.to_string()
+        };
+
+        Task::perform(
+            async move {
+                let jars = crate::game::mods::list_mods(&base_dir_clone, &channel, &version_str)
+                    .await
+                    .map_err(|e| e.to_string())?;
+
+                let paths = crate::game::GamePaths::new(base_dir_clone);
+                let patches_dir = paths.core_patches_dir(&channel, &version_str);
+                let patches =
+                    crate::game::zip_mods::list_patches(patches_dir).map_err(|e| e.to_string())?;
+
+                Ok((jars, patches))
+            },
+            |res| ModsMessage::ModsLoadedComplex(res),
+        )
     }
 
     fn perform_search(&mut self, client: reqwest::Client) -> Task<ModsMessage> {
@@ -658,7 +660,7 @@ impl ModsState {
             .spacing(10);
 
             for m in &self.installed_mods {
-                mod_list = mod_list.push(super::mods_modal::mod_row(m));
+                mod_list = mod_list.push(mod_row(m));
             }
             content = content.push(mod_list);
         }
@@ -745,7 +747,20 @@ impl ModsState {
         &'a self,
         cf_mod: &'a crate::game::curseforge::CfMod,
     ) -> Element<'a, ModsMessage> {
-        // CORRECCIÓN: Uso correcto de iced::Theme para el estilo dinámico
+        let is_installing = self.installing_ids.contains(&cf_mod.id);
+        let is_installed = self.installed_ids.contains(&cf_mod.id);
+
+        let action_btn = if is_installing {
+            button(text("Downloading...").size(12)).style(theme::ghost_button_style)
+        } else if is_installed {
+            button(text("Installed").size(12)).style(theme::success_button_style)
+        } else {
+            button(text("Install").size(12))
+                .on_press(ModsMessage::InstallMod(cf_mod.clone()))
+                .style(theme::primary_button_style)
+        }
+        .padding(8);
+
         let thumb: Element<'a, ModsMessage> = if let Some(handle) = self.thumbnails.get(&cf_mod.id)
         {
             image(handle.clone())
@@ -758,14 +773,13 @@ impl ModsState {
                 .width(50)
                 .height(50)
                 .style(|_t: &iced::Theme| container::Style {
-                    // Uso iced::Theme
                     background: Some(iced::Background::Color(Color::from_rgb(0.2, 0.2, 0.2))),
                     ..Default::default()
                 })
                 .into()
         };
 
-        button(
+        container(
             row![
                 thumb,
                 column![
@@ -780,22 +794,18 @@ impl ModsState {
                 ]
                 .spacing(4)
                 .width(Length::Fill),
-                button(text("INSTALL"))
-                    .on_press(ModsMessage::InstallMod(cf_mod.clone()))
-                    .style(theme::primary_button_style)
-                    .padding(8)
+                action_btn
             ]
             .spacing(15)
             .align_y(Alignment::Center),
         )
-        .on_press(ModsMessage::OpenModPage(cf_mod.links.website_url.clone()))
-        .style(theme::ghost_button_style)
         .padding(10)
+        .style(theme::card_style)
         .into()
     }
 }
 
-fn mod_row<'a>(mod_info: &'a ModInfo) -> Element<'a, ModsMessage> {
+pub fn mod_row<'a>(mod_info: &'a ModInfo) -> Element<'a, ModsMessage> {
     let status_color = if mod_info.enabled {
         theme::ACCENT_GREEN
     } else {
