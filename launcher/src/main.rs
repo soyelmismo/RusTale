@@ -552,9 +552,10 @@ impl RusTale {
                 self.settings = s.clone();
                 self.settings_state.temp_settings = s;
 
+                self.localization = loc;
+
                 let current_lang = self.settings.language.clone();
                 self.localization.load_language(&current_lang);
-                let _ = loc; // discard dummy loc if needed
 
                 self.reconcile_local_server();
 
