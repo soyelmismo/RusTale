@@ -253,7 +253,7 @@ impl SettingsState {
             _ => theme::secondary_button_style,
         };
 
-        button(
+        let mut btn = button(
             container(
                 row![
                     svg(util::icons::icon(util::icons::REFRESH))
@@ -266,16 +266,20 @@ impl SettingsState {
                 .align_y(Alignment::Center),
             )
             .center_x(Length::Fill),
-        )
-        .on_press(SettingsMessage::CheckForLauncherUpdates)
-        .style(style)
-        .width(if is_compact {
-            Length::Fill
-        } else {
-            Length::Fixed(180.0)
-        })
-        .padding(8)
-        .into()
+        );
+
+        if !matches!(self.update_btn_status, UpdateStatus::Checking) {
+            btn = btn.on_press(SettingsMessage::CheckForLauncherUpdates);
+        }
+
+        btn.style(style)
+            .width(if is_compact {
+                Length::Fill
+            } else {
+                Length::Fixed(180.0)
+            })
+            .padding(8)
+            .into()
     }
 
     fn view_game_tab<'a>(
@@ -732,7 +736,7 @@ impl SettingsState {
                 }
                 None
             }
-            SettingsMessage::WaitAndReset => Some(Message::Settings(SettingsMessage::WaitAndReset)),
+            SettingsMessage::WaitAndReset => None,
             SettingsMessage::None => None,
         }
     }

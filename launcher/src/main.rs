@@ -505,7 +505,11 @@ impl RusTale {
                 | Message::GenerateRandomUUID
                 | Message::RequestMoveData(_)
                 | Message::StartMigrationActual(_, _)
-                | Message::MigrationProgress(_) => {}
+                | Message::MigrationProgress(_)
+                | Message::LauncherUpdate(_)
+                | Message::CheckStatus
+                | Message::BackgroundLoaded(_)
+                | Message::News(_) => {}
                 _ => return Task::none(),
             }
         }
