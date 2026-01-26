@@ -203,7 +203,7 @@ impl SettingsState {
             selected_language,
             SettingsMessage::LanguageSelected,
         )
-        .text_size(14) // Tamaño de texto explícito
+        .text_size(14)
         .placeholder(localization.t("settings.language_placeholder"))
         .padding(10)
         .width(150)
@@ -372,11 +372,10 @@ impl SettingsState {
             minimize_tray_chk.into(),
             minimize_play_chk.into(),
             quickplay_chk.into(),
-            // === SOLUCIÓN ANTI-BUCLE INFINITO ===
-            // 1. El texto y su descripción en un contenedor de tamaño fijo
+            // === SOLUCION ANTI-BUCLE INFINITO ===
             {
                 let text_content = column![
-                    container(theme::lsd_magic_text("LSD", ctx)).height(20), // Altura fija para evitar saltos de línea
+                    container(theme::lsd_magic_text("LSD", ctx)).height(20), // Altura fija para evitar saltos de linea
                     theme::text(
                         text(localization.t("settings.lsd_desc"))
                             .size(10)

@@ -60,7 +60,7 @@ async fn cleanup_launcher(base_dir: &PathBuf) {
 
     // Rotación básica de logs (Placeholder para lógica más compleja)
     let logs_dir = base_dir.join("logs");
-    cleanup_old_files(&logs_dir, 7).await; // Borrar logs de más de 7 días
+    cleanup_old_files(&logs_dir, 7).await; // Borrar logs de más de 7 dias
 }
 
 // Función auxiliar nueva

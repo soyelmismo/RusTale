@@ -94,7 +94,7 @@ struct HealthResponse {
     server: String,
 }
 
-// Payload específico para JWT de Auth Grant y Access Token
+// Payload especifico para JWT de Auth Grant y Access Token
 #[derive(Serialize)]
 struct AuthTokenPayload {
     exp: i64,
@@ -211,7 +211,6 @@ struct ServerState {
     game_dir: PathBuf,
 }
 
-// AÑADIR ESTA FUNCIÓN AL FINAL O DONDE PREFIERAS
 pub async fn is_server_alive(port: u16) -> bool {
     let client = reqwest::Client::new();
     let url = format!("http://127.0.0.1:{}/health", port);
@@ -475,7 +474,7 @@ pub async fn start_server(
     {
         match std::net::TcpListener::bind(addr) {
             Ok(_) => {
-                // El puerto está libre. El listener se dropea aquí, liberando el puerto.
+                // El puerto está libre. El listener se dropea aqui, liberando el puerto.
             }
             Err(_) => {
                 eprintln!("Port {} is already in use.", port);
@@ -770,7 +769,7 @@ async fn handle_session_new(
         .map(|s| s.as_str())
         .unwrap_or(DEFAULT_SKIN);
 
-    // Si el cliente pide scopes específicos, los usamos, si no, ponemos los default
+    // Si el cliente pide scopes especificos, los usamos, si no, ponemos los default
     let scope_str = body
         .scopes
         .map(|s| s.join(" "))
@@ -854,15 +853,15 @@ async fn handle_session_authorize(
 ) -> impl warp::Reply {
     let state = state.lock().await;
 
-    // Aquí vemos qué servidor está intentando conectarse
+    // Aqui vemos qué servidor está intentando conectarse
     println!(">>> [SESSION AUTHORIZE] Un servidor pide permiso");
     println!("    Server Audience ID: {:?}", body.audience);
     println!("    Scopes: {:?}", body.scopes);
     println!("    Extra fields: {:?}", body.extra);
 
-    // Simulamos validación del token de identidad (en prod habría que verificar firma)
+    // Simulamos validación del token de identidad (en prod habria que verificar firma)
     if body.identity_token.is_empty() {
-        println!("    ! Advertencia: Identity Token vacío");
+        println!("    ! Advertencia: Identity Token vacio");
     }
 
     let audience = body
@@ -946,7 +945,7 @@ async fn handle_profile_lookup_username(
     println!(">>> [PROFILE LOOKUP] Buscando usuario: {}", username_query);
 
     // En este emulador simple local, solo "existimos" nosotros.
-    // Si buscan nuestro nombre (ignorando mayúsculas/minúsculas), devolvemos nuestro UUID.
+    // Si buscan nuestro nombre (ignorando mayusculas/minusculas), devolvemos nuestro UUID.
     if username_query.to_lowercase() == state.username.to_lowercase() {
         let resp = ProfileLookupResponse {
             uuid: state.uuid.clone(),

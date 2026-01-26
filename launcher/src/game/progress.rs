@@ -20,7 +20,6 @@ impl ProgressTracker {
         }
     }
 
-    /// Añade un paso a la lista. El orden importa.
     pub fn add_step(mut self, id: &'static str, weight: f32) -> Self {
         self.steps.push(ProgressStep { id, weight });
         self.total_weight += weight;
@@ -48,10 +47,10 @@ impl ProgressTracker {
         }
 
         // Si la fase reportada no está en nuestra lista (ej. un paso nuevo no registrado),
-        // devolvemos un cálculo seguro o el último valor conocido.
+        // devolvemos un cálculo seguro o el ultimo valor conocido.
         if !found {
             // Fallback: si no conocemos el paso, asumimos 0% de progreso extra
-            // o podrías retornar sub_progress si quieres comportamiento por defecto.
+            // o podrias retornar sub_progress si quieres comportamiento por defecto.
             return (accumulated_weight / self.total_weight) * 100.0;
         }
 

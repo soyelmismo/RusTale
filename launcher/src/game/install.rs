@@ -57,7 +57,7 @@ pub async fn get_installed_versions(base_dir: &PathBuf, channel: &str) -> Vec<(i
     let channel_dir = base_dir.join(channel);
     let mut installed = Vec::new();
 
-    // 1. Revisar carpetas numéricas específicas (ej: "8", "9")
+    // 1. Revisar carpetas numéricas especificas (ej: "8", "9")
     if let Ok(mut entries) = fs::read_dir(&channel_dir).await {
         while let Ok(Some(entry)) = entries.next_entry().await {
             if let Ok(file_type) = entry.file_type().await {
@@ -76,7 +76,7 @@ pub async fn get_installed_versions(base_dir: &PathBuf, channel: &str) -> Vec<(i
                                     });
 
                             if fs::metadata(&client_path).await.is_ok() {
-                                installed.push((ver, false)); // false = carpeta explícita
+                                installed.push((ver, false)); // false = carpeta explicita
                             }
                         }
                     }
@@ -239,7 +239,7 @@ pub async fn ensure_installed(
         println!("Manual installation adopted as version {}", remote_version);
     }
 
-    // Verificar si ya está al día
+    // Verificar si ya está al dia
     if files_exist && (!is_latest || version_manifest.current_local == remote_version) {
         progress_callback("complete", 100.0, "Game is up to date");
         return Ok(());

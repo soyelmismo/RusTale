@@ -75,7 +75,7 @@ fn load_or_generate_keys(path: &PathBuf) -> SigningKey {
         println!("[Crypto] Claves corruptas o ilegibles. Generando nuevas.");
     }
 
-    // SOLUCIÓN AL ERROR: Generar bytes manualmente para evitar conflicto de versiones de rand
+    // SOLUCION AL ERROR: Generar bytes manualmente para evitar conflicto de versiones de rand
     let mut bytes = [0u8; 32];
     rand::rng().fill(&mut bytes);
     let signing_key = SigningKey::from_bytes(&bytes);
@@ -97,7 +97,7 @@ fn parse_private_key(base64_str: &str) -> Result<SigningKey, ()> {
 
     // Caso 2: PKCS8 DER (~48 bytes).
     // Node.js crypto.generateKeyPairSync('ed25519') envuelve la clave en una estructura ASN.1.
-    // Para Ed25519, la clave privada son los últimos 32 bytes de la estructura Octet String.
+    // Para Ed25519, la clave privada son los ultimos 32 bytes de la estructura Octet String.
     if bytes.len() > 32 {
         if let Some(raw_key) = bytes.get(bytes.len() - 32..) {
             let array: [u8; 32] = raw_key.try_into().map_err(|_| ())?;

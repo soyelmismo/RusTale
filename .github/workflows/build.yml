@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   # ---------------------------------------------------
-  # 1. JOB DE COMPILACIÓN WINDOWS
+  # 1. JOB DE COMPILACION WINDOWS
   # ---------------------------------------------------
   build-windows:
     runs-on: windows-latest
@@ -66,7 +66,7 @@ jobs:
         path: RusTale-windows.zip
 
   # ---------------------------------------------------
-  # 2. JOB DE COMPILACIÓN LINUX
+  # 2. JOB DE COMPILACION LINUX
   # ---------------------------------------------------
   build-linux:
     runs-on: ubuntu-latest
@@ -147,17 +147,17 @@ jobs:
         name: binary-linux
         path: release_assets
 
-    # GENERACIÓN DE CHANGELOG
+    # GENERACION DE CHANGELOG
     - name: Generate Changelog
       id: changelog
       run: |
-        # Busca el último tag. Si no existe, usa el hash inicial.
+        # Busca el ultimo tag. Si no existe, usa el hash inicial.
         LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
         
         echo "Generating changelog since: $LAST_TAG"
         
         if [ -z "$LAST_TAG" ]; then
-          # Si es el primer release, toma los últimos 20 commits
+          # Si es el primer release, toma los ultimos 20 commits
           CHANGES=$(git log --pretty=format:"- %s (%h)" -n 20)
         else
           # Si hay tag previo, toma los cambios desde ese tag hasta HEAD
@@ -169,7 +169,7 @@ jobs:
         echo "$CHANGES" >> $GITHUB_OUTPUT
         echo "EOF" >> $GITHUB_OUTPUT
 
-    # GENERACIÓN DE VERSIÓN (Fecha + Hash Corto)
+    # GENERACION DE VERSION (Fecha + Hash Corto)
     - name: Generate Version Tag
       id: tagger
       run: |

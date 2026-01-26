@@ -17,7 +17,7 @@ fn main() {
     let root_dir = PathBuf::from(manifest_dir).parent().unwrap().to_path_buf();
     let aurora_dir = root_dir.join("aurora");
 
-    // Detectar extensión según sistema operativo
+    // Detectar extensión segun sistema operativo
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
     let (lib_name, ext) = match target_os.as_str() {
         "windows" => ("aurora", "dll"),

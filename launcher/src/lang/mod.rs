@@ -8,7 +8,7 @@ struct Asset;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Language {
     pub id: String,   // Ej: "es-ES"
-    pub name: String, // Ej: "Español"
+    pub name: String, // Ej: "English"
 }
 
 impl std::fmt::Display for Language {

@@ -321,12 +321,10 @@ pub async fn run_server_flow(config: ServerConfig) -> Result<()> {
             let root_clone = root_dir.clone();
             let client_clone = client.clone();
 
-            // Creamos un canal para esperar la señal
             let (tx, mut rx) = mpsc::channel(1);
 
             println!("Starting tunnel and waiting for connection details...");
 
-            // Lanzamos el túnel
             tokio::spawn(async move {
                 if let Err(e) =
                     crate::server::tunnel::start_playit(&root_clone, &client_clone, tx).await
@@ -335,8 +333,7 @@ pub async fn run_server_flow(config: ServerConfig) -> Result<()> {
                 }
             });
 
-            // BLOQUEO: Esperamos aquí hasta que Playit diga algo
-            // Añadimos un timeout de 60 segundos para no bloquearnos eternamente
+            // BLOQUEO: Esperamos aqui hasta que Playit diga algo
             let timeout = tokio::time::sleep(tokio::time::Duration::from_secs(60));
 
             tokio::select! {
@@ -346,7 +343,7 @@ pub async fn run_server_flow(config: ServerConfig) -> Result<()> {
                             println!("\n---------------------------------------------------");
                             println!("TUNNEL STATUS: {}", msg);
                             println!("---------------------------------------------------\n");
-                            // Aquí podrías parsear la IP si la mandaste en el msg
+                            // Aqui podrias parsear la IP si la mandaste en el msg
                         },
                         None => println!("Tunnel closed unexpectedly."),
                     }

@@ -29,7 +29,7 @@ pub struct BlogPost {
 
     pub author: String,
 
-    // Usamos default para que si el campo falta, sea false/vacío
+    // Usamos default para que si el campo falta, sea false/vacio
     #[serde(default)]
     pub featured: bool,
 

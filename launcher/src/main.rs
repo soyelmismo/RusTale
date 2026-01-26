@@ -430,7 +430,7 @@ impl RusTale {
         let game_runner =
             if let Some((settings, name, uuid, target_ver, trigger_status)) = &self.running_game {
                 // Ahora usamos trigger_status en lugar de self.status
-                // Esto garantiza que si pulsamos "ACTUALIZAR", la política sea NetworkUpdate
+                // Esto garantiza que si pulsamos "ACTUALIZAR", la politica sea NetworkUpdate
                 let policy = match trigger_status {
                     LauncherStatus::NeedsInstall | LauncherStatus::NeedsUpdate => {
                         InstallPolicy::NetworkUpdate
@@ -463,7 +463,7 @@ impl RusTale {
             _ => Message::None,
         });
 
-        // SOLUCIÓN: Mantener el tick vivo si el modal está abierto para evitar lag de arranque/parada
+        // SOLUCION: Mantener el tick vivo si el modal está abierto para evitar lag de arranque/parada
         let tick_sub =
             if self.settings.theme.lsd_mode || self.lsd_preview || self.settings_state.is_open {
                 // Si el modal está abierto, mantenemos el tick vivo para evitar el lag de arranque/parada
@@ -870,7 +870,7 @@ impl RusTale {
                 // Rebuild tray menu to show "Start Game"
                 self.rebuild_tray_menu();
 
-                // Modificamos la lógica aquí para mayor seguridad:
+                // Modificamos la lógica aqui para mayor seguridad:
                 // Solo salimos si es quickplay Y la ventana no está visible.
                 if self.is_quickplay_mode && !self.is_window_visible {
                     return self.save_and_exit();
@@ -886,7 +886,7 @@ impl RusTale {
                     });
                 }
 
-                // Si veníamos de quickplay pero el usuario abrió la ventana,
+                // Si veniamos de quickplay pero el usuario abrió la ventana,
                 // nos aseguramos de que la ventana se quede visible y activa.
                 if self.is_window_visible {
                     return window::oldest().and_then(|id| {
@@ -963,7 +963,7 @@ impl RusTale {
 
                     self.status_text = format!("Update found: v{}", info.tag_name);
 
-                    // Utilizar la función helper para obtener el asset correcto según el SO
+                    // Utilizar la función helper para obtener el asset correcto segun el SO
                     if let Some(url) = updater::get_asset_url(&info) {
                         Task::done(Message::LauncherUpdate(
                             updater::UpdaterMessage::StartUpdate(url),
@@ -1062,7 +1062,7 @@ impl RusTale {
                 self.settings_state.is_open = false;
 
                 // Si por alguna razón el estado quedó en "Checking" (aunque con la corrección
-                // anterior no debería), esto fuerza una re-evaluación con los settings actuales (no guardados).
+                // anterior no deberia), esto fuerza una re-evaluación con los settings actuales (no guardados).
                 if self.status == LauncherStatus::Checking {
                     Task::done(Message::CheckStatus)
                 } else {
@@ -1133,7 +1133,7 @@ impl RusTale {
                             // Sincronizar el estado temporal para que el checkbox visual se actualice
                             self.settings_state.temp_settings.theme.lsd_mode = *val;
 
-                            // CRÍTICO: Si lo desactivamos, forzamos que el preview sea false
+                            // CRITICO: Si lo desactivamos, forzamos que el preview sea false
                             // para evitar que la vibración residual reactive el ciclo.
                             if !*val {
                                 self.lsd_preview = false;
@@ -1164,7 +1164,7 @@ impl RusTale {
                 }
             }
 
-            // LÓGICA DE MIGRACIÓN
+            // LOGICA DE MIGRACION
             Message::RequestMoveData(new_path) => {
                 // 1. Validaciones previas
                 if self.status == LauncherStatus::Playing || self.running_game.is_some() {
@@ -1212,7 +1212,6 @@ impl RusTale {
                                     )
                                     .await;
 
-                                    // Señal de fin
                                     let _ = tx.send(if res.is_ok() { 200.0 } else { -1.0 });
                                     if let Err(e) = res {
                                         eprintln!("Migration error: {}", e);
@@ -1308,7 +1307,7 @@ impl RusTale {
                 // Actualizamos el estado del modal (lo que ve el usuario ahora)
                 self.settings_state.available_versions = v.clone();
 
-                // LÓGICA IMPORTANTE:
+                // LOGICA IMPORTANTE:
                 // Si el canal que estamos viendo en el modal (temp_settings) es igual
                 // al canal guardado globalmente (settings), actualizamos la caché global.
                 // Esto arregla el bug de que al volver a abrir se vean versiones viejas.
@@ -1521,7 +1520,7 @@ impl RusTale {
                     self.is_window_visible = !self.is_window_visible;
                     let is_visible = self.is_window_visible;
 
-                    // Igual aquí, si muestra la ventana, ya no es quickplay puro
+                    // Igual aqui, si muestra la ventana, ya no es quickplay puro
                     if is_visible {
                         self.is_quickplay_mode = false;
                     }
@@ -1668,7 +1667,7 @@ impl RusTale {
 
         let tint_color = theme::background_tint_color(palette);
 
-        // 2. Creamos la capa de tinte (un contenedor vacío con color de fondo)
+        // 2. Creamos la capa de tinte (un contenedor vacio con color de fondo)
         let tint_overlay = container(Space::new())
             .width(Length::Fill)
             .height(Length::Fill)
@@ -1729,7 +1728,7 @@ impl RusTale {
                 .spacing(20)
                 .into()
         } else {
-            // MODO COMPACTO / VENTANA PEQUEÑA
+            // MODO COMPACTO
             // Usamos Length::Fill para que ocupe todo el ancho disponible
             // Reducimos el padding para aprovechar espacio en ventanas muy pequeñas (480px)
             let padding = if self.window_size.width < 500.0 {
@@ -1744,7 +1743,6 @@ impl RusTale {
                 .padding(padding) // Padding dinámico
                 .style(move |t| theme::glass_container(&palette, t));
 
-            // Centramos la columna si hay mucho espacio, o la llenamos si es pequeña
             if self.window_size.width > 500.0 {
                 row![
                     Space::new().width(Length::Fill),

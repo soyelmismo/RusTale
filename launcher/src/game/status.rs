@@ -52,7 +52,7 @@ pub async fn calculate_status(
         return (LauncherStatus::Ready, None);
     }
 
-    // LÓGICA DE CACHÉ
+    // LOGICA DE CACHE
     // Si ya tenemos el dato remoto (del inicio del launcher), lo usamos.
     if let Some(remote_ver) = cached_remote_latest {
         // Leemos la versión local del json

@@ -337,7 +337,7 @@ pub async fn load_profiles() -> ProfilesConfig {
 
     // ALGORITMO DE LIMPIEZA: Guardamos inmediatamente.
     // (Deshabilitado a petición del usuario para evitar reescrituras innecesarias al inicio)
-    // 1. Si había claves obsoletas en el archivo, se pierden al leer en el struct y no se escriben de nuevo.
+    // 1. Si habia claves obsoletas en el archivo, se pierden al leer en el struct y no se escriben de nuevo.
     // 2. Si faltaban claves nuevas, el struct las tiene por default y se escriben ahora.
     // 3. Los valores existentes válidos se mantienen.
     // let _ = save_profiles(&config).await;
@@ -361,7 +361,7 @@ pub fn load_settings_sync() -> GameSettings {
         Err(_) => GameSettings::default(),
     };
 
-    // Validación extra (opcional): Asegurar que los valores leídos tienen sentido
+    // Validación extra (opcional): Asegurar que los valores leidos tienen sentido
     let mut safe_config = config;
     if safe_config.width < 100 {
         safe_config.width = 480;

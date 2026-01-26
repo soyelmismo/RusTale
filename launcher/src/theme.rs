@@ -84,7 +84,7 @@ pub fn generate_palette(config: &crate::config::ThemeConfig) -> Palette {
         accent.b = (gray + (accent.b - gray) * config.saturation).clamp(0.0, 1.0);
     }
 
-    // 1. Configurar colores base según el modo
+    // 1. Configurar colores base segun el modo
     let (bg, surf, t_p, t_s) = match config.base_mode {
         BaseThemeMode::Black => (
             Color::from_rgb(0.01, 0.01, 0.02),
@@ -106,7 +106,7 @@ pub fn generate_palette(config: &crate::config::ThemeConfig) -> Palette {
         ),
     };
 
-    // 2. Aplicar contraste y ajuste de intensidad según el modo
+    // 2. Aplicar contraste y ajuste de intensidad segun el modo
     if config.base_mode == BaseThemeMode::Light {
         accent.r = (accent.r * 0.7 * config.contrast).clamp(0.0, 1.0);
         accent.g = (accent.g * 0.7 * config.contrast).clamp(0.0, 1.0);
@@ -174,7 +174,7 @@ pub fn danger_button_style(
 }
 
 /// Envuelve cualquier contenido en la "columna estándar" de RusTale
-/// con el espaciado y padding que te gusta del menú de juego.
+/// con el espaciado y padding que te gusta del menu de juego.
 pub fn standard_column<'a, Message>(
     items: Vec<Element<'a, Message, Theme, Renderer>>,
 ) -> iced::widget::Column<'a, Message, Theme, Renderer> {
@@ -243,31 +243,35 @@ pub fn lsd_magic_text<'a, M: 'a>(
     label: &'a str,
     ctx: UIContext,
 ) -> Element<'a, M, Theme, Renderer> {
-    // 1. Definir valores estables
-    let (color, vib_x, vib_y, alpha) = if ctx.lsd_enabled {
-        let t = ctx.time * 1.0;
-        let r = (t.sin() * 0.5 + 0.5).clamp(0.0, 1.0);
-        let g = ((t + 2.09).sin() * 0.5 + 0.5).clamp(0.0, 1.0);
-        let b = ((t + 4.18).sin() * 0.5 + 0.5).clamp(0.0, 1.0);
-        (
-            Color::from_rgb(r, g, b),
-            (t * 1.5).cos() * 2.0,
-            (t * 1.2).sin() * 2.0,
-            0.3,
-        )
-    } else {
-        (ctx.palette.text_primary, 0.0, 0.0, 0.0) // Estático y color normal
-    };
+    // Si el LSD global está apagado, devolvemos texto normal
+    if !ctx.lsd_enabled {
+        return iced::widget::text(label)
+            .size(14)
+            .color(ctx.palette.text_primary)
+            .font(iced::font::Font::MONOSPACE)
+            .into();
+    }
 
+    // Calculamos el offset base de vibración (el widget lo escalará segun proximidad)
+    let t = ctx.time * 2.0;
+    let vib_x = t.cos() * 5.0;
+    let vib_y = (t * 1.3).sin() * 5.0;
+
+    // Capas de color para el efecto fantasma psicodélico
     let content = iced::widget::stack![
-        iced_text(label).size(14).color(Color { a: alpha, ..color }),
+        // Capa de brillo psicodélico (Color cambiante)
+        iced_text(label).size(14).color(Color::from_rgb(
+            (t.sin() * 0.5 + 0.5).clamp(0.0, 1.0),
+            ((t + 2.0).sin() * 0.5 + 0.5).clamp(0.0, 1.0),
+            0.8
+        )),
+        // Capa principal
         iced_text(label)
             .size(14)
-            .color(color)
+            .color(ctx.palette.text_primary)
             .font(iced::font::Font::MONOSPACE)
     ];
 
-    // USAR SIEMPRE SmoothTranslate para que el tipo de widget no cambie al hacer hover
     Element::new(SmoothTranslate::new(content.into(), (vib_x, vib_y)))
 }
 
@@ -1063,14 +1067,48 @@ impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Messa
         theme: &Theme,
         style: &renderer::Style,
         layout: Layout<'_>,
-        _cursor: mouse::Cursor,
+        cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
-        // IMPORTANTE: Pasamos un cursor falso (fuera de pantalla) al contenido hijo
-        // para que nada dentro de la vibración crea que tiene el ratón encima.
-        let fake_cursor = mouse::Cursor::Unavailable;
+        let bounds = layout.bounds();
+        let center = bounds.center();
 
-        renderer.with_translation(self.offset, |renderer| {
+        // 1. Calcular intensidad por proximidad
+        let intensity = if let Some(cursor_pos) = cursor.position() {
+            let dx = cursor_pos.x - center.x;
+            let dy = cursor_pos.y - center.y;
+            let distance = (dx * dx + dy * dy).sqrt();
+
+            let max_radius = 200.0; // Radio de activación en pixeles
+            // Mapeo 0.0 a 1.0 con suavizado parabólico
+            (1.0 - (distance / max_radius)).clamp(0.0, 1.0).powi(2)
+        } else {
+            0.0
+        };
+
+        // 2. Aplicar el offset escalado por la intensidad
+        // Solo aplicamos traslación si hay intensidad para ahorrar recursos
+        if intensity > 0.01 {
+            let dynamic_offset = Vector::new(self.offset.x * intensity, self.offset.y * intensity);
+
+            // IMPORTANTE: Pasamos un cursor falso al contenido hijo
+            // para que nada dentro de la vibración crea que tiene el ratón encima.
+            let fake_cursor = mouse::Cursor::Unavailable;
+
+            renderer.with_translation(dynamic_offset, |renderer| {
+                self.content.as_widget().draw(
+                    tree,
+                    renderer,
+                    theme,
+                    style,
+                    layout,
+                    fake_cursor,
+                    viewport,
+                );
+            });
+        } else {
+            // Sin intensidad, renderizamos sin traslación
+            let fake_cursor = mouse::Cursor::Unavailable;
             self.content.as_widget().draw(
                 tree,
                 renderer,
@@ -1080,7 +1118,7 @@ impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Messa
                 fake_cursor,
                 viewport,
             );
-        });
+        }
     }
 
     fn tag(&self) -> widget::tree::Tag {
