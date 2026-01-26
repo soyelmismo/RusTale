@@ -104,7 +104,8 @@ pub fn view<'a>(
         .width(Length::Fill)
         .height(Length::Fill)
         .center_x(Length::Fill)
-        .center_y(Length::Fill),
+        .center_y(Length::Fill)
+        .style(move |t| theme::container_style_transparent(&palette, t)),
     )
     .style(move |t, bs| match status {
         _ if is_disabled => theme::play_button_style(&palette, t, bs),
@@ -138,7 +139,8 @@ pub fn view<'a>(
         .width(Length::Fill)
         .height(Length::Fill)
         .center_x(Length::Fill)
-        .center_y(Length::Fill),
+        .center_y(Length::Fill)
+        .style(move |t| theme::container_style_transparent(&palette, t)),
     )
     .style(move |t, s| theme::secondary_button_style(&palette, t, s))
     .width(Length::Fill)
@@ -159,7 +161,8 @@ pub fn view<'a>(
         .width(Length::Fill)
         .height(Length::Fill)
         .center_x(Length::Fill)
-        .center_y(Length::Fill),
+        .center_y(Length::Fill)
+        .style(move |t| theme::container_style_transparent(&palette, t)),
     )
     .style(move |t, s| theme::secondary_button_style(&palette, t, s))
     .width(Length::Fill)
@@ -213,6 +216,7 @@ pub fn view<'a>(
                     )
                     .height(6)
                     .width(Length::Fill)
+                    .style(move |t| theme::container_style_transparent(&palette, t))
                 ]
                 .spacing(3),
                 if *status == LauncherStatus::Migrating {
@@ -241,6 +245,7 @@ pub fn view<'a>(
                             )
                             .height(3)
                             .width(Length::Fill)
+                            .style(move |t| theme::container_style_transparent(&palette, t))
                         ]
                         .spacing(2),
                     )

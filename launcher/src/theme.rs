@@ -1,6 +1,7 @@
 use iced::overlay::menu;
 use iced::widget::{
-    button, checkbox, container, pick_list, progress_bar, scrollable, slider, text_input,
+    Space, button, checkbox, column, container, pick_list, progress_bar, row as iced_row,
+    scrollable, slider, text as iced_text, text_input,
 };
 use iced::{
     Background, Border, Color, Element, Length, Rectangle, Renderer, Shadow, Size, Theme, Vector,
@@ -18,6 +19,14 @@ pub const ACCENT_GREEN: Color = Color::from_rgb(0.2, 0.8, 0.2);
 pub const STANDARD_PADDING: f32 = 20.0;
 pub const STANDARD_SPACING: u32 = 15;
 
+#[derive(Debug, Clone, Copy)]
+pub struct UIContext {
+    pub palette: Palette,
+    pub lsd_offset: (f32, f32),
+    pub lsd_enabled: bool,
+    pub time: f32,
+}
+
 // --- PALETTE SYSTEM ---
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -31,6 +40,25 @@ pub struct Palette {
     pub text_on_accent: Color,
     pub success: Color,
     pub danger: Color,
+}
+
+pub fn background_tint_color(palette: &Palette) -> Color {
+    if palette.background.r > 0.5 {
+        Color {
+            a: 0.75,
+            ..Color::WHITE
+        }
+    } else if palette.background.r > 0.1 {
+        Color {
+            a: 0.4,
+            ..palette.background
+        }
+    } else {
+        Color {
+            a: 0.2,
+            ..palette.background
+        }
+    }
 }
 
 pub fn hex_to_color(hex: &str) -> Option<Color> {
@@ -163,6 +191,140 @@ pub fn page_container<'a, Message>(
         .padding(STANDARD_PADDING)
         .width(Length::Fill)
         .height(Length::Fill)
+}
+
+/// Crea el marco estandarizado para cualquier modal (Settings, Mods, etc.)
+pub fn modal_shell<'a, Message>(
+    title: &str,
+    content: impl Into<Element<'a, Message, Theme, Renderer>>,
+    footer: Option<Element<'a, Message, Theme, Renderer>>,
+    on_close: Message,
+    ctx: UIContext,
+) -> iced::widget::Container<'a, Message, Theme, Renderer>
+where
+    Message: Clone + 'a,
+{
+    let palette = ctx.palette;
+
+    let header = iced_row![
+        text_title(title, ctx),
+        Space::new().width(Length::Fill),
+        button(text(iced_text("✕").size(16), ctx))
+            .on_press(on_close)
+            .style(move |t, s| icon_button_style(&palette, t, s))
+    ]
+    .align_y(iced::Alignment::Center)
+    .padding(20);
+
+    let mut col = column![Element::from(header), content.into()];
+
+    if let Some(f) = footer {
+        col = col.push(
+            container(f)
+                .padding(15)
+                .style(move |t| footer_style(&palette, t)),
+        );
+    }
+
+    container(col).style(move |t| modal_container(&palette, t))
+}
+
+pub fn text_title<'a, M: 'a>(content: &str, ctx: UIContext) -> Element<'a, M, Theme, Renderer> {
+    text(
+        iced_text(content.to_string())
+            .size(18)
+            .color(ctx.palette.accent)
+            .font(iced::font::Font::MONOSPACE),
+        ctx,
+    )
+}
+
+pub fn lsd_magic_text<'a, M: 'a>(
+    label: &'a str,
+    ctx: UIContext,
+) -> Element<'a, M, Theme, Renderer> {
+    // 1. Definir valores estables
+    let (color, vib_x, vib_y, alpha) = if ctx.lsd_enabled {
+        let t = ctx.time * 1.0;
+        let r = (t.sin() * 0.5 + 0.5).clamp(0.0, 1.0);
+        let g = ((t + 2.09).sin() * 0.5 + 0.5).clamp(0.0, 1.0);
+        let b = ((t + 4.18).sin() * 0.5 + 0.5).clamp(0.0, 1.0);
+        (
+            Color::from_rgb(r, g, b),
+            (t * 1.5).cos() * 2.0,
+            (t * 1.2).sin() * 2.0,
+            0.3,
+        )
+    } else {
+        (ctx.palette.text_primary, 0.0, 0.0, 0.0) // Estático y color normal
+    };
+
+    let content = iced::widget::stack![
+        iced_text(label).size(14).color(Color { a: alpha, ..color }),
+        iced_text(label)
+            .size(14)
+            .color(color)
+            .font(iced::font::Font::MONOSPACE)
+    ];
+
+    // USAR SIEMPRE SmoothTranslate para que el tipo de widget no cambie al hacer hover
+    Element::new(SmoothTranslate::new(content.into(), (vib_x, vib_y)))
+}
+
+pub fn text_body<'a, M: 'a>(content: &str, ctx: UIContext) -> Element<'a, M, Theme, Renderer> {
+    text(
+        iced_text(content.to_string())
+            .size(14)
+            .color(ctx.palette.text_primary),
+        ctx,
+    )
+}
+
+pub fn text_caption<'a, M: 'a>(content: &str, ctx: UIContext) -> Element<'a, M, Theme, Renderer> {
+    text(
+        iced_text(content.to_string())
+            .size(11)
+            .color(ctx.palette.text_secondary),
+        ctx,
+    )
+}
+
+/// Una fila estandarizada para listas (usada en Mods, Settings > Storage, etc.)
+pub fn list_item_row<'a, Message: 'a>(
+    label: Element<'a, Message, Theme, Renderer>,
+    actions: Vec<Element<'a, Message, Theme, Renderer>>,
+    ctx: UIContext,
+) -> Element<'a, Message, Theme, Renderer> {
+    container(
+        iced_row![
+            label,
+            Space::new().width(Length::Fill),
+            iced_row(actions)
+                .spacing(10)
+                .align_y(iced::Alignment::Center)
+        ]
+        .align_y(iced::Alignment::Center)
+        .padding(12),
+    )
+    .style(move |t| card_style(&ctx.palette, t))
+    .into()
+}
+
+pub fn labeled_input<'a, M: 'a + Clone>(
+    label: &str,
+    value: &str,
+    on_change: impl Fn(String) -> M + 'static,
+    ctx: UIContext,
+) -> Element<'a, M, Theme, Renderer> {
+    column![
+        text_caption(label, ctx),
+        iced::widget::text_input("", value)
+            .on_input(on_change)
+            .padding(10)
+            .style(move |t, s| text_input_style(&ctx.palette, t, s))
+    ]
+    .spacing(5)
+    .into()
 }
 
 pub fn glass_container(palette: &Palette, _t: &Theme) -> container::Style {
@@ -864,13 +1026,6 @@ pub fn container_style_transparent(_palette: &Palette, _t: &Theme) -> container:
     container::Style::default()
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct UIContext {
-    pub palette: Palette,
-    pub lsd_offset: (f32, f32),
-    pub lsd_enabled: bool,
-}
-
 // --- LSD MODE WIDGETS ---
 
 pub struct SmoothTranslate<'a, Message> {
@@ -908,13 +1063,23 @@ impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Messa
         theme: &Theme,
         style: &renderer::Style,
         layout: Layout<'_>,
-        cursor: mouse::Cursor,
+        _cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
+        // IMPORTANTE: Pasamos un cursor falso (fuera de pantalla) al contenido hijo
+        // para que nada dentro de la vibración crea que tiene el ratón encima.
+        let fake_cursor = mouse::Cursor::Unavailable;
+
         renderer.with_translation(self.offset, |renderer| {
-            self.content
-                .as_widget()
-                .draw(tree, renderer, theme, style, layout, cursor, viewport);
+            self.content.as_widget().draw(
+                tree,
+                renderer,
+                theme,
+                style,
+                layout,
+                fake_cursor,
+                viewport,
+            );
         });
     }
 
@@ -936,15 +1101,15 @@ impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Messa
 
     fn mouse_interaction(
         &self,
-        tree: &widget::Tree,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        viewport: &Rectangle,
-        renderer: &Renderer,
+        _tree: &widget::Tree,
+        _layout: Layout<'_>,
+        _cursor: mouse::Cursor,
+        _viewport: &Rectangle,
+        _renderer: &Renderer,
     ) -> mouse::Interaction {
-        self.content
-            .as_widget()
-            .mouse_interaction(tree, layout, cursor, viewport, renderer)
+        // El widget visual NO debe tener interacción propia,
+        // dejamos que el mouse_area superior se encargue.
+        mouse::Interaction::None
     }
 
     fn update(
@@ -958,21 +1123,8 @@ impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Messa
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
-        let adjusted_cursor = cursor
-            .position()
-            .map(|p| p - self.offset)
-            .map(mouse::Cursor::Available)
-            .unwrap_or(cursor);
-
         self.content.as_widget_mut().update(
-            tree,
-            event,
-            layout,
-            adjusted_cursor,
-            renderer,
-            clipboard,
-            shell,
-            viewport,
+            tree, event, layout, cursor, renderer, clipboard, shell, viewport,
         )
     }
 
@@ -998,8 +1150,11 @@ fn get_seeded_disparity(offset: (f32, f32), seed: usize) -> (f32, f32) {
     (nx * 0.8, ny * 0.8)
 }
 
-pub fn text<'a, M: 'a>(content: impl Into<Element<'a, M>>, ctx: UIContext) -> Element<'a, M> {
-    let element = content.into();
+pub fn text<'a, M: 'a>(
+    content: iced::widget::Text<'a, Theme, Renderer>,
+    ctx: UIContext,
+) -> Element<'a, M, Theme, Renderer> {
+    let element: Element<'a, M, Theme, Renderer> = content.into();
     if ctx.lsd_enabled {
         let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 1);
         Element::new(SmoothTranslate::new(element, (vx, vy)))

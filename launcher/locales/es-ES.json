@@ -16,7 +16,7 @@
             "patching": "Parcheando...",
             "general": "General",
             "migrating": "Migrando...",
-            "step": "Paso Actual"
+            "step": "Paso actual"
         },
         "info": {
             "channel": "Canal",
@@ -24,16 +24,16 @@
         }
     },
     "tray": {
-        "show_hide": "Mostrar/Ocultar Launcher",
+        "show_hide": "Mostrar/Ocultar launcher",
         "quit": "Salir de RusTale",
         "tooltip": "RusTale Launcher"
     },
     "profile": {
         "title": "Perfil",
-        "select": "Seleccionar Perfil",
-        "add": "Añadir Perfil",
+        "select": "Seleccionar perfil",
+        "add": "Añadir perfil",
         "name_placeholder": "Nombre...",
-        "new_name_placeholder": "Nuevo Nombre..."
+        "new_name_placeholder": "Nuevo nombre..."
     },
     "settings": {
         "title": "Ajustes",
@@ -45,41 +45,42 @@
             "java": "Java"
         },
         "language": "Idioma",
-        "language_placeholder": "Seleccionar Idioma",
-        "game_config": "Configuración del Juego",
-        "install_path": "Ruta de Instalación",
+        "language_placeholder": "Seleccionar idioma",
+        "game_config": "Configuración del juego",
+        "install_path": "Ruta de instalación",
         "browse": "Explorar...",
-        "select_channel": "Seleccionar Canal",
-        "select_version": "Seleccionar Versión",
-        "auto_update": "Auto Actualizar Launcher",
-        "check_updates": "Buscar Actualizaciones",
-        "check_failed": "Error al Buscar",
+        "select_channel": "Seleccionar canal",
+        "select_version": "Seleccionar versión",
+        "auto_update": "Auto actualizar launcher",
+        "check_updates": "Buscar actualizaciones",
+        "check_failed": "Error al buscar",
         "version": {
-            "latest": "Última (Auto-Actualizar)",
+            "latest": "Última (Auto-actualizar)",
             "specific": "Versión {0}"
         },
         "storage": {
-            "title": "Gestión de Almacenamiento",
+            "title": "Gestión de almacenamiento",
             "desc": "Gestiona las versiones instaladas localmente",
             "no_versions": "No hay versiones instaladas",
             "latest_format": "Última ({0})",
             "version_format": "Versión {0}"
         },
-        "enable_news": "Habilitar Noticias",
-        "enable_online_fix": "Habilitar Online Fix (Parche Multijugador)",
+        "enable_news": "Habilitar noticias",
+        "enable_online_fix": "Habilitar parche multijugador",
         "online_fix_desc": "Redirige la autenticación para jugar en servidores no oficiales.",
-        "minimize_to_tray": "Minimizar a la Bandeja al Cerrar",
-        "minimize_on_play": "Ocultar Ventana al Iniciar el Juego",
-        "quickplay": "Habilitar QuickPlay (Saltar Menú)",
-        "quickplay_desc": "Inicia el juego directamente saltando el menú principal.",
-        "patch_mode": "Modo de Parche:",
-        "update_channel": "Canal de Actualización",
-        "target_version": "Versión Objetivo",
+        "minimize_to_tray": "Minimizar a la bandeja al cerrar",
+        "minimize_on_play": "Ocultar ventana al iniciar el juego",
+        "quickplay": "Habilitar QuickPlay",
+        "quickplay_desc": "Inicia el juego directamente.",
+        "lsd_desc": "Experimenta lo que sintió Hoffman.",
+        "patch_mode": "Modo de parche:",
+        "update_channel": "Canal de actualización",
+        "target_version": "Versión objetivo",
         "display": "Pantalla",
         "width": "Ancho",
         "height": "Alto",
-        "fullscreen": "Modo Pantalla Completa",
-        "java_memory": "Asignación de Memoria (GB)",
+        "fullscreen": "Modo pantalla completa",
+        "java_memory": "Asignación de memoria (GB)",
         "min": "Mín",
         "max": "Máx",
         "jvm_args": "Argumentos JVM",
@@ -87,8 +88,8 @@
         "move_to": "Mover a...",
         "open_folder": "Abrir",
         "theme": "Tema",
-        "theme_preset": "Ajuste de Color",
-        "theme_mode": "Modo de Color",
+        "theme_preset": "Ajuste de color",
+        "theme_mode": "Modo de color",
         "theme_mode_light": "Claro",
         "theme_mode_dark": "Oscuro",
         "theme_mode_gray": "Gris",
@@ -98,7 +99,7 @@
         "cancel": "Cancelar"
     },
     "dialog": {
-        "select_folder": "Seleccionar Carpeta de Instalación"
+        "select_folder": "Seleccionar carpeta de instalación"
     },
     "news": {
         "loading": "Cargando últimas noticias...",
@@ -125,7 +126,16 @@
         "no_results": "No se encontraron resultados",
         "page": "Página {0} de {1}",
         "prev": "Anterior",
-        "next": "Siguiente"
+        "next": "Siguiente",
+        "downloads": "Descargas",
+        "core_patches": "Parches del cliente (ZIP)",
+        "jar_mods": "Mods (JAR)",
+        "active": "Activo",
+        "disabled": "Desactivado",
+        "enable": "Activar",
+        "disable": "Desactivar",
+        "open_jar_folder": "Abrir carpeta JAR",
+        "open_patch_folder": "Abrir carpeta ZIP"
     },
     "common": {
         "close": "Cerrar"

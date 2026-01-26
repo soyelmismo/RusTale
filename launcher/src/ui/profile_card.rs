@@ -2,8 +2,8 @@ use crate::Message;
 use crate::config::ProfilesConfig;
 use crate::theme;
 use crate::util;
-use iced::widget::{Space, button, column, container, row, svg, text, text_input, tooltip};
-use iced::{Alignment, Color, Element, Length};
+use iced::widget::{Space, button, column, container, row, svg, text_input, tooltip};
+use iced::{Alignment, Element, Length};
 
 pub fn view<'a>(
     profiles: &'a ProfilesConfig,
@@ -72,7 +72,8 @@ pub fn view<'a>(
                     .spacing(5)
                     .align_y(Alignment::Center),
                 )
-                .padding(5),
+                .padding(5)
+                .style(move |t| theme::card_style(&palette, t)),
             );
         } else if is_being_edited_uuid {
             let (_, curr_uuid) = editing_uuid.as_ref().unwrap();
@@ -146,7 +147,7 @@ pub fn view<'a>(
             dropdown_content = dropdown_content.push(
                 button(
                     row![
-                        theme::text(text(&profile.name).size(13).width(Length::Fill), ctx),
+                        container(theme::text_body(&profile.name, ctx)).width(Length::Fill),
                         tooltip(
                             button(theme::svg(
                                 svg(util::icons::icon(util::icons::PERSON))
@@ -234,7 +235,8 @@ pub fn view<'a>(
                 .spacing(5)
                 .align_y(Alignment::Center),
             )
-            .padding(5),
+            .padding(5)
+            .style(move |t| theme::card_style(&palette, t)),
         );
     }
 
@@ -248,7 +250,7 @@ pub fn view<'a>(
                         .height(14),
                     ctx
                 ),
-                theme::text(text(localization.t("profile.add")).size(13), ctx)
+                theme::text_body(localization.t("profile.add"), ctx)
             ]
             .spacing(8)
             .align_y(Alignment::Center),
@@ -260,15 +262,10 @@ pub fn view<'a>(
     );
 
     column![
-        theme::text(
-            text(localization.t("profile.title"))
-                .size(10)
-                .color(Color::from_rgb(0.5, 0.5, 0.5)),
-            ctx
-        ),
+        theme::text_caption(localization.t("profile.title"), ctx),
         button(
             row![
-                theme::text(text(profile_name).size(14).width(Length::Fill), ctx),
+                container(theme::text_body(&profile_name, ctx)).width(Length::Fill),
                 theme::svg(
                     svg(util::icons::icon(if dropdown_open {
                         util::icons::X
@@ -290,9 +287,9 @@ pub fn view<'a>(
         if dropdown_open {
             container(dropdown_content)
                 .width(Length::Fill)
-                .style(move |t| theme::modal_container(&palette, t))
+                .style(move |t| theme::card_style(&palette, t))
         } else {
-            container(Space::new())
+            container(Space::new()).style(move |t| theme::container_style_transparent(&palette, t))
         }
     ]
     .spacing(5)

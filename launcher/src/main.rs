@@ -319,6 +319,7 @@ struct RusTale {
     palette: theme::Palette,
     lsd_offset: (f32, f32),
     start_time: std::time::Instant,
+    lsd_preview: bool,
 }
 
 impl RusTale {
@@ -408,6 +409,7 @@ impl RusTale {
                 palette: theme::generate_palette(&initial_settings.theme),
                 lsd_offset: (0.0, 0.0),
                 start_time: std::time::Instant::now(),
+                lsd_preview: false,
             },
             Task::batch(vec![
                 Task::done(Message::Initialize),
@@ -461,11 +463,14 @@ impl RusTale {
             _ => Message::None,
         });
 
-        let tick_sub = if self.settings.theme.lsd_mode {
-            iced::time::every(std::time::Duration::from_millis(1)).map(Message::Tick)
-        } else {
-            Subscription::none()
-        };
+        // SOLUCIÓN: Mantener el tick vivo si el modal está abierto para evitar lag de arranque/parada
+        let tick_sub =
+            if self.settings.theme.lsd_mode || self.lsd_preview || self.settings_state.is_open {
+                // Si el modal está abierto, mantenemos el tick vivo para evitar el lag de arranque/parada
+                iced::time::every(std::time::Duration::from_millis(16)).map(Message::Tick)
+            } else {
+                Subscription::none()
+            };
 
         Subscription::batch(vec![game_runner, tray_sub, menu_sub, window_sub, tick_sub])
     }
@@ -513,16 +518,20 @@ impl RusTale {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Tick(_now) => {
-                if self.settings.theme.lsd_mode {
+                let is_effect_active = self.settings.theme.lsd_mode || self.lsd_preview;
+
+                if is_effect_active {
                     let t = self.start_time.elapsed().as_secs_f32();
-
                     let smooth_t = t * 0.4;
-                    let x = (smooth_t).sin() * 2.5 + (smooth_t * 1.5).cos() * 1.0;
 
+                    // Calculamos el offset normalmente
+                    let x = (smooth_t).sin() * 2.5 + (smooth_t * 1.5).cos() * 1.0;
                     let y = (smooth_t * 0.8).cos() * 2.5 + (smooth_t * 1.2).sin() * 1.0;
 
                     self.lsd_offset = (x, y);
                 } else {
+                    // En lugar de resetear a 0 bruscamente, solo dejamos de actualizar si el offset ya es 0
+                    // o lo forzamos a 0 si la suscripción sigue viva un frame más
                     self.lsd_offset = (0.0, 0.0);
                 }
                 return Task::none();
@@ -1021,7 +1030,7 @@ impl RusTale {
                             |_| Message::None,
                         )
                     } else {
-                        println!("UUID inválido ignorado");
+                        println!("ignored invalid UUID");
                         Task::none()
                     }
                 } else {
@@ -1116,6 +1125,34 @@ impl RusTale {
                 |_| Message::Settings(SettingsMessage::ResetUpdateStatus),
             ),
             Message::Settings(msg) => {
+                match &msg {
+                    SettingsMessage::LsdToggled(val) => {
+                        // GUARDIA: Solo actuar si el valor es diferente al actual
+                        if self.settings.theme.lsd_mode != *val {
+                            self.settings.theme.lsd_mode = *val;
+                            // Sincronizar el estado temporal para que el checkbox visual se actualice
+                            self.settings_state.temp_settings.theme.lsd_mode = *val;
+
+                            // CRÍTICO: Si lo desactivamos, forzamos que el preview sea false
+                            // para evitar que la vibración residual reactive el ciclo.
+                            if !*val {
+                                self.lsd_preview = false;
+                            }
+                        }
+                        // Retornamos temprano para evitar procesamiento adicional
+                        return Task::none();
+                    }
+                    SettingsMessage::LsdHovered(val) => {
+                        // Solo actualizamos si cambia, para no saturar la cola de mensajes
+                        if self.lsd_preview != *val {
+                            self.lsd_preview = *val;
+                        }
+                        // No necesitamos procesar esto más allá, retornamos temprano
+                        return Task::none();
+                    }
+                    _ => {}
+                }
+
                 if let Some(m) = self.settings_state.update(msg) {
                     self.palette =
                         crate::theme::generate_palette(&self.settings_state.temp_settings.theme);
@@ -1625,8 +1662,20 @@ impl RusTale {
         let ctx = theme::UIContext {
             palette: *palette,
             lsd_offset: self.lsd_offset,
-            lsd_enabled: self.settings.theme.lsd_mode,
+            lsd_enabled: self.settings.theme.lsd_mode || self.lsd_preview,
+            time: self.start_time.elapsed().as_secs_f32(),
         };
+
+        let tint_color = theme::background_tint_color(palette);
+
+        // 2. Creamos la capa de tinte (un contenedor vacío con color de fondo)
+        let tint_overlay = container(Space::new())
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(move |_| container::Style {
+                background: Some(tint_color.into()),
+                ..Default::default()
+            });
 
         let is_interaction_disabled = self.settings_state.is_open || self.mods_state.is_open;
 
@@ -1670,7 +1719,8 @@ impl RusTale {
             )
             .width(Length::FillPortion(2))
             .height(Length::Fill)
-            .padding(30);
+            .padding(30)
+            .style(move |t| theme::container_style_transparent(&palette, t));
 
             row![left_column, right_column]
                 .width(Length::Fill)
@@ -1698,7 +1748,9 @@ impl RusTale {
             if self.window_size.width > 500.0 {
                 row![
                     Space::new().width(Length::Fill),
-                    container(left_column).width(400.0), // Max width visual
+                    container(left_column)
+                        .width(400.0)
+                        .style(move |t| theme::container_style_transparent(&palette, t)), // Max width visual
                     Space::new().width(Length::Fill)
                 ]
                 .width(Length::Fill)
@@ -1710,6 +1762,7 @@ impl RusTale {
                     .width(Length::Fill)
                     .height(Length::Fill)
                     .padding(10) // Margen externo pequeño
+                    .style(move |t| theme::container_style_transparent(&palette, t))
                     .into()
             }
         };
@@ -1731,20 +1784,26 @@ impl RusTale {
                 .into()
         };
 
-        let final_view = stack![bg, main_content];
+        let final_view = stack![bg, tint_overlay, main_content];
 
         let overlay = if self.settings_state.is_open {
-            Some(container(
-                self.settings_state
-                    .view(&self.localization, self.window_size, ctx)
-                    .map(Message::Settings),
-            ))
+            Some(
+                container(
+                    self.settings_state
+                        .view(&self.localization, self.window_size, ctx)
+                        .map(Message::Settings),
+                )
+                .style(move |t| theme::container_style_transparent(&palette, t)),
+            )
         } else if self.mods_state.is_open {
-            Some(container(
-                self.mods_state
-                    .view(&self.localization, self.window_size, ctx)
-                    .map(Message::Mods),
-            ))
+            Some(
+                container(
+                    self.mods_state
+                        .view(&self.localization, self.window_size, ctx)
+                        .map(Message::Mods),
+                )
+                .style(move |t| theme::container_style_transparent(&palette, t)),
+            )
         } else {
             None
         };

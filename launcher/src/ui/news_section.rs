@@ -155,6 +155,7 @@ impl NewsSection {
                 )
                 .width(200)
                 .center_x(Length::Fill)
+                .style(move |t| theme::container_style_transparent(&palette, t))
             ]
             .align_x(Alignment::Center)
             .spacing(10),
@@ -162,6 +163,7 @@ impl NewsSection {
         .width(Length::Fill)
         .height(Length::Fill)
         .center_y(Length::Fill)
+        .style(move |t| theme::container_style_transparent(&palette, t))
         .into()
     }
 
@@ -198,6 +200,7 @@ impl NewsSection {
         .width(Length::Fill)
         .height(Length::Fill)
         .center_y(Length::Fill)
+        .style(move |t| theme::container_style_transparent(&palette, t))
         .into()
     }
 
@@ -217,6 +220,7 @@ impl NewsSection {
         .width(Length::Fill)
         .height(Length::Fill)
         .center_y(Length::Fill)
+        .style(move |t| theme::container_style_transparent(&palette, t))
         .into()
     }
 
@@ -253,6 +257,7 @@ impl NewsSection {
                 })
                 .width(Length::Fill)
                 .center_x(Length::Fill)
+                .style(move |t| theme::container_style_transparent(&palette, t))
             ]
             .spacing(5)
             .into()

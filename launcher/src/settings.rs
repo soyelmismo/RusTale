@@ -2,8 +2,8 @@ use crate::Message;
 use crate::config::GameSettings;
 use crate::{theme, util};
 use iced::widget::{
-    Space, button, checkbox, column, container, pick_list, row, scrollable, slider, svg, text,
-    text_input,
+    Space, button, checkbox, column, container, mouse_area, pick_list, row, scrollable, slider,
+    svg, text, text_input,
 };
 use iced::{Alignment, Color, Element, Length, Size};
 
@@ -107,6 +107,7 @@ pub enum SettingsMessage {
     ThemeSaturationChanged(f32),
     ThemeContrastChanged(f32),
     LsdToggled(bool),
+    LsdHovered(bool),
     BaseThemeChanged(crate::config::BaseThemeMode),
     None,
 }
@@ -256,13 +257,8 @@ impl SettingsState {
                 .on_toggle(SettingsMessage::QuickplayToggled)
                 .style(move |t, s| theme::checkbox_style(&palette, t, s)),
             column![
-                theme::text(text(localization.t("settings.quickplay")).size(14), ctx),
-                theme::text(
-                    text(localization.t("settings.quickplay_desc"))
-                        .size(10)
-                        .color(Color::from_rgb(0.5, 0.5, 0.5)),
-                    ctx
-                ),
+                theme::text_body(&localization.t("settings.quickplay"), ctx),
+                theme::text_caption(&localization.t("settings.quickplay_desc"), ctx),
             ]
         ]
         .spacing(10)
@@ -376,23 +372,38 @@ impl SettingsState {
             minimize_tray_chk.into(),
             minimize_play_chk.into(),
             quickplay_chk.into(),
-            row![
-                checkbox(self.temp_settings.theme.lsd_mode)
-                    .on_toggle(SettingsMessage::LsdToggled)
-                    .style(move |t, s| theme::checkbox_style(&palette, t, s)),
-                column![
-                    theme::text(text("LSD").size(14).color(palette.accent), ctx),
+            // === SOLUCIÓN ANTI-BUCLE INFINITO ===
+            // 1. El texto y su descripción en un contenedor de tamaño fijo
+            {
+                let text_content = column![
+                    container(theme::lsd_magic_text("LSD", ctx)).height(20), // Altura fija para evitar saltos de línea
                     theme::text(
-                        text("Experience the launcher in another dimension.")
+                        text(localization.t("settings.lsd_desc"))
                             .size(10)
                             .color(palette.text_secondary),
                         ctx
                     ),
                 ]
-            ]
-            .spacing(10)
-            .align_y(Alignment::Center)
-            .into(),
+                .spacing(2)
+                .width(Length::Fixed(180.0)); // Ancho fijo para que no empuje al checkbox
+
+                // 2. El Mouse Area SOLO envuelve al texto, NO al checkbox
+                let lsd_label_with_hover = mouse_area(text_content)
+                    .on_enter(SettingsMessage::LsdHovered(true))
+                    .on_exit(SettingsMessage::LsdHovered(false));
+
+                // 3. La fila organiza los elementos de forma independiente
+                row![
+                    // El checkbox está completamente aislado
+                    checkbox(self.temp_settings.theme.lsd_mode)
+                        .on_toggle(SettingsMessage::LsdToggled)
+                        .style(move |t, s| theme::checkbox_style(&palette, t, s)),
+                    lsd_label_with_hover
+                ]
+                .spacing(15) // Espaciado generoso para evitar interferencias
+                .align_y(Alignment::Center)
+                .into()
+            },
         ]))
         .into()
     }
@@ -439,7 +450,8 @@ impl SettingsState {
                 .spacing(8)
                 .align_y(Alignment::Center),
             )
-            .center_x(Length::Fill),
+            .center_x(Length::Fill)
+            .style(move |t| theme::container_style_transparent(&palette, t)),
         );
 
         if !matches!(self.update_btn_status, UpdateStatus::Checking) {
@@ -680,6 +692,7 @@ impl SettingsState {
                 })
             } else {
                 container(Space::new())
+                    .style(move |t| theme::container_style_transparent(&palette, t))
             },
         ]
         .spacing(10);
@@ -711,6 +724,7 @@ impl SettingsState {
             ))
             .width(Length::Fill)
             .padding(10)
+            .style(move |t| theme::container_style_transparent(&palette, t))
             .into()
         } else {
             let mut list = column!().spacing(5);
@@ -735,6 +749,7 @@ impl SettingsState {
                                 ),)
                                 .center_x(Length::Fill)
                                 .center_y(Length::Fill)
+                                .style(move |t| theme::container_style_transparent(&palette, t))
                             )
                             .on_press(SettingsMessage::OpenVersionFolder(version_val))
                             .style(move |t, s| theme::secondary_button_style(&palette, t, s)),
@@ -747,6 +762,7 @@ impl SettingsState {
                                 ),)
                                 .center_x(Length::Fill)
                                 .center_y(Length::Fill)
+                                .style(move |t| theme::container_style_transparent(&palette, t))
                             )
                             .on_press(SettingsMessage::RepairVersion(version_val))
                             .style(move |t, s| theme::secondary_button_style(&palette, t, s)),
@@ -759,6 +775,7 @@ impl SettingsState {
                                 ),)
                                 .center_x(Length::Fill)
                                 .center_y(Length::Fill)
+                                .style(move |t| theme::container_style_transparent(&palette, t))
                             )
                             .on_press(SettingsMessage::DeleteVersion(version_val))
                             .style(move |t, s| theme::secondary_button_style(&palette, t, s)),
@@ -782,6 +799,7 @@ impl SettingsState {
                 bottom: 0.0,
                 left: 0.0,
             })
+            .style(move |t| theme::container_style_transparent(&palette, t))
             .into()
         };
 
@@ -968,7 +986,10 @@ impl SettingsState {
             }
             SettingsMessage::LsdToggled(val) => {
                 self.temp_settings.theme.lsd_mode = val;
-                None
+                Some(Message::Settings(SettingsMessage::LsdToggled(val)))
+            }
+            SettingsMessage::LsdHovered(val) => {
+                Some(Message::Settings(SettingsMessage::LsdHovered(val)))
             }
             SettingsMessage::BaseThemeChanged(mode) => {
                 self.temp_settings.theme.base_mode = mode;
@@ -1032,14 +1053,14 @@ impl SettingsState {
             Tab::Video => theme::page_container(theme::standard_column(vec![
                 section_title(localization.t("settings.display"), ctx),
                 row![
-                    input_group(
-                        localization.t("settings.width"),
+                    theme::labeled_input(
+                        &localization.t("settings.width"),
                         &self.temp_settings.width.to_string(),
                         SettingsMessage::WidthChanged,
                         ctx,
                     ),
-                    input_group(
-                        localization.t("settings.height"),
+                    theme::labeled_input(
+                        &localization.t("settings.height"),
                         &self.temp_settings.height.to_string(),
                         SettingsMessage::HeightChanged,
                         ctx,
@@ -1051,7 +1072,7 @@ impl SettingsState {
                     checkbox(self.temp_settings.fullscreen)
                         .on_toggle(SettingsMessage::FullscreenToggled)
                         .style(move |t, s| theme::checkbox_style(&palette, t, s)),
-                    theme::text(text(localization.t("settings.fullscreen")).size(14), ctx)
+                    theme::text_body(&localization.t("settings.fullscreen"), ctx)
                 ]
                 .spacing(10)
                 .align_y(Alignment::Center)
@@ -1060,16 +1081,14 @@ impl SettingsState {
             .into(),
             Tab::Java => theme::page_container(theme::standard_column(vec![
                 section_title(localization.t("settings.java_memory"), ctx),
-                theme::text(
-                    text(format!(
+                theme::text_body(
+                    &format!(
                         "{}: {} GB",
                         localization.t("settings.min"),
                         self.temp_settings.min_memory
-                    ))
-                    .size(12),
+                    ),
                     ctx,
-                )
-                .into(),
+                ),
                 slider(
                     1.0..=16.0,
                     self.temp_settings.min_memory as f32,
@@ -1078,16 +1097,14 @@ impl SettingsState {
                 .step(1.0)
                 .style(move |t, s| theme::slider_style(&palette, t, s))
                 .into(),
-                theme::text(
-                    text(format!(
+                theme::text_body(
+                    &format!(
                         "{}: {} GB",
                         localization.t("settings.max"),
                         self.temp_settings.max_memory
-                    ))
-                    .size(12),
+                    ),
                     ctx,
-                )
-                .into(),
+                ),
                 slider(
                     1.0..=32.0,
                     self.temp_settings.max_memory as f32,
@@ -1140,39 +1157,30 @@ impl SettingsState {
         } else {
             Length::Fixed(500.0)
         };
-        let padding_outer = if is_compact { 10 } else { 0 };
 
-        container(column![
-            row![
-                theme::text(
-                    text(localization.t("settings.title"))
-                        .size(18)
-                        .font(iced::font::Font::MONOSPACE),
-                    ctx
-                ),
-                Space::new().width(Length::Fill),
-            ]
-            .padding(20),
-            row![
-                container(tabs)
-                    .padding(10)
-                    .style(move |t| theme::sidebar_style(&palette, t)),
-                container(
-                    scrollable(content)
-                        .style(move |t, status| theme::scrollable_style(&palette, t, status))
-                )
-                .padding(20)
-                .width(Length::Fill),
-            ]
-            .height(Length::Fill),
-            container(footer)
+        let main_row = row![
+            container(tabs)
                 .padding(10)
-                .style(move |t| theme::footer_style(&palette, t)),
-        ])
+                .style(move |t| theme::sidebar_style(&palette, t)),
+            container(
+                scrollable(content)
+                    .style(move |t, status| theme::scrollable_style(&palette, t, status))
+            )
+            .padding(20)
+            .width(Length::Fill)
+            .style(move |t| theme::container_style_transparent(&palette, t)),
+        ]
+        .height(Length::Fill);
+
+        theme::modal_shell(
+            &localization.t("settings.title"),
+            main_row,
+            Some(footer.into()),
+            SettingsMessage::CloseModal,
+            ctx,
+        )
         .width(modal_width)
         .height(modal_height)
-        .padding(padding_outer)
-        .style(move |t| theme::modal_container(&palette, t))
         .into()
     }
 }
@@ -1222,7 +1230,8 @@ fn tab_button<'a>(
         container(content)
             .width(Length::Fill)
             .center_x(Length::Fill)
-            .padding(10),
+            .padding(10)
+            .style(move |t| theme::container_style_transparent(&palette, t)),
     )
     .on_press(SettingsMessage::TabSelected(tab))
     .width(Length::Fill)
@@ -1253,7 +1262,8 @@ fn theme_mode_button<'a>(
             ctx,
         ))
         .center_x(Length::Fill)
-        .padding(8),
+        .padding(8)
+        .style(move |t| theme::container_style_transparent(&palette, t)),
     )
     .on_press(SettingsMessage::BaseThemeChanged(mode))
     .width(Length::Fill)
@@ -1271,30 +1281,5 @@ fn section_title<'a>(
     label: impl Into<String>,
     ctx: theme::UIContext,
 ) -> Element<'a, SettingsMessage> {
-    let palette = ctx.palette;
-    theme::text(text(label.into()).size(16).color(palette.accent), ctx).into()
-}
-
-fn input_group<'a>(
-    label: impl Into<String>,
-    value: &str,
-    on_change: fn(String) -> SettingsMessage,
-    ctx: theme::UIContext,
-) -> Element<'a, SettingsMessage> {
-    let palette = ctx.palette;
-    column![
-        theme::text(
-            text(label.into())
-                .size(12)
-                .color(Color::from_rgb(0.7, 0.7, 0.7)),
-            ctx
-        ),
-        text_input("", value)
-            .on_input(on_change)
-            .padding(8)
-            .style(move |t, status| theme::text_input_style(&palette, t, status))
-            .width(100)
-    ]
-    .spacing(5)
-    .into()
+    theme::text_title(&label.into(), ctx)
 }
