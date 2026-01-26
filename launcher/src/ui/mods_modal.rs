@@ -502,17 +502,24 @@ impl ModsState {
         &'a self,
         loc: &'a crate::lang::Localization,
         ws: Size,
-        palette: &'a theme::Palette,
+        ctx: theme::UIContext,
     ) -> Element<'a, ModsMessage, Theme, Renderer> {
+        let palette = ctx.palette;
         let is_c = ws.width < 600.0;
-        let c_btn = button(text(loc.t("common.close").to_string()).size(12))
-            .on_press(ModsMessage::Close)
-            .style(move |t: &Theme, s| theme::secondary_button_style(palette, t, s))
-            .padding(if is_c { 5 } else { 10 });
+        let c_btn = button(theme::text(
+            text(loc.t("common.close").to_string()).size(12),
+            ctx,
+        ))
+        .on_press(ModsMessage::Close)
+        .style(move |t: &Theme, s| theme::secondary_button_style(&palette, t, s))
+        .padding(if is_c { 5 } else { 10 });
         let h = row![
-            text("MOD MANAGER")
-                .size(if is_c { 16 } else { 20 })
-                .font(iced::font::Font::MONOSPACE),
+            theme::text(
+                text("MOD MANAGER")
+                    .size(if is_c { 16 } else { 20 })
+                    .font(iced::font::Font::MONOSPACE),
+                ctx
+            ),
             Space::new().width(Length::Fill),
             c_btn
         ]
@@ -523,17 +530,17 @@ impl ModsState {
                 "INSTALLED",
                 self.current_tab == ModTab::Installed,
                 is_c,
-                palette
+                ctx
             )
             .on_press(ModsMessage::SwitchTab(ModTab::Installed)),
-            tab_btn("BROWSE", self.current_tab == ModTab::Browse, is_c, palette)
+            tab_btn("BROWSE", self.current_tab == ModTab::Browse, is_c, ctx)
                 .on_press(ModsMessage::SwitchTab(ModTab::Browse))
         ]
         .spacing(10)
         .padding(if is_c { 10 } else { 20 });
         let cnt = match self.current_tab {
-            ModTab::Installed => self.view_installed(loc, palette),
-            ModTab::Browse => self.view_browse(loc, is_c, palette),
+            ModTab::Installed => self.view_installed(loc, ctx),
+            ModTab::Browse => self.view_browse(loc, is_c, ctx),
         };
         let (mw, mh) = (
             if ws.width < 850.0 {
@@ -557,21 +564,23 @@ impl ModsState {
         .width(mw)
         .height(mh)
         .padding(if is_c { 5 } else { 0 })
-        .style(move |t: &Theme| theme::modal_container(palette, t))
+        .style(move |t: &Theme| theme::modal_container(&palette, t))
         .into()
     }
 
     fn view_installed<'a>(
         &'a self,
         _loc: &'a crate::lang::Localization,
-        palette: &'a theme::Palette,
+        ctx: theme::UIContext,
     ) -> Element<'a, ModsMessage, Theme, Renderer> {
+        let palette = ctx.palette;
         if self.installed_mods.is_empty() && self.patch_mods.is_empty() {
-            return container(
+            return container(theme::text(
                 text("No mods installed")
                     .size(16)
                     .color(palette.text_secondary),
-            )
+                ctx,
+            ))
             .width(Length::Fill)
             .height(Length::Fill)
             .center_x(Length::Fill)
@@ -581,72 +590,85 @@ impl ModsState {
         let mut c = column![].spacing(20);
         if !self.patch_mods.is_empty() {
             let h = row![
-                text("CORE PATCHES (ZIP)")
-                    .size(14)
-                    .color(palette.accent)
-                    .font(iced::font::Font::MONOSPACE),
+                theme::text(
+                    text("CORE PATCHES (ZIP)")
+                        .size(14)
+                        .color(palette.accent)
+                        .font(iced::font::Font::MONOSPACE),
+                    ctx
+                ),
                 Space::new().width(Length::Fill),
                 button(
                     row![
-                        svg(util::icons::icon(util::icons::FOLDER))
-                            .width(14)
-                            .height(14)
-                            .style(move |t: &Theme, s| theme::svg_accent(palette, t, s)),
-                        text("Open Folder").size(10)
+                        theme::svg(
+                            svg(util::icons::icon(util::icons::FOLDER))
+                                .width(14)
+                                .height(14)
+                                .style(move |t: &Theme, s| theme::svg_accent(&palette, t, s)),
+                            ctx
+                        ),
+                        theme::text(text("Open Folder").size(10), ctx)
                     ]
                     .spacing(5)
                     .align_y(Alignment::Center)
                 )
                 .on_press(ModsMessage::OpenPatchFolder)
-                .style(move |t: &Theme, s| theme::secondary_button_style(palette, t, s))
+                .style(move |t: &Theme, s| theme::secondary_button_style(&palette, t, s))
                 .padding(5)
             ]
             .align_y(Alignment::Center);
             let mut pl = column![h].spacing(10);
             for p in &self.patch_mods {
-                pl = pl.push(patch_row(p, &self.temp_settings, palette));
+                pl = pl.push(patch_row(p, &self.temp_settings, ctx));
             }
             c = c.push(pl);
         }
         let hj = row![
-            text("MODS (JAR)")
-                .size(14)
-                .color(palette.accent)
-                .font(iced::font::Font::MONOSPACE),
+            theme::text(
+                text("MODS (JAR)")
+                    .size(14)
+                    .color(palette.accent)
+                    .font(iced::font::Font::MONOSPACE),
+                ctx
+            ),
             Space::new().width(Length::Fill),
             button(
                 row![
-                    svg(util::icons::icon(util::icons::FOLDER))
-                        .width(14)
-                        .height(14)
-                        .style(move |t: &Theme, s| theme::svg_accent(palette, t, s)),
-                    text("Open Folder").size(10)
+                    theme::svg(
+                        svg(util::icons::icon(util::icons::FOLDER))
+                            .width(14)
+                            .height(14)
+                            .style(move |t: &Theme, s| theme::svg_accent(&palette, t, s)),
+                        ctx
+                    ),
+                    theme::text(text("Open Folder").size(10), ctx)
                 ]
                 .spacing(5)
                 .align_y(Alignment::Center)
             )
             .on_press(ModsMessage::OpenJarFolder)
-            .style(move |t: &Theme, s| theme::secondary_button_style(palette, t, s))
+            .style(move |t: &Theme, s| theme::secondary_button_style(&palette, t, s))
             .padding(5)
         ]
         .align_y(Alignment::Center);
         let mut ml = column![hj].spacing(10);
         if !self.installed_mods.is_empty() {
             for m in &self.installed_mods {
-                ml = ml.push(mod_row(m, palette));
+                ml = ml.push(mod_row(m, ctx));
             }
         } else if self.patch_mods.is_empty() {
-            ml = ml.push(
+            ml = ml.push(theme::text(
                 text("No JAR mods installed")
                     .size(12)
                     .color(palette.text_secondary),
-            );
+                ctx,
+            ));
         }
         c = c.push(ml);
         container(
             scrollable(c)
                 .height(Length::Fill)
-                .style(move |t: &Theme, s| theme::scrollable_style(palette, t, s)),
+                .style(move |t: &Theme, s| theme::scrollable_style(&palette, t, s)),
         )
         .padding(0)
         .into()
@@ -656,50 +678,57 @@ impl ModsState {
         &'a self,
         _loc: &'a crate::lang::Localization,
         is_c: bool,
-        palette: &'a theme::Palette,
+        ctx: theme::UIContext,
     ) -> Element<'a, ModsMessage, Theme, Renderer> {
+        let palette = ctx.palette;
         let sb = row![
             text_input("Search mods...", &self.search_query)
                 .on_input(ModsMessage::SearchChanged)
                 .on_submit(ModsMessage::SearchSubmit)
                 .padding(10)
-                .style(move |t: &Theme, s| theme::text_input_style(palette, t, s))
+                .style(move |t: &Theme, s| theme::text_input_style(&palette, t, s))
                 .width(Length::Fill),
-            button(text("Search").size(14))
+            button(theme::text(text("Search").size(14), ctx))
                 .on_press(ModsMessage::SearchSubmit)
-                .style(move |t: &Theme, s| theme::primary_button_style(palette, t, s))
+                .style(move |t: &Theme, s| theme::primary_button_style(&palette, t, s))
                 .padding(10)
         ]
         .spacing(10);
         let c: Element<'a, ModsMessage, Theme, Renderer> = if self.loading {
-            container(text("Loading...").size(20))
+            container(theme::text(text("Loading...").size(20), ctx))
                 .center_x(Length::Fill)
                 .center_y(Length::Fill)
                 .height(Length::Fill)
                 .into()
         } else if let Some(err) = &self.error {
-            container(text(err).color(Color::from_rgb(1.0, 0.4, 0.4)))
-                .center_x(Length::Fill)
-                .into()
+            container(theme::text(
+                text(err).color(Color::from_rgb(1.0, 0.4, 0.4)),
+                ctx,
+            ))
+            .center_x(Length::Fill)
+            .into()
         } else {
             let l = column(
                 self.remote_mods
                     .iter()
-                    .map(|m| self.view_remote_card(m, palette))
+                    .map(|m| self.view_remote_card(m, ctx))
                     .collect::<Vec<_>>(),
             )
             .spacing(10);
             container(
                 scrollable(l)
                     .height(Length::Fill)
-                    .style(move |t: &Theme, s| theme::scrollable_style(palette, t, s)),
+                    .style(move |t: &Theme, s| theme::scrollable_style(&palette, t, s)),
             )
             .padding(0)
             .into()
         };
-        let pr = button(text("< Prev").size(if is_c { 12 } else { 14 }))
-            .style(move |t: &Theme, s| theme::secondary_button_style(palette, t, s))
-            .padding(if is_c { 6 } else { 10 });
+        let pr = button(theme::text(
+            text("< Prev").size(if is_c { 12 } else { 14 }),
+            ctx,
+        ))
+        .style(move |t: &Theme, s| theme::secondary_button_style(&palette, t, s))
+        .padding(if is_c { 6 } else { 10 });
         let pr = if self.current_page > 0 {
             pr.on_press(ModsMessage::PrevPage)
         } else {
@@ -707,11 +736,17 @@ impl ModsState {
         };
         let pg = row![
             pr,
-            text(format!("Page {}", self.current_page + 1)).size(if is_c { 12 } else { 14 }),
-            button(text("Next >").size(if is_c { 12 } else { 14 }))
-                .on_press(ModsMessage::NextPage)
-                .style(move |t: &Theme, s| theme::secondary_button_style(palette, t, s))
-                .padding(if is_c { 6 } else { 10 })
+            theme::text(
+                text(format!("Page {}", self.current_page + 1)).size(if is_c { 12 } else { 14 }),
+                ctx
+            ),
+            button(theme::text(
+                text("Next >").size(if is_c { 12 } else { 14 }),
+                ctx
+            ))
+            .on_press(ModsMessage::NextPage)
+            .style(move |t: &Theme, s| theme::secondary_button_style(&palette, t, s))
+            .padding(if is_c { 6 } else { 10 })
         ]
         .spacing(if is_c { 10 } else { 20 })
         .align_y(Alignment::Center)
@@ -722,22 +757,23 @@ impl ModsState {
     fn view_remote_card<'a>(
         &'a self,
         cf: &'a CfMod,
-        palette: &'a theme::Palette,
+        ctx: theme::UIContext,
     ) -> Element<'a, ModsMessage, Theme, Renderer> {
+        let palette = ctx.palette;
         let (isi, isin) = (
             self.installing_ids.contains(&cf.id),
             self.installed_ids.contains(&cf.id),
         );
         let ab = if isi {
-            button(text("Downloading...").size(12))
-                .style(move |t: &Theme, s| theme::ghost_button_style(palette, t, s))
+            button(theme::text(text("Downloading...").size(12), ctx))
+                .style(move |t: &Theme, s| theme::ghost_button_style(&palette, t, s))
         } else if isin {
-            button(text("Installed").size(12))
-                .style(move |t: &Theme, s| theme::success_button_style(palette, t, s))
+            button(theme::text(text("Installed").size(12), ctx))
+                .style(move |t: &Theme, s| theme::success_button_style(&palette, t, s))
         } else {
-            button(text("Install").size(12))
+            button(theme::text(text("Install").size(12), ctx))
                 .on_press(ModsMessage::InstallMod(cf.clone()))
-                .style(move |t: &Theme, s| theme::primary_button_style(palette, t, s))
+                .style(move |t: &Theme, s| theme::primary_button_style(&palette, t, s))
         }
         .padding(8);
         let th: Element<'a, ModsMessage, Theme, Renderer> =
@@ -751,21 +787,27 @@ impl ModsState {
                 container(Space::new())
                     .width(50)
                     .height(50)
-                    .style(move |t: &Theme| theme::card_style(palette, t))
+                    .style(move |t: &Theme| theme::card_style(&palette, t))
                     .into()
             };
         container(
             row![
                 th,
                 column![
-                    text(&cf.name).size(16).color(palette.text_primary),
-                    text(&cf.summary)
-                        .size(12)
-                        .color(palette.text_secondary)
-                        .width(Length::Fill),
-                    text(format!("Downloads: {:.0}", cf.download_count))
-                        .size(10)
-                        .color(palette.accent)
+                    theme::text(text(&cf.name).size(16).color(palette.text_primary), ctx),
+                    theme::text(
+                        text(&cf.summary)
+                            .size(12)
+                            .color(palette.text_secondary)
+                            .width(Length::Fill),
+                        ctx
+                    ),
+                    theme::text(
+                        text(format!("Downloads: {:.0}", cf.download_count))
+                            .size(10)
+                            .color(palette.accent),
+                        ctx
+                    )
                 ]
                 .spacing(4)
                 .width(Length::Fill),
@@ -775,44 +817,50 @@ impl ModsState {
             .align_y(Alignment::Center),
         )
         .padding(10)
-        .style(move |t: &Theme| theme::card_style(palette, t))
+        .style(move |t: &Theme| theme::card_style(&palette, t))
         .into()
     }
 }
 
 pub fn mod_row<'a>(
     mi: &'a ModInfo,
-    palette: &'a theme::Palette,
+    ctx: theme::UIContext,
 ) -> Element<'a, ModsMessage, Theme, Renderer> {
+    let palette = ctx.palette;
     let sc = if mi.enabled {
         theme::ACCENT_GREEN
     } else {
         palette.text_secondary
     };
     let tb = if mi.enabled {
-        button(text("DISABLE"))
-            .style(move |t: &Theme, s| theme::secondary_button_style(palette, t, s))
+        button(theme::text(text("DISABLE"), ctx))
+            .style(move |t: &Theme, s| theme::secondary_button_style(&palette, t, s))
     } else {
-        button(text("ENABLE")).style(move |t: &Theme, s| theme::primary_button_style(palette, t, s))
+        button(theme::text(text("ENABLE"), ctx))
+            .style(move |t: &Theme, s| theme::primary_button_style(&palette, t, s))
     }
     .on_press(ModsMessage::ToggleLocal(mi.clone()));
-    let db = button(
+    let db = button(theme::svg(
         svg(util::icons::icon(util::icons::TRASH))
             .width(14)
             .height(14)
             .style(|_, _| iced::widget::svg::Style {
                 color: Some(Color::BLACK),
             }),
-    )
+        ctx,
+    ))
     .on_press(ModsMessage::DeleteLocal(mi.clone()))
-    .style(move |t: &Theme, s| theme::danger_button_style(palette, t, s))
+    .style(move |t: &Theme, s| theme::danger_button_style(&palette, t, s))
     .padding(8);
     container(
         row![
-            text(&mi.name).size(14).width(Length::Fill),
-            text(if mi.enabled { "ACTIVE" } else { "DISABLED" })
-                .size(12)
-                .color(sc),
+            theme::text(text(&mi.name).size(14).width(Length::Fill), ctx),
+            theme::text(
+                text(if mi.enabled { "ACTIVE" } else { "DISABLED" })
+                    .size(12)
+                    .color(sc),
+                ctx
+            ),
             tb,
             db
         ]
@@ -820,7 +868,7 @@ pub fn mod_row<'a>(
         .align_y(Alignment::Center),
     )
     .padding(10)
-    .style(move |t: &Theme| theme::card_style(palette, t))
+    .style(move |t: &Theme| theme::card_style(&palette, t))
     .into()
 }
 
@@ -828,20 +876,22 @@ fn tab_btn<'a>(
     l: &'a str,
     a: bool,
     c: bool,
-    palette: &'a theme::Palette,
+    ctx: theme::UIContext,
 ) -> button::Button<'a, ModsMessage, Theme, Renderer> {
-    button(
+    let palette = ctx.palette;
+    button(theme::text(
         text(l)
             .size(if c { 10 } else { 12 })
             .align_x(iced::alignment::Horizontal::Center),
-    )
+        ctx,
+    ))
     .width(Length::Fill)
     .padding(if c { 6 } else { 8 })
     .style(move |t: &Theme, s| {
         if a {
-            theme::active_tab_style(palette, t, s)
+            theme::active_tab_style(&palette, t, s)
         } else {
-            theme::ghost_button_style(palette, t, s)
+            theme::ghost_button_style(&palette, t, s)
         }
     })
 }
@@ -849,49 +899,60 @@ fn tab_btn<'a>(
 fn patch_row<'a>(
     p: &'a PatchManifest,
     _curr: &'a GameSettings,
-    palette: &'a theme::Palette,
+    ctx: theme::UIContext,
 ) -> Element<'a, ModsMessage, Theme, Renderer> {
+    let palette = ctx.palette;
     let sc = if p.enabled {
         theme::ACCENT_GREEN
     } else {
         palette.text_secondary
     };
     let tb = if p.enabled {
-        button(text("DISABLE"))
-            .style(move |t: &Theme, s| theme::secondary_button_style(palette, t, s))
+        button(theme::text(text("DISABLE"), ctx))
+            .style(move |t: &Theme, s| theme::secondary_button_style(&palette, t, s))
             .on_press(ModsMessage::ToggleZipPatch(p.mod_id.clone(), false))
     } else {
-        button(text("ENABLE"))
-            .style(move |t: &Theme, s| theme::primary_button_style(palette, t, s))
+        button(theme::text(text("ENABLE"), ctx))
+            .style(move |t: &Theme, s| theme::primary_button_style(&palette, t, s))
             .on_press(ModsMessage::ToggleZipPatch(p.mod_id.clone(), true))
     };
-    let db = button(
+    let db = button(theme::svg(
         svg(util::icons::icon(util::icons::TRASH))
             .width(14)
             .height(14)
             .style(|_, _| iced::widget::svg::Style {
                 color: Some(Color::BLACK),
             }),
-    )
+        ctx,
+    ))
     .on_press(ModsMessage::UninstallZipPatch(
         p.mod_id.clone(),
         _curr.clone(),
     ))
-    .style(move |t: &Theme, s| theme::danger_button_style(palette, t, s))
+    .style(move |t: &Theme, s| theme::danger_button_style(&palette, t, s))
     .padding(5);
     container(
         row![
-            text("📦").size(20),
+            theme::text(text("📦").size(20), ctx),
             column![
-                text(&p.mod_name).size(14),
+                theme::text(text(&p.mod_name).size(14), ctx),
                 row![
-                    text(if p.enabled { "ACTIVE" } else { "DISABLED" })
-                        .size(10)
-                        .color(sc),
-                    text("|").size(10).color(Color::from_rgb(0.3, 0.3, 0.3)),
-                    text(p.install_date.format("%Y-%m-%d").to_string())
-                        .size(10)
-                        .color(palette.text_secondary)
+                    theme::text(
+                        text(if p.enabled { "ACTIVE" } else { "DISABLED" })
+                            .size(10)
+                            .color(sc),
+                        ctx
+                    ),
+                    theme::text(
+                        text("|").size(10).color(Color::from_rgb(0.3, 0.3, 0.3)),
+                        ctx
+                    ),
+                    theme::text(
+                        text(p.install_date.format("%Y-%m-%d").to_string())
+                            .size(10)
+                            .color(palette.text_secondary),
+                        ctx
+                    )
                 ]
                 .spacing(5)
             ]
@@ -903,6 +964,6 @@ fn patch_row<'a>(
         .align_y(Alignment::Center),
     )
     .padding(10)
-    .style(move |t: &Theme| theme::card_style(palette, t))
+    .style(move |t: &Theme| theme::card_style(&palette, t))
     .into()
 }

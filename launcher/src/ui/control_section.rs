@@ -13,8 +13,9 @@ pub fn view<'a>(
     status_text: &'a str,
     localization: &'a crate::lang::Localization,
     is_disabled: bool,
-    palette: &'a theme::Palette,
+    ctx: theme::UIContext,
 ) -> Element<'a, Message> {
+    let palette = ctx.palette;
     let play_button_text = match status {
         LauncherStatus::Playing => localization.t("launcher.stop"),
         LauncherStatus::Downloading => localization.t("launcher.status.cancel"),
@@ -49,19 +50,31 @@ pub fn view<'a>(
 
     let info_section = column![
         row![
-            text(localization.t("launcher.info.channel"))
-                .size(10)
-                .color(palette.text_secondary),
+            theme::text(
+                text(localization.t("launcher.info.channel"))
+                    .size(10)
+                    .color(palette.text_secondary),
+                ctx
+            ),
             Space::new().width(Length::Fill),
-            text(&settings.channel).size(12).color(palette.text_primary)
+            theme::text(
+                text(&settings.channel).size(12).color(palette.text_primary),
+                ctx
+            )
         ]
         .width(Length::Fill),
         row![
-            text(localization.t("launcher.info.version"))
-                .size(10)
-                .color(palette.text_secondary),
+            theme::text(
+                text(localization.t("launcher.info.version"))
+                    .size(10)
+                    .color(palette.text_secondary),
+                ctx
+            ),
             Space::new().width(Length::Fill),
-            text(version_display).size(12).color(palette.text_primary)
+            theme::text(
+                text(version_display).size(12).color(palette.text_primary),
+                ctx
+            )
         ]
         .width(Length::Fill),
     ]
@@ -70,14 +83,20 @@ pub fn view<'a>(
     let mut play_btn = button(
         container(
             row![
-                svg(util::icons::icon(play_icon))
-                    .width(icon_size)
-                    .height(icon_size)
-                    .style(move |t, s| theme::svg_accent(palette, t, s)),
-                text(play_button_text)
-                    .size(font_size + 4)
-                    .font(Font::MONOSPACE)
-                    .align_y(iced::alignment::Vertical::Center)
+                theme::svg(
+                    svg(util::icons::icon(play_icon))
+                        .width(icon_size)
+                        .height(icon_size)
+                        .style(move |t, s| theme::svg_accent(&palette, t, s)),
+                    ctx
+                ),
+                theme::text(
+                    text(play_button_text)
+                        .size(font_size + 4)
+                        .font(Font::MONOSPACE)
+                        .align_y(iced::alignment::Vertical::Center),
+                    ctx
+                )
             ]
             .spacing(spacing_val)
             .align_y(Alignment::Center),
@@ -88,13 +107,13 @@ pub fn view<'a>(
         .center_y(Length::Fill),
     )
     .style(move |t, bs| match status {
-        _ if is_disabled => theme::play_button_style(palette, t, bs),
-        LauncherStatus::Playing => theme::play_button_style_active(palette, t, bs),
+        _ if is_disabled => theme::play_button_style(&palette, t, bs),
+        LauncherStatus::Playing => theme::play_button_style_active(&palette, t, bs),
         LauncherStatus::Downloading | LauncherStatus::Migrating => {
-            theme::danger_button_style(palette, t, bs)
+            theme::danger_button_style(&palette, t, bs)
         }
-        LauncherStatus::NeedsUpdate => theme::update_button_style(palette, t, bs),
-        _ => theme::play_button_style(palette, t, bs),
+        LauncherStatus::NeedsUpdate => theme::update_button_style(&palette, t, bs),
+        _ => theme::play_button_style(&palette, t, bs),
     })
     .width(Length::Fill)
     .height(Length::Fill);
@@ -114,14 +133,14 @@ pub fn view<'a>(
             svg(util::icons::icon(util::icons::SETTINGS))
                 .width(18)
                 .height(18)
-                .style(move |t, s| theme::svg_accent(palette, t, s)),
+                .style(move |t, s| theme::svg_accent(&palette, t, s)),
         )
         .width(Length::Fill)
         .height(Length::Fill)
         .center_x(Length::Fill)
         .center_y(Length::Fill),
     )
-    .style(move |t, s| theme::secondary_button_style(palette, t, s))
+    .style(move |t, s| theme::secondary_button_style(&palette, t, s))
     .width(Length::Fill)
     .height(Length::Fill);
     let settings_btn = if !is_disabled {
@@ -135,14 +154,14 @@ pub fn view<'a>(
             svg(util::icons::icon(util::icons::PUZZLE))
                 .width(18)
                 .height(18)
-                .style(move |t, s| theme::svg_accent(palette, t, s)),
+                .style(move |t, s| theme::svg_accent(&palette, t, s)),
         )
         .width(Length::Fill)
         .height(Length::Fill)
         .center_x(Length::Fill)
         .center_y(Length::Fill),
     )
-    .style(move |t, s| theme::secondary_button_style(palette, t, s))
+    .style(move |t, s| theme::secondary_button_style(&palette, t, s))
     .width(Length::Fill)
     .height(Length::Fill);
     let mods_btn = if !is_disabled {
@@ -160,27 +179,37 @@ pub fn view<'a>(
     .spacing(10)
     .height(90);
 
+    // Aplicar LSD al status text
+    let status_text_widget =
+        theme::text(text(status_text).size(14).color(palette.text_primary), ctx);
+
     column![
         info_section,
         if *status == LauncherStatus::Downloading || *status == LauncherStatus::Migrating {
             column![
                 column![
                     row![
-                        text(if *status == LauncherStatus::Migrating {
-                            localization.t("launcher.status.migrating")
-                        } else {
-                            localization.t("launcher.status.general")
-                        })
-                        .size(11)
-                        .color(palette.text_secondary),
-                        Space::new().width(Length::Fill),
-                        text(format!("{:.0}%", download_progress))
+                        theme::text(
+                            text(if *status == LauncherStatus::Migrating {
+                                localization.t("launcher.status.migrating")
+                            } else {
+                                localization.t("launcher.status.general")
+                            })
                             .size(11)
-                            .color(palette.text_primary)
+                            .color(palette.text_secondary),
+                            ctx
+                        ),
+                        Space::new().width(Length::Fill),
+                        theme::text(
+                            text(format!("{:.0}%", download_progress))
+                                .size(11)
+                                .color(palette.text_primary),
+                            ctx
+                        )
                     ],
                     container(
                         ProgressBar::new(0.0..=100.0, download_progress)
-                            .style(move |t| theme::orange_bar_style(palette, t))
+                            .style(move |t| theme::orange_bar_style(&palette, t))
                     )
                     .height(6)
                     .width(Length::Fill)
@@ -192,17 +221,23 @@ pub fn view<'a>(
                     Element::from(
                         column![
                             row![
-                                text(localization.t("launcher.status.step"))
-                                    .size(10)
-                                    .color(palette.text_secondary),
+                                theme::text(
+                                    text(localization.t("launcher.status.step"))
+                                        .size(10)
+                                        .color(palette.text_secondary),
+                                    ctx
+                                ),
                                 Space::new().width(Length::Fill),
-                                text(format!("{:.0}%", sub_progress))
-                                    .size(10)
-                                    .color(palette.text_secondary)
+                                theme::text(
+                                    text(format!("{:.0}%", sub_progress))
+                                        .size(10)
+                                        .color(palette.text_secondary),
+                                    ctx
+                                )
                             ],
                             container(
                                 ProgressBar::new(0.0..=100.0, sub_progress)
-                                    .style(move |t| theme::sub_bar_style(palette, t))
+                                    .style(move |t| theme::sub_bar_style(&palette, t))
                             )
                             .height(3)
                             .width(Length::Fill)
@@ -215,7 +250,7 @@ pub fn view<'a>(
         } else {
             column![]
         },
-        text(status_text).size(14).color(palette.text_primary),
+        status_text_widget,
         actions
     ]
     .spacing(15)

@@ -226,6 +226,7 @@ pub fn main() -> iced::Result {
 #[derive(Debug, Clone)]
 pub enum Message {
     None,
+    Tick(std::time::Instant),
     Initialize,
     Mods(ModsMessage),                        // New type of wrapper message
     ModsLoaded(Result<Vec<ModInfo>, String>), // Result of the load
@@ -316,6 +317,8 @@ struct RusTale {
     local_server_stop_tx: Option<tokio::sync::oneshot::Sender<()>>,
     cancellation_token: Arc<AtomicBool>,
     palette: theme::Palette,
+    lsd_offset: (f32, f32),
+    start_time: std::time::Instant,
 }
 
 impl RusTale {
@@ -403,6 +406,8 @@ impl RusTale {
                 local_server_stop_tx: None,
                 cancellation_token: Arc::new(AtomicBool::new(false)),
                 palette: theme::generate_palette(&initial_settings.theme),
+                lsd_offset: (0.0, 0.0),
+                start_time: std::time::Instant::now(),
             },
             Task::batch(vec![
                 Task::done(Message::Initialize),
@@ -456,7 +461,13 @@ impl RusTale {
             _ => Message::None,
         });
 
-        Subscription::batch(vec![game_runner, tray_sub, menu_sub, window_sub])
+        let tick_sub = if self.settings.theme.lsd_mode {
+            iced::time::every(std::time::Duration::from_millis(16)).map(Message::Tick)
+        } else {
+            Subscription::none()
+        };
+
+        Subscription::batch(vec![game_runner, tray_sub, menu_sub, window_sub, tick_sub])
     }
 
     fn reconcile_local_server(&mut self) {
@@ -500,6 +511,41 @@ impl RusTale {
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
+        match message {
+            Message::Tick(now) => {
+                if self.settings.theme.lsd_mode {
+                    let t = now.duration_since(self.start_time).as_secs_f32();
+
+                    // 1. Ralentizamos el tiempo base para sensación de "flotación"
+                    // El cerebro bajo efectos procesa el movimiento visual con "lag" o suavidad.
+                    let slow_t = t * 0.5;
+
+                    // 2. Cálculo de Offset (Drifting/Deriva)
+                    // Eje X: Suma de senos con fases desincronizadas (0.5 y 1.13)
+                    let drift_x = (slow_t * 0.5).sin() * 3.0   // Marea amplia
+                    + (slow_t * 1.13).cos() * 1.5; // Olea secundaria
+
+                    // Eje Y: Usamos cosenos y fases distintas (0.3 y 0.91) para movimiento elíptico no perfecto
+                    let drift_y = (slow_t * 0.3).cos() * 3.0   // Marea amplia vertical
+                    + (slow_t * 0.91).sin() * 1.5; // Olea secundaria vertical
+
+                    // (Opcional) Micro-warp: Una distorsión minúscula de alta frecuencia
+                    // para simular que el texto se "derrite" ligeramente.
+                    let melt = (t * 2.5).sin() * 0.5;
+
+                    self.lsd_offset = (drift_x + melt, drift_y);
+
+                    // NOTA: Si tu estructura lo permite, el realismo máximo se logra
+                    // añadiendo una variable de escala para el efecto de "respiración":
+                    // self.lsd_scale = 1.0 + (slow_t * 0.7).sin() * 0.02;
+                } else {
+                    self.lsd_offset = (0.0, 0.0);
+                }
+                return Task::none();
+            }
+            _ => {}
+        }
+
         if self.settings_state.is_open {
             match &message {
                 Message::Settings(_)
@@ -1404,6 +1450,7 @@ impl RusTale {
             | Message::SaveProfileName
             | Message::CancelProfileEdit
             | Message::ToggleProfileDropdown => self.handle_profile_message(message),
+            Message::Tick(_) => Task::none(),
             Message::TrayEvent(evt) => {
                 if let tray_icon::TrayIconEvent::Click {
                     button: tray_icon::MouseButton::Left,
@@ -1582,12 +1629,18 @@ impl RusTale {
                 self.profile_dropdown_open = !self.profile_dropdown_open;
                 Task::none()
             }
+            Message::Tick(_) => Task::none(),
             _ => Task::none(),
         }
     }
 
     fn view(&self) -> Element<'_, Message> {
         let palette = &self.palette;
+        let ctx = theme::UIContext {
+            palette: *palette,
+            lsd_offset: self.lsd_offset,
+            lsd_enabled: self.settings.theme.lsd_mode,
+        };
 
         let is_interaction_disabled = self.settings_state.is_open || self.mods_state.is_open;
 
@@ -1598,7 +1651,7 @@ impl RusTale {
                 &self.editing_uuid,
                 self.profile_dropdown_open && !is_interaction_disabled,
                 &self.localization,
-                &palette,
+                ctx,
             ),
             Space::new().height(Length::Fill),
             control_section::view(
@@ -1610,7 +1663,7 @@ impl RusTale {
                 &self.status_text,
                 &self.localization,
                 is_interaction_disabled,
-                &palette,
+                ctx,
             ),
         ]
         .spacing(20);
@@ -1626,7 +1679,7 @@ impl RusTale {
 
             let right_column = container(
                 self.news_section
-                    .view(&self.localization, is_interaction_disabled, &palette)
+                    .view(&self.localization, is_interaction_disabled, ctx)
                     .map(Message::News),
             )
             .width(Length::FillPortion(2))
@@ -1697,13 +1750,13 @@ impl RusTale {
         let overlay = if self.settings_state.is_open {
             Some(container(
                 self.settings_state
-                    .view(&self.localization, self.window_size, &palette)
+                    .view(&self.localization, self.window_size, ctx)
                     .map(Message::Settings),
             ))
         } else if self.mods_state.is_open {
             Some(container(
                 self.mods_state
-                    .view(&self.localization, self.window_size, &palette)
+                    .view(&self.localization, self.window_size, ctx)
                     .map(Message::Mods),
             ))
         } else {

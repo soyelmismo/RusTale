@@ -1,8 +1,10 @@
 use iced::overlay::menu;
 use iced::widget::{
-    button, checkbox, container, pick_list, progress_bar, scrollable, slider, svg, text_input,
+    button, checkbox, container, pick_list, progress_bar, scrollable, slider, text_input,
 };
-use iced::{Background, Border, Color, Shadow, Theme, Vector};
+use iced::{Background, Border, Color, Element, Padding, Shadow, Theme, Vector};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 // --- CONSTANTS ---
 pub const ACCENT_GREEN: Color = Color::from_rgb(0.2, 0.8, 0.2);
@@ -127,7 +129,7 @@ pub fn glass_container(palette: &Palette, _t: &Theme) -> container::Style {
 }
 
 pub fn news_panel_style(palette: &Palette, t: &Theme) -> container::Style {
-    glass_container(palette, t)
+    glass_container(&palette, t)
 }
 
 pub fn icon_button_style(palette: &Palette, _t: &Theme, status: button::Status) -> button::Style {
@@ -314,9 +316,9 @@ pub fn primary_button_style(
     match status {
         button::Status::Hovered => button::Style {
             background: Some(Background::Color(Color::from_rgb(
-                (palette.accent.r + 0.1).min(1.0),
-                (palette.accent.g + 0.1).min(1.0),
-                (palette.accent.b + 0.1).min(1.0),
+                (&palette.accent.r + 0.1).min(1.0),
+                (&palette.accent.g + 0.1).min(1.0),
+                (&palette.accent.b + 0.1).min(1.0),
             ))),
             ..base
         },
@@ -341,9 +343,9 @@ pub fn success_button_style(
     match status {
         button::Status::Hovered | button::Status::Pressed => button::Style {
             background: Some(Background::Color(Color::from_rgb(
-                (palette.success.r + 0.1).min(1.0),
-                (palette.success.g + 0.1).min(1.0),
-                (palette.success.b + 0.1).min(1.0),
+                (&palette.success.r + 0.1).min(1.0),
+                (&palette.success.g + 0.1).min(1.0),
+                (&palette.success.b + 0.1).min(1.0),
             ))),
             ..base
         },
@@ -551,7 +553,11 @@ pub fn sub_bar_style(_palette: &Palette, _t: &Theme) -> progress_bar::Style {
     }
 }
 
-pub fn update_button_style(palette: &Palette, _t: &Theme, status: button::Status) -> button::Style {
+pub fn update_button_style(
+    &palette: &Palette,
+    _t: &Theme,
+    status: button::Status,
+) -> button::Style {
     let base = button::Style {
         background: Some(Background::Color(Color::from_rgba(0.035, 0.05, 0.1, 0.8))),
         border: Border {
@@ -662,14 +668,22 @@ pub fn menu_style(palette: &Palette, _t: &Theme) -> menu::Style {
     }
 }
 
-pub fn svg_muted(_palette: &Palette, _t: &Theme, _status: svg::Status) -> svg::Style {
-    svg::Style {
+pub fn svg_muted(
+    _palette: &Palette,
+    _t: &Theme,
+    _status: iced::widget::svg::Status,
+) -> iced::widget::svg::Style {
+    iced::widget::svg::Style {
         color: Some(Color::from_rgb(0.5, 0.5, 0.5)),
     }
 }
 
-pub fn svg_accent(palette: &Palette, _t: &Theme, _status: svg::Status) -> svg::Style {
-    svg::Style {
+pub fn svg_accent(
+    palette: &Palette,
+    _t: &Theme,
+    _status: iced::widget::svg::Status,
+) -> iced::widget::svg::Style {
+    iced::widget::svg::Style {
         color: Some(palette.accent),
     }
 }
@@ -720,4 +734,79 @@ pub fn scrollable_style(
 
 pub fn container_style_transparent(_palette: &Palette, _t: &Theme) -> container::Style {
     container::Style::default()
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct UIContext {
+    pub palette: Palette,
+    pub lsd_offset: (f32, f32),
+    pub lsd_enabled: bool,
+}
+
+// --- LSD MODE WIDGETS ---
+
+// Guardamos el último offset procesado para saber cuándo empieza un nuevo frame
+static LAST_FRAME_OFFSET: Mutex<(f32, f32)> = Mutex::new((0.0, 0.0));
+static LSD_COMPONENT_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+/// Obtiene un índice estable para el componente actual dentro del frame actual.
+/// Esto garantiza que el Componente A siempre se mueva igual, eliminando el parpadeo.
+fn get_stable_disparity(current_offset: (f32, f32)) -> (f32, f32) {
+    let mut last_offset = LAST_FRAME_OFFSET.lock().unwrap();
+
+    // Si el offset global ha cambiado, es un nuevo frame -> reseteamos el contador de componentes
+    if (current_offset.0 - last_offset.0).abs() > 0.0001
+        || (current_offset.1 - last_offset.1).abs() > 0.0001
+    {
+        *last_offset = current_offset;
+        LSD_COMPONENT_COUNTER.store(0, Ordering::SeqCst);
+    }
+
+    let index = LSD_COMPONENT_COUNTER.fetch_add(1, Ordering::Relaxed);
+
+    // Usamos el Ángulo Áureo (~2.399 rad) para que la dispersión sea máxima y no se repita
+    let angle = (index as f32) * 2.399;
+    let s = angle.sin();
+    let c = angle.cos();
+
+    // Rotación suave del vector de movimiento original
+    // Damping: Multiplicamos por 0.8 para evitar que el objeto se "separe" demasiado de su origen (evita duplicidad)
+    let nx = (current_offset.0 * c - current_offset.1 * s) * 0.8;
+    let ny = (current_offset.0 * s + current_offset.1 * c) * 0.8;
+
+    (nx, ny)
+}
+
+/// Reemplazo para text() que aplica el efecto LSD si está activo
+pub fn text<'a, M: 'a>(content: impl Into<Element<'a, M>>, ctx: UIContext) -> Element<'a, M> {
+    let element = content.into();
+    if ctx.lsd_enabled {
+        let (vx, vy) = get_stable_disparity(ctx.lsd_offset);
+        container(element)
+            .padding(Padding {
+                top: vy,
+                left: vx,
+                ..Default::default()
+            })
+            .into()
+    } else {
+        element
+    }
+}
+
+pub fn svg<'a, M: 'a>(content: impl Into<Element<'a, M>>, ctx: UIContext) -> Element<'a, M> {
+    let element = content.into();
+    if ctx.lsd_enabled {
+        // Los iconos tienen una entropía ligeramente desplazada para desincronizarlos de su texto
+        let (vx, vy) = get_stable_disparity((ctx.lsd_offset.0 + 0.5, ctx.lsd_offset.1 + 0.5));
+        container(element)
+            .padding(Padding {
+                top: vy * 1.3,
+                left: vx * 1.3,
+                ..Default::default()
+            })
+            .into()
+    } else {
+        element
+    }
 }

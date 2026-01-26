@@ -116,6 +116,7 @@ pub struct ThemeConfig {
     pub accent_hex: String,
     pub saturation: f32, // 0.0 to 2.0 (1.0 is default)
     pub contrast: f32,   // 0.0 to 2.0 (1.0 is default)
+    pub lsd_mode: bool,
 }
 
 impl Default for ThemeConfig {
@@ -124,6 +125,7 @@ impl Default for ThemeConfig {
             accent_hex: "#FFA845".to_string(), // RusTale Orange
             saturation: 1.0,
             contrast: 1.0,
+            lsd_mode: false,
         }
     }
 }

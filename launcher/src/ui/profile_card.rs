@@ -11,8 +11,9 @@ pub fn view<'a>(
     editing_uuid: &'a Option<(String, String)>,
     dropdown_open: bool,
     localization: &'a crate::lang::Localization,
-    palette: &'a theme::Palette,
+    ctx: theme::UIContext,
 ) -> Element<'a, Message> {
+    let palette = ctx.palette;
     let active_profile = profiles.get_active_profile();
     let profile_name = active_profile
         .as_ref()
@@ -44,26 +45,28 @@ pub fn view<'a>(
                         text_input(localization.t("profile.name_placeholder"), current_name)
                             .on_input(Message::ProfileNameChanged)
                             .on_submit(Message::SaveProfileName)
-                            .style(move |t, status| theme::text_input_style(palette, t, status))
+                            .style(move |t, status| theme::text_input_style(&palette, t, status))
                             .padding(5)
                             .width(Length::Fill),
-                        button(
+                        button(theme::svg(
                             svg(util::icons::icon(util::icons::CHECK))
                                 .width(12)
                                 .height(12)
-                                .style(move |t, s| theme::svg_accent(palette, t, s))
-                        )
+                                .style(move |t, s| theme::svg_accent(&palette, t, s)),
+                            ctx
+                        ))
                         .on_press(Message::SaveProfileName)
-                        .style(move |t, s| theme::icon_button_style(palette, t, s))
+                        .style(move |t, s| theme::icon_button_style(&palette, t, s))
                         .padding(4),
-                        button(
+                        button(theme::svg(
                             svg(util::icons::icon(util::icons::X))
                                 .width(12)
                                 .height(12)
-                                .style(move |t, s| theme::svg_accent(palette, t, s))
-                        )
+                                .style(move |t, s| theme::svg_accent(&palette, t, s)),
+                            ctx
+                        ))
                         .on_press(Message::CancelProfileEdit)
-                        .style(move |t, s| theme::icon_button_style(palette, t, s))
+                        .style(move |t, s| theme::icon_button_style(&palette, t, s))
                         .padding(4),
                     ]
                     .spacing(5)
@@ -79,98 +82,105 @@ pub fn view<'a>(
                         text_input("UUID...", curr_uuid)
                             .on_input(Message::ProfileUUIDChanged)
                             .on_submit(Message::SaveProfileUUID)
-                            .style(move |t, s| theme::text_input_style(palette, t, s))
+                            .style(move |t, s| theme::text_input_style(&palette, t, s))
                             .padding(5)
                             .width(Length::Fill),
                         tooltip(
-                            button(
+                            button(theme::svg(
                                 svg(util::icons::icon(util::icons::COPY))
                                     .width(12)
                                     .height(12)
-                                    .style(move |t, s| theme::svg_accent(palette, t, s))
-                            )
+                                    .style(move |t, s| theme::svg_accent(&palette, t, s)),
+                                ctx
+                            ))
                             .on_press(Message::CopyUUID(curr_uuid.clone()))
-                            .style(move |t, s| theme::icon_button_style(palette, t, s))
+                            .style(move |t, s| theme::icon_button_style(&palette, t, s))
                             .padding(4),
                             "Copy UUID",
                             tooltip::Position::Top
                         )
-                        .style(move |t| theme::container_style_transparent(palette, t)),
+                        .style(move |t| theme::container_style_transparent(&palette, t)),
                         tooltip(
-                            button(
+                            button(theme::svg(
                                 svg(util::icons::icon(util::icons::DICE))
                                     .width(12)
                                     .height(12)
-                                    .style(move |t, s| theme::svg_accent(palette, t, s))
-                            )
+                                    .style(move |t, s| theme::svg_accent(&palette, t, s)),
+                                ctx
+                            ))
                             .on_press(Message::GenerateRandomUUID)
-                            .style(move |t, s| theme::icon_button_style(palette, t, s))
+                            .style(move |t, s| theme::icon_button_style(&palette, t, s))
                             .padding(4),
                             "Generate Random UUID",
                             tooltip::Position::Top
                         )
-                        .style(move |t| theme::container_style_transparent(palette, t)),
-                        button(
+                        .style(move |t| theme::container_style_transparent(&palette, t)),
+                        button(theme::svg(
                             svg(util::icons::icon(util::icons::CHECK))
                                 .width(12)
                                 .height(12)
-                                .style(move |t, s| theme::svg_accent(palette, t, s))
-                        )
+                                .style(move |t, s| theme::svg_accent(&palette, t, s)),
+                            ctx
+                        ))
                         .on_press(Message::SaveProfileUUID)
-                        .style(move |t, s| theme::icon_button_style(palette, t, s))
+                        .style(move |t, s| theme::icon_button_style(&palette, t, s))
                         .padding(4),
-                        button(
+                        button(theme::svg(
                             svg(util::icons::icon(util::icons::X))
                                 .width(12)
                                 .height(12)
-                                .style(move |t, s| theme::svg_accent(palette, t, s))
-                        )
+                                .style(move |t, s| theme::svg_accent(&palette, t, s)),
+                            ctx
+                        ))
                         .on_press(Message::CancelProfileUUIDEdit)
-                        .style(move |t, s| theme::icon_button_style(palette, t, s))
+                        .style(move |t, s| theme::icon_button_style(&palette, t, s))
                         .padding(4),
                     ]
                     .spacing(5)
                     .align_y(Alignment::Center),
                 )
                 .padding(5)
-                .style(move |t| theme::active_tab_container_style(palette, t)),
+                .style(move |t| theme::active_tab_container_style(&palette, t)),
             );
         } else {
             dropdown_content = dropdown_content.push(
                 button(
                     row![
-                        text(&profile.name).size(13).width(Length::Fill),
+                        theme::text(text(&profile.name).size(13).width(Length::Fill), ctx),
                         tooltip(
-                            button(
+                            button(theme::svg(
                                 svg(util::icons::icon(util::icons::PERSON))
                                     .width(12)
                                     .height(12)
-                                    .style(move |t, s| theme::svg_accent(palette, t, s))
-                            )
+                                    .style(move |t, s| theme::svg_accent(&palette, t, s)),
+                                ctx
+                            ))
                             .on_press(Message::EditProfileUUID(profile.id.clone()))
-                            .style(move |t, s| theme::icon_button_style(palette, t, s))
+                            .style(move |t, s| theme::icon_button_style(&palette, t, s))
                             .padding(4),
                             "View/Edit UUID",
                             tooltip::Position::Top
                         )
-                        .style(move |t| theme::container_style_transparent(palette, t)),
-                        button(
+                        .style(move |t| theme::container_style_transparent(&palette, t)),
+                        button(theme::svg(
                             svg(util::icons::icon(util::icons::EDIT))
                                 .width(12)
                                 .height(12)
-                                .style(move |t, s| theme::svg_accent(palette, t, s))
-                        )
+                                .style(move |t, s| theme::svg_accent(&palette, t, s)),
+                            ctx
+                        ))
                         .on_press(Message::EditProfile(profile.id.clone()))
-                        .style(move |t, s| theme::icon_button_style(palette, t, s))
+                        .style(move |t, s| theme::icon_button_style(&palette, t, s))
                         .padding(4),
-                        button(
+                        button(theme::svg(
                             svg(util::icons::icon(util::icons::TRASH))
                                 .width(12)
                                 .height(12)
-                                .style(move |t, s| theme::svg_accent(palette, t, s))
-                        )
+                                .style(move |t, s| theme::svg_accent(&palette, t, s)),
+                            ctx
+                        ))
                         .on_press(Message::DeleteProfile(profile.id.clone()))
-                        .style(move |t, s| theme::icon_button_style(palette, t, s))
+                        .style(move |t, s| theme::icon_button_style(&palette, t, s))
                         .padding(4),
                     ]
                     .align_y(Alignment::Center)
@@ -180,9 +190,9 @@ pub fn view<'a>(
                 .width(Length::Fill)
                 .style(move |t, s| {
                     if is_selected {
-                        theme::active_tab_style(palette, t, s)
+                        theme::active_tab_style(&palette, t, s)
                     } else {
-                        theme::ghost_button_style(palette, t, s)
+                        theme::ghost_button_style(&palette, t, s)
                     }
                 })
                 .padding(8),
@@ -197,26 +207,28 @@ pub fn view<'a>(
                     text_input(localization.t("profile.new_name_placeholder"), curr_name)
                         .on_input(Message::ProfileNameChanged)
                         .on_submit(Message::SaveProfileName)
-                        .style(move |t, s| theme::text_input_style(palette, t, s))
+                        .style(move |t, s| theme::text_input_style(&palette, t, s))
                         .padding(5)
                         .width(Length::Fill),
-                    button(
+                    button(theme::svg(
                         svg(util::icons::icon(util::icons::CHECK))
                             .width(12)
                             .height(12)
-                            .style(move |t, s| theme::svg_accent(palette, t, s))
-                    )
+                            .style(move |t, s| theme::svg_accent(&palette, t, s)),
+                        ctx
+                    ))
                     .on_press(Message::SaveProfileName)
-                    .style(move |t, s| theme::icon_button_style(palette, t, s))
+                    .style(move |t, s| theme::icon_button_style(&palette, t, s))
                     .padding(4),
-                    button(
+                    button(theme::svg(
                         svg(util::icons::icon(util::icons::X))
                             .width(12)
                             .height(12)
-                            .style(move |t, s| theme::svg_accent(palette, t, s))
-                    )
+                            .style(move |t, s| theme::svg_accent(&palette, t, s)),
+                        ctx
+                    ))
                     .on_press(Message::CancelProfileEdit)
-                    .style(move |t, s| theme::icon_button_style(palette, t, s))
+                    .style(move |t, s| theme::icon_button_style(&palette, t, s))
                     .padding(4),
                 ]
                 .spacing(5)
@@ -230,46 +242,55 @@ pub fn view<'a>(
     dropdown_content = dropdown_content.push(
         button(
             row![
-                svg(util::icons::icon(util::icons::PLUS))
-                    .width(14)
-                    .height(14),
-                text(localization.t("profile.add")).size(13)
+                theme::svg(
+                    svg(util::icons::icon(util::icons::PLUS))
+                        .width(14)
+                        .height(14),
+                    ctx
+                ),
+                theme::text(text(localization.t("profile.add")).size(13), ctx)
             ]
             .spacing(8)
             .align_y(Alignment::Center),
         )
         .on_press(Message::AddProfile)
         .width(Length::Fill)
-        .style(move |t, s| theme::primary_button_style(palette, t, s))
+        .style(move |t, s| theme::primary_button_style(&palette, t, s))
         .padding(10),
     );
 
     column![
-        text(localization.t("profile.title"))
-            .size(10)
-            .color(Color::from_rgb(0.5, 0.5, 0.5)),
+        theme::text(
+            text(localization.t("profile.title"))
+                .size(10)
+                .color(Color::from_rgb(0.5, 0.5, 0.5)),
+            ctx
+        ),
         button(
             row![
-                text(profile_name).size(14).width(Length::Fill),
-                svg(util::icons::icon(if dropdown_open {
-                    util::icons::X
-                } else {
-                    util::icons::CHEVRON_RIGHT
-                }))
-                .width(12)
-                .height(12)
-                .style(move |t, s| theme::svg_muted(palette, t, s))
+                theme::text(text(profile_name).size(14).width(Length::Fill), ctx),
+                theme::svg(
+                    svg(util::icons::icon(if dropdown_open {
+                        util::icons::X
+                    } else {
+                        util::icons::CHEVRON_RIGHT
+                    }))
+                    .width(12)
+                    .height(12)
+                    .style(move |t, s| theme::svg_muted(&palette, t, s)),
+                    ctx
+                )
             ]
             .align_y(Alignment::Center)
         )
         .on_press(Message::ToggleProfileDropdown)
         .width(Length::Fill)
-        .style(move |t, s| theme::dropdown_trigger_style(palette, t, s))
+        .style(move |t, s| theme::dropdown_trigger_style(&palette, t, s))
         .padding(10),
         if dropdown_open {
             container(dropdown_content)
                 .width(Length::Fill)
-                .style(move |t| theme::modal_container(palette, t))
+                .style(move |t| theme::modal_container(&palette, t))
         } else {
             container(Space::new())
         }

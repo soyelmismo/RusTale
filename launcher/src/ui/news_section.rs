@@ -106,22 +106,23 @@ impl NewsSection {
         &'a self,
         localization: &'a crate::lang::Localization,
         is_disabled: bool,
-        palette: &'a theme::Palette,
+        ctx: theme::UIContext,
     ) -> Element<'a, NewsMessage, Theme, Renderer> {
+        let palette = ctx.palette;
         let content: Element<'a, NewsMessage, Theme, Renderer> = if self.loading {
-            self.view_loading(localization, is_disabled, palette)
+            self.view_loading(localization, is_disabled, ctx)
         } else if let Some(error) = &self.error {
-            self.view_error(error, localization, is_disabled, palette)
+            self.view_error(error, localization, is_disabled, ctx)
         } else if self.posts.is_empty() {
-            self.view_empty(localization, is_disabled, palette)
+            self.view_empty(localization, is_disabled, ctx)
         } else {
-            self.view_posts(localization, is_disabled, palette)
+            self.view_posts(localization, is_disabled, ctx)
         };
 
         container(content)
             .width(Length::Fill)
             .height(Length::Fill)
-            .style(move |t: &Theme| theme::news_panel_style(palette, t))
+            .style(move |t: &Theme| theme::news_panel_style(&palette, t))
             .into()
     }
 
@@ -129,19 +130,23 @@ impl NewsSection {
         &'a self,
         loc: &'a crate::lang::Localization,
         is_disabled: bool,
-        palette: &'a theme::Palette,
+        ctx: theme::UIContext,
     ) -> Element<'a, NewsMessage, Theme, Renderer> {
+        let palette = ctx.palette;
         column![
-            header_section(true, loc, is_disabled, palette),
+            header_section(true, loc, is_disabled, ctx),
             container(
                 column![
-                    text(loc.t("news.loading"))
-                        .size(14)
-                        .color(palette.text_secondary),
+                    theme::text(
+                        text(loc.t("news.loading"))
+                            .size(14)
+                            .color(palette.text_secondary),
+                        ctx
+                    ),
                     Space::new().height(20.0),
                     container(
                         ProgressBar::new(0.0..=100.0, 50.0)
-                            .style(move |t: &Theme| theme::orange_bar_style(palette, t))
+                            .style(move |t: &Theme| theme::orange_bar_style(&palette, t))
                     )
                     .width(200)
                     .center_x(Length::Fill)
@@ -162,19 +167,23 @@ impl NewsSection {
         err: &'a str,
         loc: &'a crate::lang::Localization,
         is_disabled: bool,
-        palette: &'a theme::Palette,
+        ctx: theme::UIContext,
     ) -> Element<'a, NewsMessage, Theme, Renderer> {
+        let palette = ctx.palette;
         column![
-            header_section(false, loc, is_disabled, palette),
+            header_section(false, loc, is_disabled, ctx),
             container(
                 column![
-                    text(loc.t("news.failed"))
-                        .size(16)
-                        .color(Color::from_rgb(1.0, 0.5, 0.5)),
-                    text(err).size(12).color(palette.text_secondary),
+                    theme::text(
+                        text(loc.t("news.failed"))
+                            .size(16)
+                            .color(Color::from_rgb(1.0, 0.5, 0.5)),
+                        ctx
+                    ),
+                    theme::text(text(err).size(12).color(palette.text_secondary), ctx),
                     {
-                        let mut btn = button(text(loc.t("news.retry")).size(14))
-                            .style(move |t: &Theme, s| theme::primary_button_style(palette, t, s))
+                        let mut btn = button(theme::text(text(loc.t("news.retry")).size(14), ctx))
+                            .style(move |t: &Theme, s| theme::primary_button_style(&palette, t, s))
                             .padding(8);
                         if !is_disabled {
                             btn = btn.on_press(NewsMessage::LoadNews);
@@ -197,15 +206,17 @@ impl NewsSection {
         &'a self,
         loc: &'a crate::lang::Localization,
         is_disabled: bool,
-        palette: &'a theme::Palette,
+        ctx: theme::UIContext,
     ) -> Element<'a, NewsMessage, Theme, Renderer> {
+        let palette = ctx.palette;
         column![
-            header_section(false, loc, is_disabled, palette),
-            container(
+            header_section(false, loc, is_disabled, ctx),
+            container(theme::text(
                 text(loc.t("news.empty"))
                     .size(14)
-                    .color(palette.text_secondary)
-            )
+                    .color(palette.text_secondary),
+                ctx
+            ))
             .width(Length::Fill)
             .height(Length::Fill)
             .center_y(Length::Fill)
@@ -218,29 +229,30 @@ impl NewsSection {
         &'a self,
         loc: &'a crate::lang::Localization,
         is_disabled: bool,
-        palette: &'a theme::Palette,
+        ctx: theme::UIContext,
     ) -> Element<'a, NewsMessage, Theme, Renderer> {
+        let palette = ctx.palette;
         let posts_view = column![
-            header_section(false, loc, is_disabled, palette),
+            header_section(false, loc, is_disabled, ctx),
             scrollable(
                 column(
                     self.posts
                         .iter()
-                        .map(|post| self.view_post(post, loc, is_disabled, palette))
+                        .map(|post| self.view_post(post, loc, is_disabled, ctx))
                         .collect::<Vec<_>>()
                 )
                 .spacing(8)
             )
             .height(Length::Fill)
-            .style(move |t: &Theme, s| theme::scrollable_style(palette, t, s))
+            .style(move |t: &Theme, s| theme::scrollable_style(&palette, t, s))
         ]
         .spacing(10);
         if self.error.is_some() {
             column![
                 posts_view,
                 container({
-                    let mut btn = button(text(loc.t("news.retry")).size(12))
-                        .style(move |t: &Theme, s| theme::secondary_button_style(palette, t, s))
+                    let mut btn = button(theme::text(text(loc.t("news.retry")).size(12), ctx))
+                        .style(move |t: &Theme, s| theme::secondary_button_style(&palette, t, s))
                         .padding(4);
                     if !is_disabled {
                         btn = btn.on_press(NewsMessage::LoadNews);
@@ -262,8 +274,9 @@ impl NewsSection {
         post: &'a BlogPost,
         loc: &'a crate::lang::Localization,
         is_disabled: bool,
-        palette: &'a theme::Palette,
+        ctx: theme::UIContext,
     ) -> Element<'a, NewsMessage, Theme, Renderer> {
+        let palette = ctx.palette;
         let image_content: Element<'a, NewsMessage, Theme, Renderer> =
             if let Some(cover) = &post.cover_image {
                 if let Some(handle) = self.images.get(&cover.s3_key) {
@@ -289,23 +302,32 @@ impl NewsSection {
                 }),
                 column![
                     row![
-                        svg(util::icons::icon(util::icons::CALENDAR))
-                            .width(10)
-                            .height(10)
-                            .style(move |t: &Theme, s| theme::svg_accent(palette, t, s)),
-                        text(post.format_date())
-                            .size(9)
-                            .color(palette.text_secondary)
+                        theme::svg(
+                            svg(util::icons::icon(util::icons::CALENDAR))
+                                .width(10)
+                                .height(10)
+                                .style(move |t: &Theme, s| theme::svg_accent(&palette, t, s)),
+                            ctx
+                        ),
+                        theme::text(
+                            text(post.format_date())
+                                .size(9)
+                                .color(palette.text_secondary),
+                            ctx
+                        )
                     ]
                     .spacing(4),
-                    text(&post.title).size(14).color(palette.text_primary),
-                    text(
-                        post.body_excerpt
-                            .as_deref()
-                            .unwrap_or_else(|| loc.t("news.no_desc"))
+                    theme::text(text(&post.title).size(14).color(palette.text_primary), ctx),
+                    theme::text(
+                        text(
+                            post.body_excerpt
+                                .as_deref()
+                                .unwrap_or_else(|| loc.t("news.no_desc"))
+                        )
+                        .size(11)
+                        .color(palette.text_secondary),
+                        ctx
                     )
-                    .size(11)
-                    .color(palette.text_secondary)
                 ]
                 .spacing(2)
                 .width(Length::Fill)
@@ -316,7 +338,7 @@ impl NewsSection {
         if !is_disabled {
             btn = btn.on_press(NewsMessage::OpenPost(post.get_post_url()));
         }
-        btn.style(move |t: &Theme, s| theme::ghost_button_style(palette, t, s))
+        btn.style(move |t: &Theme, s| theme::ghost_button_style(&palette, t, s))
             .width(Length::Fill)
             .padding(8)
             .into()
@@ -336,8 +358,9 @@ fn header_section<'a>(
     loading: bool,
     loc: &'a crate::lang::Localization,
     is_disabled: bool,
-    palette: &'a theme::Palette,
+    ctx: theme::UIContext,
 ) -> Element<'a, NewsMessage, Theme, Renderer> {
+    let palette = ctx.palette;
     row![
         row![
             container(Space::new())
@@ -351,13 +374,16 @@ fn header_section<'a>(
                     },
                     ..Default::default()
                 }),
-            text(if loading {
-                loc.t("news.feed_loading")
-            } else {
-                loc.t("news.feed_latest")
-            })
-            .size(10)
-            .color(palette.text_secondary)
+            theme::text(
+                text(if loading {
+                    loc.t("news.feed_loading")
+                } else {
+                    loc.t("news.feed_latest")
+                })
+                .size(10)
+                .color(palette.text_secondary),
+                ctx
+            )
         ]
         .spacing(8)
         .padding(5)
@@ -366,13 +392,19 @@ fn header_section<'a>(
         {
             let mut btn = button(
                 row![
-                    text(loc.t("news.browse_all"))
-                        .size(10)
-                        .color(palette.text_secondary),
-                    svg(util::icons::icon(util::icons::CHEVRON_RIGHT))
-                        .width(10)
-                        .height(10)
-                        .style(move |t: &Theme, s| theme::svg_muted(palette, t, s))
+                    theme::text(
+                        text(loc.t("news.browse_all"))
+                            .size(10)
+                            .color(palette.text_secondary),
+                        ctx
+                    ),
+                    theme::svg(
+                        svg(util::icons::icon(util::icons::CHEVRON_RIGHT))
+                            .width(10)
+                            .height(10)
+                            .style(move |t: &Theme, s| theme::svg_muted(&palette, t, s)),
+                        ctx
+                    )
                 ]
                 .spacing(2)
                 .align_y(Alignment::Center),
@@ -380,7 +412,7 @@ fn header_section<'a>(
             if !is_disabled {
                 btn = btn.on_press(NewsMessage::OpenAllNews);
             }
-            btn.style(move |t: &Theme, s| theme::ghost_button_style(palette, t, s))
+            btn.style(move |t: &Theme, s| theme::ghost_button_style(&palette, t, s))
                 .padding(4)
         }
     ]
