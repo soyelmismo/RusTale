@@ -2,12 +2,21 @@ use iced::overlay::menu;
 use iced::widget::{
     button, checkbox, container, pick_list, progress_bar, scrollable, slider, text_input,
 };
-use iced::{Background, Border, Color, Element, Padding, Shadow, Theme, Vector};
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use iced::{
+    Background, Border, Color, Element, Length, Rectangle, Renderer, Shadow, Size, Theme, Vector,
+};
+
+use iced::advanced::layout::{self, Layout};
+use iced::advanced::mouse;
+use iced::advanced::renderer::{self, Renderer as _};
+use iced::advanced::widget::{self, Widget};
+use iced::advanced::{Clipboard, Shell};
+use iced::event::Event;
 
 // --- CONSTANTS ---
 pub const ACCENT_GREEN: Color = Color::from_rgb(0.2, 0.8, 0.2);
+pub const STANDARD_PADDING: f32 = 20.0;
+pub const STANDARD_SPACING: u32 = 15;
 
 // --- PALETTE SYSTEM ---
 
@@ -19,6 +28,7 @@ pub struct Palette {
     pub surface_hover: Color,
     pub text_primary: Color,
     pub text_secondary: Color,
+    pub text_on_accent: Color,
     pub success: Color,
     pub danger: Color,
 }
@@ -35,38 +45,68 @@ pub fn hex_to_color(hex: &str) -> Option<Color> {
 }
 
 pub fn generate_palette(config: &crate::config::ThemeConfig) -> Palette {
-    let mut base = hex_to_color(&config.accent_hex).unwrap_or(Color::from_rgb8(255, 168, 69));
+    use crate::config::BaseThemeMode;
+    let mut accent = hex_to_color(&config.accent_hex).unwrap_or(Color::from_rgb8(255, 168, 69));
+
+    // 0. Aplicar saturación ANTES de los cálculos de modo
     if (config.saturation - 1.0).abs() > 0.01 {
-        let gray = base.r * 0.299 + base.g * 0.587 + base.b * 0.114;
-        base.r = (gray + (base.r - gray) * config.saturation).clamp(0.0, 1.0);
-        base.g = (gray + (base.g - gray) * config.saturation).clamp(0.0, 1.0);
-        base.b = (gray + (base.b - gray) * config.saturation).clamp(0.0, 1.0);
+        let gray = accent.r * 0.299 + accent.g * 0.587 + accent.b * 0.114;
+        accent.r = (gray + (accent.r - gray) * config.saturation).clamp(0.0, 1.0);
+        accent.g = (gray + (accent.g - gray) * config.saturation).clamp(0.0, 1.0);
+        accent.b = (gray + (accent.b - gray) * config.saturation).clamp(0.0, 1.0);
     }
-    let tint_factor = 0.03 * config.contrast;
-    let bg_lum = 0.05 / config.contrast.max(0.1);
-    let background = Color::from_rgb(
-        (bg_lum + (base.r * tint_factor)).clamp(0.0, 1.0),
-        (bg_lum + (base.g * tint_factor)).clamp(0.0, 1.0),
-        (bg_lum + (base.b * tint_factor)).clamp(0.0, 1.0),
-    );
-    let surface = Color::from_rgb(
-        (background.r + 0.05).clamp(0.0, 1.0),
-        (background.g + 0.05).clamp(0.0, 1.0),
-        (background.b + 0.05).clamp(0.0, 1.0),
-    );
-    let text_lum = (0.9 * config.contrast).clamp(0.0, 1.0);
-    let text_primary = Color::from_rgb(text_lum, text_lum, text_lum);
-    let text_secondary = Color::from_rgba(text_lum, text_lum, text_lum, 0.6);
+
+    // 1. Configurar colores base según el modo
+    let (bg, surf, t_p, t_s) = match config.base_mode {
+        BaseThemeMode::Black => (
+            Color::from_rgb(0.01, 0.01, 0.02),
+            Color::from_rgb(0.06, 0.06, 0.09),
+            Color::WHITE,
+            Color::from_rgba(1.0, 1.0, 1.0, 0.5),
+        ),
+        BaseThemeMode::Grey => (
+            Color::from_rgb(0.12, 0.12, 0.14),
+            Color::from_rgb(0.18, 0.18, 0.22),
+            Color::WHITE,
+            Color::from_rgba(1.0, 1.0, 1.0, 0.5),
+        ),
+        BaseThemeMode::Light => (
+            Color::from_rgb(0.96, 0.97, 0.99),
+            Color::from_rgb(1.0, 1.0, 1.0),
+            Color::from_rgb(0.1, 0.1, 0.2),
+            Color::from_rgba(0.2, 0.2, 0.3, 0.6),
+        ),
+    };
+
+    // 2. Aplicar contraste y ajuste de intensidad según el modo
+    if config.base_mode == BaseThemeMode::Light {
+        accent.r = (accent.r * 0.7 * config.contrast).clamp(0.0, 1.0);
+        accent.g = (accent.g * 0.7 * config.contrast).clamp(0.0, 1.0);
+        accent.b = (accent.b * 0.7 * config.contrast).clamp(0.0, 1.0);
+    } else {
+        accent.r = (accent.r * config.contrast).clamp(0.0, 1.0);
+        accent.g = (accent.g * config.contrast).clamp(0.0, 1.0);
+        accent.b = (accent.b * config.contrast).clamp(0.0, 1.0);
+    }
+
+    // 3. CALCULAR TEXTO SOBRE ACENTO
+    let luminance = 0.299 * accent.r + 0.587 * accent.g + 0.114 * accent.b;
+    let text_on_accent = if luminance > 0.5 {
+        Color::BLACK
+    } else {
+        Color::WHITE
+    };
 
     Palette {
-        accent: base,
-        background,
-        surface,
-        surface_hover: Color::from_rgba(1.0, 1.0, 1.0, 0.1),
-        text_primary,
-        text_secondary,
-        success: ACCENT_GREEN,
-        danger: Color::from_rgb(0.9, 0.2, 0.2),
+        accent,
+        background: bg,
+        surface: surf,
+        surface_hover: Color::from_rgba(accent.r, accent.g, accent.b, 0.08),
+        text_primary: t_p,
+        text_secondary: t_s,
+        text_on_accent,
+        success: Color::from_rgb(0.1, 0.7, 0.3),
+        danger: Color::from_rgb(0.8, 0.2, 0.2),
     }
 }
 
@@ -79,7 +119,7 @@ pub fn card_style(palette: &Palette, _t: &Theme) -> container::Style {
             radius: 12.0.into(),
         },
         shadow: Shadow {
-            color: Color::BLACK,
+            color: Color::from_rgba(0.0, 0.0, 0.0, 0.2),
             offset: Vector::new(0.0, 4.0),
             blur_radius: 10.0,
         },
@@ -105,21 +145,51 @@ pub fn danger_button_style(
     }
 }
 
+/// Envuelve cualquier contenido en la "columna estándar" de RusTale
+/// con el espaciado y padding que te gusta del menú de juego.
+pub fn standard_column<'a, Message>(
+    items: Vec<Element<'a, Message, Theme, Renderer>>,
+) -> iced::widget::Column<'a, Message, Theme, Renderer> {
+    iced::widget::column(items)
+        .spacing(STANDARD_SPACING)
+        .width(Length::Fill)
+}
+
+/// Contenedor base para páginas dentro de modales (Settings, Mods, etc.)
+pub fn page_container<'a, Message>(
+    content: impl Into<Element<'a, Message, Theme, Renderer>>,
+) -> iced::widget::Container<'a, Message, Theme, Renderer> {
+    iced::widget::container(content)
+        .padding(STANDARD_PADDING)
+        .width(Length::Fill)
+        .height(Length::Fill)
+}
+
 pub fn glass_container(palette: &Palette, _t: &Theme) -> container::Style {
+    let alpha = if palette.background.r > 0.5 {
+        0.6
+    } else {
+        0.85
+    }; // Menos opaco en modo claro
     container::Style {
         background: Some(Background::Color(Color::from_rgba(
             palette.background.r,
             palette.background.g,
             palette.background.b,
-            0.85,
+            alpha,
         ))),
         border: Border {
-            color: Color::from_rgba(1.0, 1.0, 1.0, 0.08),
+            color: Color::from_rgba(
+                palette.text_primary.r,
+                palette.text_primary.g,
+                palette.text_primary.b,
+                0.1,
+            ),
             width: 1.0,
             radius: 12.0.into(),
         },
         shadow: Shadow {
-            color: Color::BLACK,
+            color: Color::from_rgba(0.0, 0.0, 0.0, 0.2),
             offset: Vector::new(0.0, 4.0),
             blur_radius: 10.0,
         },
@@ -190,7 +260,7 @@ pub fn play_button_style(palette: &Palette, _t: &Theme, status: button::Status) 
         },
         button::Status::Pressed => button::Style {
             background: Some(Background::Color(palette.accent)),
-            text_color: Color::BLACK,
+            text_color: palette.text_on_accent,
             ..base
         },
         button::Status::Disabled => button::Style {
@@ -241,26 +311,36 @@ pub fn secondary_button_style(
     _t: &Theme,
     status: button::Status,
 ) -> button::Style {
+    let is_light = palette.background.r > 0.5;
     match status {
         button::Status::Hovered | button::Status::Pressed => button::Style {
             background: Some(Background::Color(palette.surface_hover)),
+            text_color: palette.accent,
             border: Border {
                 color: palette.accent,
                 width: 1.0,
                 radius: 8.0.into(),
             },
-            text_color: palette.accent,
-            ..button::Style::default()
+            ..Default::default()
         },
         _ => button::Style {
-            background: Some(Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.3))),
+            background: Some(Background::Color(if is_light {
+                Color::from_rgba(0.0, 0.0, 0.0, 0.03)
+            } else {
+                Color::from_rgba(1.0, 1.0, 1.0, 0.05)
+            })),
+            text_color: palette.text_secondary,
             border: Border {
-                color: Color::from_rgba(1.0, 1.0, 1.0, 0.1),
+                color: Color::from_rgba(
+                    palette.text_primary.r,
+                    palette.text_primary.g,
+                    palette.text_primary.b,
+                    0.05,
+                ),
                 width: 1.0,
                 radius: 8.0.into(),
             },
-            text_color: palette.text_secondary,
-            ..button::Style::default()
+            ..Default::default()
         },
     }
 }
@@ -304,26 +384,23 @@ pub fn primary_button_style(
     _t: &Theme,
     status: button::Status,
 ) -> button::Style {
-    let base = button::Style {
+    let mut style = button::Style {
         background: Some(Background::Color(palette.accent)),
-        text_color: Color::BLACK,
+        text_color: palette.text_on_accent,
         border: Border {
             radius: 6.0.into(),
             ..Default::default()
         },
         ..Default::default()
     };
-    match status {
-        button::Status::Hovered => button::Style {
-            background: Some(Background::Color(Color::from_rgb(
-                (&palette.accent.r + 0.1).min(1.0),
-                (&palette.accent.g + 0.1).min(1.0),
-                (&palette.accent.b + 0.1).min(1.0),
-            ))),
-            ..base
-        },
-        _ => base,
+    if status == button::Status::Hovered {
+        style.shadow = Shadow {
+            color: Color::from_rgba(0.0, 0.0, 0.0, 0.2),
+            blur_radius: 5.0,
+            ..Default::default()
+        };
     }
+    style
 }
 
 pub fn success_button_style(
@@ -400,17 +477,18 @@ pub fn active_tab_container_style(palette: &Palette, _t: &Theme) -> container::S
 }
 
 pub fn modal_container(palette: &Palette, _t: &Theme) -> container::Style {
+    let is_light = palette.background.r > 0.5;
     container::Style {
         background: Some(Background::Color(palette.background)),
         border: Border {
-            color: Color::from_rgba(1.0, 1.0, 1.0, 0.1),
+            color: Color::from_rgba(0.0, 0.0, 0.0, if is_light { 0.05 } else { 0.2 }),
             width: 1.0,
             radius: 16.0.into(),
         },
         shadow: Shadow {
-            color: Color::BLACK,
+            color: Color::from_rgba(0.0, 0.0, 0.0, if is_light { 0.1 } else { 0.5 }),
             offset: Vector::new(0.0, 10.0),
-            blur_radius: 30.0,
+            blur_radius: 25.0,
         },
         text_color: Some(palette.text_primary),
         ..Default::default()
@@ -418,10 +496,20 @@ pub fn modal_container(palette: &Palette, _t: &Theme) -> container::Style {
 }
 
 pub fn sidebar_style(palette: &Palette, _t: &Theme) -> container::Style {
+    let is_light = palette.background.r > 0.5;
     container::Style {
-        background: Some(Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.2))),
+        background: Some(Background::Color(if is_light {
+            Color::from_rgba(0.0, 0.0, 0.0, 0.03)
+        } else {
+            Color::from_rgba(0.0, 0.0, 0.0, 0.2)
+        })),
         border: Border {
-            color: Color::from_rgba(1.0, 1.0, 1.0, 0.05),
+            color: Color::from_rgba(
+                palette.text_primary.r,
+                palette.text_primary.g,
+                palette.text_primary.b,
+                0.05,
+            ),
             width: 0.0,
             radius: 0.0.into(),
         },
@@ -431,10 +519,20 @@ pub fn sidebar_style(palette: &Palette, _t: &Theme) -> container::Style {
 }
 
 pub fn footer_style(palette: &Palette, _t: &Theme) -> container::Style {
+    let is_light = palette.background.r > 0.5;
     container::Style {
-        background: Some(Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.3))),
+        background: Some(Background::Color(if is_light {
+            Color::from_rgba(0.0, 0.0, 0.0, 0.05)
+        } else {
+            Color::from_rgba(0.0, 0.0, 0.0, 0.3)
+        })),
         border: Border {
-            color: Color::from_rgba(1.0, 1.0, 1.0, 0.05),
+            color: Color::from_rgba(
+                palette.text_primary.r,
+                palette.text_primary.g,
+                palette.text_primary.b,
+                0.05,
+            ),
             width: 1.0,
             radius: 0.0.into(),
         },
@@ -448,43 +546,45 @@ pub fn text_input_style(
     _t: &Theme,
     status: text_input::Status,
 ) -> text_input::Style {
-    let base = text_input::Style {
-        background: Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.3)),
+    let is_light = palette.background.r > 0.5;
+    text_input::Style {
+        background: Background::Color(if is_light {
+            Color::from_rgb(0.92, 0.93, 0.95)
+        } else {
+            Color::from_rgba(0.0, 0.0, 0.0, 0.4)
+        }),
         border: Border {
-            color: Color::from_rgba(1.0, 1.0, 1.0, 0.1),
+            color: if matches!(status, text_input::Status::Focused { .. }) {
+                palette.accent
+            } else {
+                Color::from_rgba(
+                    palette.text_primary.r,
+                    palette.text_primary.g,
+                    palette.text_primary.b,
+                    0.1,
+                )
+            },
             width: 1.0,
             radius: 6.0.into(),
         },
         icon: palette.text_secondary,
         placeholder: palette.text_secondary,
         value: palette.text_primary,
-        selection: Color::from_rgba(palette.accent.r, palette.accent.g, palette.accent.b, 0.3),
-    };
-    match status {
-        text_input::Status::Focused { .. } => text_input::Style {
-            border: Border {
-                color: palette.accent,
-                ..base.border
-            },
-            ..base
-        },
-        text_input::Status::Hovered => text_input::Style {
-            border: Border {
-                color: Color::from_rgba(1.0, 1.0, 1.0, 0.3),
-                ..base.border
-            },
-            ..base
-        },
-        _ => base,
+        selection: Color::from_rgba(palette.accent.r, palette.accent.g, palette.accent.b, 0.2),
     }
 }
 
 pub fn slider_style(palette: &Palette, _t: &Theme, _status: slider::Status) -> slider::Style {
+    let is_light = palette.background.r > 0.5;
     slider::Style {
         rail: slider::Rail {
             backgrounds: (
                 Background::Color(palette.accent),
-                Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.1)),
+                Background::Color(if is_light {
+                    Color::from_rgba(0.0, 0.0, 0.0, 0.1)
+                } else {
+                    Color::from_rgba(1.0, 1.0, 1.0, 0.1)
+                }),
             ),
             width: 4.0,
             border: Border {
@@ -495,8 +595,12 @@ pub fn slider_style(palette: &Palette, _t: &Theme, _status: slider::Status) -> s
         handle: slider::Handle {
             shape: slider::HandleShape::Circle { radius: 8.0 },
             background: Background::Color(palette.text_primary),
-            border_width: 0.0,
-            border_color: Color::TRANSPARENT,
+            border_width: 1.0,
+            border_color: if is_light {
+                Color::from_rgba(0.0, 0.0, 0.0, 0.1)
+            } else {
+                Color::TRANSPARENT
+            },
         },
     }
 }
@@ -598,11 +702,21 @@ pub fn dropdown_trigger_style(
     _t: &Theme,
     status: button::Status,
 ) -> button::Style {
+    let is_light = palette.background.r > 0.5;
     let base = button::Style {
         text_color: palette.text_primary,
-        background: Some(Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.3))),
+        background: Some(Background::Color(if is_light {
+            Color::from_rgb(0.92, 0.93, 0.95)
+        } else {
+            Color::from_rgba(0.0, 0.0, 0.0, 0.3)
+        })),
         border: Border {
-            color: Color::from_rgba(1.0, 1.0, 1.0, 0.1),
+            color: Color::from_rgba(
+                palette.text_primary.r,
+                palette.text_primary.g,
+                palette.text_primary.b,
+                0.1,
+            ),
             width: 1.0,
             radius: 8.0.into(),
         },
@@ -625,13 +739,23 @@ pub fn pick_list_style(
     _t: &Theme,
     status: pick_list::Status,
 ) -> pick_list::Style {
+    let is_light = palette.background.r > 0.5;
     let base = pick_list::Style {
         text_color: palette.text_primary,
         placeholder_color: palette.text_secondary,
         handle_color: palette.text_secondary,
-        background: Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.3)),
+        background: Background::Color(if is_light {
+            Color::from_rgb(0.92, 0.93, 0.95)
+        } else {
+            Color::from_rgba(0.0, 0.0, 0.0, 0.3)
+        }),
         border: Border {
-            color: Color::from_rgba(1.0, 1.0, 1.0, 0.1),
+            color: Color::from_rgba(
+                palette.text_primary.r,
+                palette.text_primary.g,
+                palette.text_primary.b,
+                0.1,
+            ),
             width: 1.0,
             radius: 8.0.into(),
         },
@@ -658,7 +782,7 @@ pub fn menu_style(palette: &Palette, _t: &Theme) -> menu::Style {
             width: 1.0,
             radius: 8.0.into(),
         },
-        selected_text_color: Color::BLACK,
+        selected_text_color: palette.text_on_accent,
         selected_background: Background::Color(palette.accent),
         shadow: Shadow {
             color: Color::BLACK,
@@ -669,12 +793,16 @@ pub fn menu_style(palette: &Palette, _t: &Theme) -> menu::Style {
 }
 
 pub fn svg_muted(
-    _palette: &Palette,
+    palette: &Palette,
     _t: &Theme,
     _status: iced::widget::svg::Status,
 ) -> iced::widget::svg::Style {
     iced::widget::svg::Style {
-        color: Some(Color::from_rgb(0.5, 0.5, 0.5)),
+        color: Some(if palette.background.r > 0.5 {
+            Color::from_rgb(0.3, 0.3, 0.4)
+        } else {
+            Color::from_rgb(0.5, 0.5, 0.5)
+        }),
     }
 }
 
@@ -745,50 +873,136 @@ pub struct UIContext {
 
 // --- LSD MODE WIDGETS ---
 
-// Guardamos el último offset procesado para saber cuándo empieza un nuevo frame
-static LAST_FRAME_OFFSET: Mutex<(f32, f32)> = Mutex::new((0.0, 0.0));
-static LSD_COMPONENT_COUNTER: AtomicUsize = AtomicUsize::new(0);
-
-/// Obtiene un índice estable para el componente actual dentro del frame actual.
-/// Esto garantiza que el Componente A siempre se mueva igual, eliminando el parpadeo.
-fn get_stable_disparity(current_offset: (f32, f32)) -> (f32, f32) {
-    let mut last_offset = LAST_FRAME_OFFSET.lock().unwrap();
-
-    // Si el offset global ha cambiado, es un nuevo frame -> reseteamos el contador de componentes
-    if (current_offset.0 - last_offset.0).abs() > 0.0001
-        || (current_offset.1 - last_offset.1).abs() > 0.0001
-    {
-        *last_offset = current_offset;
-        LSD_COMPONENT_COUNTER.store(0, Ordering::SeqCst);
-    }
-
-    let index = LSD_COMPONENT_COUNTER.fetch_add(1, Ordering::Relaxed);
-
-    // Usamos el Ángulo Áureo (~2.399 rad) para que la dispersión sea máxima y no se repita
-    let angle = (index as f32) * 2.399;
-    let s = angle.sin();
-    let c = angle.cos();
-
-    // Rotación suave del vector de movimiento original
-    // Damping: Multiplicamos por 0.8 para evitar que el objeto se "separe" demasiado de su origen (evita duplicidad)
-    let nx = (current_offset.0 * c - current_offset.1 * s) * 0.8;
-    let ny = (current_offset.0 * s + current_offset.1 * c) * 0.8;
-
-    (nx, ny)
+pub struct SmoothTranslate<'a, Message> {
+    content: Element<'a, Message, Theme, Renderer>,
+    offset: Vector,
 }
 
-/// Reemplazo para text() que aplica el efecto LSD si está activo
+impl<'a, Message> SmoothTranslate<'a, Message> {
+    pub fn new(content: Element<'a, Message, Theme, Renderer>, offset: (f32, f32)) -> Self {
+        Self {
+            content,
+            offset: Vector::new(offset.0, offset.1),
+        }
+    }
+}
+
+impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Message> {
+    fn size(&self) -> Size<Length> {
+        self.content.as_widget().size()
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut widget::Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        self.content.as_widget_mut().layout(tree, renderer, limits)
+    }
+
+    fn draw(
+        &self,
+        tree: &widget::Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        renderer.with_translation(self.offset, |renderer| {
+            self.content
+                .as_widget()
+                .draw(tree, renderer, theme, style, layout, cursor, viewport);
+        });
+    }
+
+    fn tag(&self) -> widget::tree::Tag {
+        self.content.as_widget().tag()
+    }
+
+    fn state(&self) -> widget::tree::State {
+        self.content.as_widget().state()
+    }
+
+    fn children(&self) -> Vec<widget::Tree> {
+        self.content.as_widget().children()
+    }
+
+    fn diff(&self, tree: &mut widget::Tree) {
+        self.content.as_widget().diff(tree);
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &widget::Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        self.content
+            .as_widget()
+            .mouse_interaction(tree, layout, cursor, viewport, renderer)
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut widget::Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        let adjusted_cursor = cursor
+            .position()
+            .map(|p| p - self.offset)
+            .map(mouse::Cursor::Available)
+            .unwrap_or(cursor);
+
+        self.content.as_widget_mut().update(
+            tree,
+            event,
+            layout,
+            adjusted_cursor,
+            renderer,
+            clipboard,
+            shell,
+            viewport,
+        )
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut widget::Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn widget::Operation,
+    ) {
+        self.content
+            .as_widget_mut()
+            .operate(tree, layout, renderer, operation);
+    }
+}
+
+fn get_seeded_disparity(offset: (f32, f32), seed: usize) -> (f32, f32) {
+    let s = (seed as f32 * 0.618033).fract() * 6.28;
+
+    let nx = offset.0 * s.cos() - offset.1 * s.sin();
+    let ny = offset.0 * s.sin() + offset.1 * s.cos();
+
+    (nx * 0.8, ny * 0.8)
+}
+
 pub fn text<'a, M: 'a>(content: impl Into<Element<'a, M>>, ctx: UIContext) -> Element<'a, M> {
     let element = content.into();
     if ctx.lsd_enabled {
-        let (vx, vy) = get_stable_disparity(ctx.lsd_offset);
-        container(element)
-            .padding(Padding {
-                top: vy,
-                left: vx,
-                ..Default::default()
-            })
-            .into()
+        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 1);
+        Element::new(SmoothTranslate::new(element, (vx, vy)))
     } else {
         element
     }
@@ -797,15 +1011,8 @@ pub fn text<'a, M: 'a>(content: impl Into<Element<'a, M>>, ctx: UIContext) -> El
 pub fn svg<'a, M: 'a>(content: impl Into<Element<'a, M>>, ctx: UIContext) -> Element<'a, M> {
     let element = content.into();
     if ctx.lsd_enabled {
-        // Los iconos tienen una entropía ligeramente desplazada para desincronizarlos de su texto
-        let (vx, vy) = get_stable_disparity((ctx.lsd_offset.0 + 0.5, ctx.lsd_offset.1 + 0.5));
-        container(element)
-            .padding(Padding {
-                top: vy * 1.3,
-                left: vx * 1.3,
-                ..Default::default()
-            })
-            .into()
+        let (vx, vy) = get_seeded_disparity((ctx.lsd_offset.0 + 0.5, ctx.lsd_offset.1 + 0.5), 1);
+        Element::new(SmoothTranslate::new(element, (vx * 1.3, vy * 1.3)))
     } else {
         element
     }

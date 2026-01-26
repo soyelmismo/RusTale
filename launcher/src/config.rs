@@ -111,9 +111,18 @@ impl std::fmt::Display for OnlineFixMode {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum BaseThemeMode {
+    #[default]
+    Black,
+    Grey,
+    Light,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ThemeConfig {
     pub accent_hex: String,
+    pub base_mode: BaseThemeMode,
     pub saturation: f32, // 0.0 to 2.0 (1.0 is default)
     pub contrast: f32,   // 0.0 to 2.0 (1.0 is default)
     pub lsd_mode: bool,
@@ -123,6 +132,7 @@ impl Default for ThemeConfig {
     fn default() -> Self {
         Self {
             accent_hex: "#FFA845".to_string(), // RusTale Orange
+            base_mode: BaseThemeMode::Black,
             saturation: 1.0,
             contrast: 1.0,
             lsd_mode: false,

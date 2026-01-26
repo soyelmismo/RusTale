@@ -107,6 +107,7 @@ pub enum SettingsMessage {
     ThemeSaturationChanged(f32),
     ThemeContrastChanged(f32),
     LsdToggled(bool),
+    BaseThemeChanged(crate::config::BaseThemeMode),
     None,
 }
 
@@ -278,6 +279,28 @@ impl SettingsState {
         let theme_section = column![
             section_title(localization.t("settings.theme"), ctx),
             row![
+                theme_mode_button(
+                    localization.t("settings.theme_mode_dark"),
+                    crate::config::BaseThemeMode::Black,
+                    self.temp_settings.theme.base_mode,
+                    ctx
+                ),
+                theme_mode_button(
+                    localization.t("settings.theme_mode_gray"),
+                    crate::config::BaseThemeMode::Grey,
+                    self.temp_settings.theme.base_mode,
+                    ctx
+                ),
+                theme_mode_button(
+                    localization.t("settings.theme_mode_light"),
+                    crate::config::BaseThemeMode::Light,
+                    self.temp_settings.theme.base_mode,
+                    ctx
+                ),
+            ]
+            .spacing(2)
+            .width(Length::Fill),
+            row![
                 theme::text(
                     text(localization.t("settings.theme_preset"))
                         .size(12)
@@ -331,7 +354,7 @@ impl SettingsState {
         ]
         .spacing(10);
 
-        column![
+        theme::page_container(theme::standard_column(vec![
             section_title(localization.t("settings.tabs.launcher"), ctx),
             column![
                 theme::text(
@@ -342,16 +365,17 @@ impl SettingsState {
                 ),
                 language_pick
             ]
-            .spacing(5),
-            Space::new().height(10),
-            theme_section,
-            Space::new().height(10),
-            news_checkbox,
-            auto_update_chk,
+            .spacing(5)
+            .into(),
+            Space::new().height(10).into(),
+            theme_section.into(),
+            Space::new().height(10).into(),
+            news_checkbox.into(),
+            auto_update_chk.into(),
             self.view_update_check_button(localization, _is_compact, ctx),
-            minimize_tray_chk,
-            minimize_play_chk,
-            quickplay_chk,
+            minimize_tray_chk.into(),
+            minimize_play_chk.into(),
+            quickplay_chk.into(),
             row![
                 checkbox(self.temp_settings.theme.lsd_mode)
                     .on_toggle(SettingsMessage::LsdToggled)
@@ -367,10 +391,9 @@ impl SettingsState {
                 ]
             ]
             .spacing(10)
-            .align_y(Alignment::Center),
-        ]
-        .spacing(15)
-        .width(Length::Fill)
+            .align_y(Alignment::Center)
+            .into(),
+        ]))
         .into()
     }
 
@@ -775,15 +798,11 @@ impl SettingsState {
         ]
         .spacing(5);
 
-        column![
-            path_selector,
-            Space::new().height(15),
-            game_config,
-            Space::new().height(15),
-            installed_manager
-        ]
-        .spacing(10)
-        .width(Length::Fill)
+        theme::page_container(theme::standard_column(vec![
+            path_selector.into(),
+            game_config.into(),
+            installed_manager.into(),
+        ]))
         .into()
     }
 
@@ -951,6 +970,10 @@ impl SettingsState {
                 self.temp_settings.theme.lsd_mode = val;
                 None
             }
+            SettingsMessage::BaseThemeChanged(mode) => {
+                self.temp_settings.theme.base_mode = mode;
+                None
+            }
             SettingsMessage::None => None,
         }
     }
@@ -1006,24 +1029,24 @@ impl SettingsState {
         let content = match self.current_tab {
             Tab::Launcher => self.view_launcher_tab(localization, is_compact, ctx),
             Tab::Game => self.view_game_tab(localization, is_compact, ctx),
-            Tab::Video => column![
+            Tab::Video => theme::page_container(theme::standard_column(vec![
                 section_title(localization.t("settings.display"), ctx),
                 row![
                     input_group(
                         localization.t("settings.width"),
                         &self.temp_settings.width.to_string(),
                         SettingsMessage::WidthChanged,
-                        ctx
+                        ctx,
                     ),
                     input_group(
                         localization.t("settings.height"),
                         &self.temp_settings.height.to_string(),
                         SettingsMessage::HeightChanged,
-                        ctx
+                        ctx,
                     ),
                 ]
-                .spacing(20),
-                Space::new().height(20),
+                .spacing(20)
+                .into(),
                 row![
                     checkbox(self.temp_settings.fullscreen)
                         .on_toggle(SettingsMessage::FullscreenToggled)
@@ -1031,11 +1054,11 @@ impl SettingsState {
                     theme::text(text(localization.t("settings.fullscreen")).size(14), ctx)
                 ]
                 .spacing(10)
-                .align_y(Alignment::Center),
-            ]
-            .spacing(15)
+                .align_y(Alignment::Center)
+                .into(),
+            ]))
             .into(),
-            Tab::Java => column![
+            Tab::Java => theme::page_container(theme::standard_column(vec![
                 section_title(localization.t("settings.java_memory"), ctx),
                 theme::text(
                     text(format!(
@@ -1044,16 +1067,17 @@ impl SettingsState {
                         self.temp_settings.min_memory
                     ))
                     .size(12),
-                    ctx
-                ),
+                    ctx,
+                )
+                .into(),
                 slider(
                     1.0..=16.0,
                     self.temp_settings.min_memory as f32,
-                    SettingsMessage::MinMemoryChanged
+                    SettingsMessage::MinMemoryChanged,
                 )
                 .step(1.0)
-                .style(move |t, s| theme::slider_style(&palette, t, s)),
-                Space::new().height(10),
+                .style(move |t, s| theme::slider_style(&palette, t, s))
+                .into(),
                 theme::text(
                     text(format!(
                         "{}: {} GB",
@@ -1061,26 +1085,27 @@ impl SettingsState {
                         self.temp_settings.max_memory
                     ))
                     .size(12),
-                    ctx
-                ),
+                    ctx,
+                )
+                .into(),
                 slider(
                     1.0..=32.0,
                     self.temp_settings.max_memory as f32,
-                    SettingsMessage::MaxMemoryChanged
+                    SettingsMessage::MaxMemoryChanged,
                 )
                 .step(1.0)
-                .style(move |t, s| theme::slider_style(&palette, t, s)),
-                Space::new().height(20),
+                .style(move |t, s| theme::slider_style(&palette, t, s))
+                .into(),
                 section_title(localization.t("settings.jvm_args"), ctx),
                 text_input(
                     localization.t("settings.jvm_args_placeholder"),
-                    &self.temp_settings.java_args
+                    &self.temp_settings.java_args,
                 )
                 .on_input(SettingsMessage::JavaArgsChanged)
                 .padding(10)
-                .style(move |t, status| theme::text_input_style(&palette, t, status)),
-            ]
-            .spacing(15)
+                .style(move |t, status| theme::text_input_style(&palette, t, status))
+                .into(),
+            ]))
             .into(),
         };
 
@@ -1206,6 +1231,37 @@ fn tab_button<'a>(
             theme::active_tab_style(&palette, t, status)
         } else {
             theme::ghost_button_style(&palette, t, status)
+        }
+    })
+    .into()
+}
+
+fn theme_mode_button<'a>(
+    label: &str,
+    mode: crate::config::BaseThemeMode,
+    current: crate::config::BaseThemeMode,
+    ctx: theme::UIContext,
+) -> Element<'a, SettingsMessage> {
+    let palette = ctx.palette;
+    let is_active = mode == current;
+
+    button(
+        container(theme::text(
+            text(label.to_string())
+                .size(10)
+                .font(iced::font::Font::MONOSPACE),
+            ctx,
+        ))
+        .center_x(Length::Fill)
+        .padding(8),
+    )
+    .on_press(SettingsMessage::BaseThemeChanged(mode))
+    .width(Length::Fill)
+    .style(move |t, s| {
+        if is_active {
+            theme::active_tab_style(&palette, t, s)
+        } else {
+            theme::secondary_button_style(&palette, t, s)
         }
     })
     .into()

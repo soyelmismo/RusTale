@@ -523,8 +523,7 @@ impl ModsState {
             Space::new().width(Length::Fill),
             c_btn
         ]
-        .align_y(Alignment::Center)
-        .padding(if is_c { 10 } else { 20 });
+        .align_y(Alignment::Center);
         let ts = row![
             tab_btn(
                 "INSTALLED",
@@ -536,8 +535,7 @@ impl ModsState {
             tab_btn("BROWSE", self.current_tab == ModTab::Browse, is_c, ctx)
                 .on_press(ModsMessage::SwitchTab(ModTab::Browse))
         ]
-        .spacing(10)
-        .padding(if is_c { 10 } else { 20 });
+        .spacing(10);
         let cnt = match self.current_tab {
             ModTab::Installed => self.view_installed(loc, ctx),
             ModTab::Browse => self.view_browse(loc, is_c, ctx),
@@ -554,16 +552,13 @@ impl ModsState {
                 Length::Fixed(600.0)
             },
         );
-        container(column![
-            h,
-            ts,
-            container(cnt)
-                .padding(if is_c { 10 } else { 20 })
-                .height(Length::Fill)
-        ])
+        theme::page_container(theme::standard_column(vec![
+            h.into(),
+            ts.into(),
+            container(cnt).height(Length::Fill).into(),
+        ]))
         .width(mw)
         .height(mh)
-        .padding(if is_c { 5 } else { 0 })
         .style(move |t: &Theme| theme::modal_container(&palette, t))
         .into()
     }
@@ -587,7 +582,9 @@ impl ModsState {
             .center_y(Length::Fill)
             .into();
         }
-        let mut c = column![].spacing(20);
+
+        let mut content_items = Vec::new();
+
         if !self.patch_mods.is_empty() {
             let h = row![
                 theme::text(
@@ -617,12 +614,14 @@ impl ModsState {
                 .padding(5)
             ]
             .align_y(Alignment::Center);
+
             let mut pl = column![h].spacing(10);
             for p in &self.patch_mods {
                 pl = pl.push(patch_row(p, &self.temp_settings, ctx));
             }
-            c = c.push(pl);
+            content_items.push(pl.into());
         }
+
         let hj = row![
             theme::text(
                 text("MODS (JAR)")
@@ -651,6 +650,7 @@ impl ModsState {
             .padding(5)
         ]
         .align_y(Alignment::Center);
+
         let mut ml = column![hj].spacing(10);
         if !self.installed_mods.is_empty() {
             for m in &self.installed_mods {
@@ -664,14 +664,12 @@ impl ModsState {
                 ctx,
             ));
         }
-        c = c.push(ml);
-        container(
-            scrollable(c)
-                .height(Length::Fill)
-                .style(move |t: &Theme, s| theme::scrollable_style(&palette, t, s)),
-        )
-        .padding(0)
-        .into()
+        content_items.push(ml.into());
+
+        scrollable(theme::standard_column(content_items))
+            .height(Length::Fill)
+            .style(move |t: &Theme, s| theme::scrollable_style(&palette, t, s))
+            .into()
     }
 
     fn view_browse<'a>(
@@ -751,7 +749,7 @@ impl ModsState {
         .spacing(if is_c { 10 } else { 20 })
         .align_y(Alignment::Center)
         .width(Length::Fill);
-        column![sb, c, pg].spacing(15).into()
+        theme::standard_column(vec![sb.into(), c.into(), pg.into()]).into()
     }
 
     fn view_remote_card<'a>(

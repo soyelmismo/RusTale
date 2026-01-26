@@ -202,7 +202,7 @@ struct ProfileInfo {
 const ENTITLEMENTS: &[&str] = &["game.base", "game.deluxe", "game.founder", "game.server"];
 
 // Default skin JSON (Fallback)
-const DEFAULT_SKIN: &str = r#"{"bodyCharacteristic":"Default.11","underwear":"Bra.Blue","face":"Face_Neutral","ears":"Ogre_Ears","mouth":"Mouth_Makeup","haircut":"SideBuns.Black","facialHair":null,"eyebrows":"RoundThin.Black","eyes":"Plain_Eyes.Green","pants":"Icecream_Skirt.Strawberry","overpants":"LongSocks_Bow.Lime","undertop":"VNeck_Shirt.Black","overtop":"NeckHigh_Savanna.Pink","shoes":"Wellies.Orange","headAccessory":null,"faceAccessory":null,"earAccessory":null,"skinFeature":null,"gloves":null,"cape":null}"#;
+const DEFAULT_SKIN: &str = r#"{"bodyCharacteristic":"Muscular.09","underwear":"Boxer.Purple","face":"Face_Neutral","ears":"Default","mouth":"Mouth_Long","haircut":"SuperSlickback.PitchBlack","facialHair":null,"eyebrows":"Thin.PitchBlack","eyes":"Large_Eyes.GreenLight","pants":"Bermuda_Rolled.GreyBlue","overpants":null,"undertop":null,"overtop":"Winter_Jacket.Red","shoes":"BasicShoes_Sandals.Black","headAccessory":"StrawHat.Red","faceAccessory":"Plaster.Brown","earAccessory":null,"skinFeature":null,"gloves":null,"cape":null}"#;
 
 struct ServerState {
     username: String,

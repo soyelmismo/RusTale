@@ -462,7 +462,7 @@ impl RusTale {
         });
 
         let tick_sub = if self.settings.theme.lsd_mode {
-            iced::time::every(std::time::Duration::from_millis(16)).map(Message::Tick)
+            iced::time::every(std::time::Duration::from_millis(1)).map(Message::Tick)
         } else {
             Subscription::none()
         };
@@ -512,32 +512,16 @@ impl RusTale {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Tick(now) => {
+            Message::Tick(_now) => {
                 if self.settings.theme.lsd_mode {
-                    let t = now.duration_since(self.start_time).as_secs_f32();
+                    let t = self.start_time.elapsed().as_secs_f32();
 
-                    // 1. Ralentizamos el tiempo base para sensación de "flotación"
-                    // El cerebro bajo efectos procesa el movimiento visual con "lag" o suavidad.
-                    let slow_t = t * 0.5;
+                    let smooth_t = t * 0.4;
+                    let x = (smooth_t).sin() * 2.5 + (smooth_t * 1.5).cos() * 1.0;
 
-                    // 2. Cálculo de Offset (Drifting/Deriva)
-                    // Eje X: Suma de senos con fases desincronizadas (0.5 y 1.13)
-                    let drift_x = (slow_t * 0.5).sin() * 3.0   // Marea amplia
-                    + (slow_t * 1.13).cos() * 1.5; // Olea secundaria
+                    let y = (smooth_t * 0.8).cos() * 2.5 + (smooth_t * 1.2).sin() * 1.0;
 
-                    // Eje Y: Usamos cosenos y fases distintas (0.3 y 0.91) para movimiento elíptico no perfecto
-                    let drift_y = (slow_t * 0.3).cos() * 3.0   // Marea amplia vertical
-                    + (slow_t * 0.91).sin() * 1.5; // Olea secundaria vertical
-
-                    // (Opcional) Micro-warp: Una distorsión minúscula de alta frecuencia
-                    // para simular que el texto se "derrite" ligeramente.
-                    let melt = (t * 2.5).sin() * 0.5;
-
-                    self.lsd_offset = (drift_x + melt, drift_y);
-
-                    // NOTA: Si tu estructura lo permite, el realismo máximo se logra
-                    // añadiendo una variable de escala para el efecto de "respiración":
-                    // self.lsd_scale = 1.0 + (slow_t * 0.7).sin() * 0.02;
+                    self.lsd_offset = (x, y);
                 } else {
                     self.lsd_offset = (0.0, 0.0);
                 }
@@ -615,6 +599,8 @@ impl RusTale {
 
                 self.profiles = p;
                 self.settings = s.clone();
+                self.palette = theme::generate_palette(&self.settings.theme);
+
                 self.settings_state.temp_settings = s;
 
                 self.localization = loc;
