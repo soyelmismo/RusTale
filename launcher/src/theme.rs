@@ -1,7 +1,7 @@
 use iced::overlay::menu;
 use iced::widget::{
-    Space, button, checkbox, column, container, pick_list, progress_bar, row as iced_row,
-    scrollable, slider, text as iced_text, text_input,
+    button, checkbox, column, container, pick_list, progress_bar, row as iced_row,
+    scrollable, slider, text as iced_text, text_input, Space, 
 };
 use iced::{
     Background, Border, Color, Element, Length, Point, Rectangle, Renderer, Shadow, Size, Theme,
@@ -49,8 +49,10 @@ pub struct Palette {
     pub danger: Color,
 }
 
+// --- WIDGET EFFECT SYSTEM ---
+
 #[derive(Debug, Default)]
-struct SmoothTranslateState {
+struct WidgetEffectState {
     smoothed_stillness: Cell<f32>,
     last_mouse_pos: Cell<iced::Point>,
     last_time: Cell<f32>,
@@ -59,7 +61,7 @@ struct SmoothTranslateState {
     intensity: Cell<f32>,           // Estado persistente de intensidad
 }
 
-impl SmoothTranslateState {
+impl WidgetEffectState {
     pub fn new() -> Self {
         Self {
             smoothed_stillness: Cell::new(0.0),
@@ -86,7 +88,7 @@ impl SmoothTranslateState {
         // Actualizamos intensidad en el estado
         self.intensity.set(intensity);
 
-        // --- 1. LoGICA DE REPULSIoN (Bordes) + ATRACCIoN (Centro) ---
+        // --- 1. LOGICA DE REPULSION (Bordes) + ATRACCION (Centro) ---
         let center = bounds.center();
         let center_dist = mouse_pos.distance(center);
 
@@ -101,8 +103,8 @@ impl SmoothTranslateState {
         let mut target_displacement = Vector::new(0.0, 0.0);
 
         if is_inside {
-            // --- COMERZAR "CAPTURA" AL ACERCARSE AL CENTRO ---
-            // Radio de pegado: 40% de la dimension minima
+            // --- COMENZAR "CAPTURA" AL ACERCARSE AL CENTRO ---
+            // Radio de pegado: 45% de la dimension minima
             let capture_radius = bounds.width.min(bounds.height) * 0.45;
             // 0.0 en el centro exacto, 1.0 en el borde del radio de captura
             let capture_factor = (center_dist / capture_radius.max(5.0)).clamp(0.0, 1.0);
@@ -110,7 +112,7 @@ impl SmoothTranslateState {
             // Vector de atraccion (seguir al mouse)
             let attract_v = Vector::new(mouse_pos.x - center.x, mouse_pos.y - center.y);
 
-            // Vector de repulsión interna (empujar hacia el borde)
+            // Vector de repulsion interna (empujar hacia el borde)
             let mut repel_v = Vector::new(closest_point.x - center.x, closest_point.y - center.y);
             let mag = (repel_v.x * repel_v.x + repel_v.y * repel_v.y).sqrt();
             if mag > 0.1 {
@@ -125,13 +127,13 @@ impl SmoothTranslateState {
             target_displacement.y =
                 attract_v.y * (1.0 - capture_factor) + repel_v.y * capture_factor;
         } else if dist_to_boundary < radius {
-            // --- REPULSIÓN EXTERNA ---
+            // --- REPULSION EXTERNA ---
             let dx = closest_point.x - mouse_pos.x;
             let dy = closest_point.y - mouse_pos.y;
             let mag = (dx * dx + dy * dy).sqrt();
 
             if mag > 0.1 {
-                // Usamos un exponente más alto (3.0) para que la fuerza caiga mucho más rápido con la distancia
+                // Usamos un exponente mas alto (3.0) para que la fuerza caiga mucho mas rapido con la distancia
                 let force = (1.0 - dist_to_boundary / radius).powf(3.0);
                 // Reducimos el multiplicador de 30.0 a 12.0
                 target_displacement =
@@ -145,18 +147,18 @@ impl SmoothTranslateState {
             target_displacement.y * intensity,
         );
 
-        // --- 2. FÍSICA "LENTA Y TONTA" (Aceleración mínima + Mucha viscosidad) ---
+        // --- 2. FISICA "LENTA Y TONTA" (Aceleracion minima + Mucha viscosidad) ---
         let current_pos = self.current_repulsion.get();
         let mut current_vel = self.current_velocity.get();
 
-        // Aceleración bajísima (0.005): Tarda una eternidad en empezar a moverse
+        // Aceleracion bajisima (0.005): Tarda una eternidad en empezar a moverse
         let accel_x = (target_repulsion.x - current_pos.x) * 0.005;
         let accel_y = (target_repulsion.y - current_pos.y) * 0.005;
 
         current_vel.x += accel_x;
         current_vel.y += accel_y;
 
-        // Fricción muy alta (0.94): Se siente como si estuviera en almíbar, flota mucho
+        // Friccion muy alta (0.94): Se siente como si estuviera en almiar, flota mucho
         current_vel.x *= 0.94;
         current_vel.y *= 0.94;
 
@@ -166,7 +168,7 @@ impl SmoothTranslateState {
         self.current_velocity.set(current_vel);
         self.current_repulsion.set(next_repulsion);
 
-        // --- 3. JITTER "CANSADO" (Frecuencia bajísima) ---
+        // --- 3. JITTER "CANSADO" (Frecuencia bajisima) ---
         let center_dist = mouse_pos.distance(bounds.center());
         let jitter_multiplier = (1.0 + (center_dist / 200.0)).min(2.5);
 
@@ -179,14 +181,807 @@ impl SmoothTranslateState {
     }
 }
 
-// 2. WIDGET WRAPPER
-pub struct SmoothTranslate<'a, Message> {
+// Widget wrapper for applying effects
+pub struct WidgetEffect<'a, Message> {
     content: Element<'a, Message, Theme, Renderer>,
-    offset: Vector,
-    mouse_pos: iced::Point, // Para interactividad futura
-    proximity_only: bool, // Si true, no hace efecto a menos que el raton este cerca (para textos pequeños)
-    time: f32,            // Tiempo global pasado desde main.rs
+    offset_seed: (f32, f32),      // To make each widget unique
+    mouse_pos: iced::Point,       // Current mouse position
+    proximity_only: bool,         // Only apply effect when mouse is near
+    time: f32,                    // Global time from main.rs
+    effect_type: EffectType,      // Type of effect to apply
 }
+
+#[derive(Debug, Clone, Copy)]
+pub enum EffectType {
+    Translate,      // Smooth translation effect
+    Scale,          // Scale effect
+    Rotate,         // Rotation effect
+    Glow,           // Glow/hover effect
+    Combined,       // Combination of effects
+}
+
+impl<'a, Message> WidgetEffect<'a, Message> {
+    pub fn new(
+        content: Element<'a, Message, Theme, Renderer>,
+        offset_seed: (f32, f32),
+        mouse_pos: iced::Point,
+        proximity_only: bool,
+        time: f32,
+        effect_type: EffectType,
+    ) -> Self {
+        Self {
+            content,
+            offset_seed,
+            mouse_pos,
+            proximity_only,
+            time,
+            effect_type,
+        }
+    }
+}
+
+impl<'a, Message> Widget<Message, Theme, Renderer> for WidgetEffect<'a, Message> {
+    fn size(&self) -> Size<Length> {
+        self.content.as_widget().size()
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut widget::Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        self.content
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits)
+    }
+
+    fn tag(&self) -> widget::tree::Tag {
+        widget::tree::Tag::of::<WidgetEffectState>()
+    }
+
+    fn state(&self) -> widget::tree::State {
+        widget::tree::State::new(WidgetEffectState::new())
+    }
+
+    fn children(&self) -> Vec<widget::Tree> {
+        vec![widget::Tree::new(&self.content)]
+    }
+
+    fn diff(&self, tree: &mut widget::Tree) {
+        tree.diff_children(std::slice::from_ref(&self.content));
+    }
+
+    fn draw(
+        &self,
+        tree: &widget::Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        let state = tree.state.downcast_ref::<WidgetEffectState>();
+        let bounds = layout.bounds();
+
+        // Apply effect only if enabled and not in proximity-only mode
+        if self.proximity_only && (!self.lsd_enabled || self.lsd_intensity < 0.1) {
+            self.content.as_widget().draw(
+                &tree.children[0],
+                renderer,
+                theme,
+                style,
+                layout,
+                cursor,
+                viewport,
+            );
+            return;
+        }
+
+        // Calculate displacement based on effect type
+        let displacement = state.calculate_displacement(
+            self.mouse_pos,
+            bounds,
+            self.time,
+            self.lsd_intensity,
+            true,
+        );
+
+        // Apply transformation based on effect type
+        match self.effect_type {
+            EffectType::Translate => {
+                renderer.with_translation(displacement, |r| {
+                    self.content.as_widget().draw(
+                        &tree.children[0],
+                        r,
+                        theme,
+                        style,
+                        layout,
+                        cursor,
+                        viewport,
+                    );
+                });
+            }
+            EffectType::Scale => {
+                // Calculate scale factor based on distance from mouse
+                let distance = self.mouse_pos.distance(bounds.center());
+                let scale_factor = 1.0 + (0.1 * self.lsd_intensity * (1.0 - (distance / 200.0).min(1.0)));
+                
+                renderer.with_layer(bounds, |r| {
+                    r.with_scale(scale_factor, |scaled_renderer| {
+                        self.content.as_widget().draw(
+                            &tree.children[0],
+                            scaled_renderer,
+                            theme,
+                            style,
+                            layout,
+                            cursor,
+                            viewport,
+                        );
+                    });
+                });
+            }
+            EffectType::Rotate => {
+                // Calculate rotation based on time and mouse position
+                let rotation_angle = (self.time * 0.5 + self.mouse_pos.x * 0.01) * self.lsd_intensity;
+                let cos = rotation_angle.cos();
+                let sin = rotation_angle.sin();
+                let matrix = [
+                    [cos, -sin, 0.0],
+                    [sin, cos, 0.0],
+                    [0.0, 0.0, 1.0],
+                ];
+                
+                renderer.with_layer(bounds, |r| {
+                    r.with_transform(matrix, |transformed_renderer| {
+                        self.content.as_widget().draw(
+                            &tree.children[0],
+                            transformed_renderer,
+                            theme,
+                            style,
+                            layout,
+                            cursor,
+                            viewport,
+                        );
+                    });
+                });
+            }
+            EffectType::Glow => {
+                // Draw content normally, but potentially with glow effects
+                self.content.as_widget().draw(
+                    &tree.children[0],
+                    renderer,
+                    theme,
+                    style,
+                    layout,
+                    cursor,
+                    viewport,
+                );
+            }
+            EffectType::Combined => {
+                // Apply combined effects
+                renderer.with_translation(displacement, |r| {
+                    let distance = self.mouse_pos.distance(bounds.center());
+                    let scale_factor = 1.0 + (0.05 * self.lsd_intensity * (1.0 - (distance / 200.0).min(1.0)));
+                    
+                    r.with_scale(scale_factor, |scaled_renderer| {
+                        let rotation_angle = (self.time * 0.3 + self.mouse_pos.x * 0.005) * self.lsd_intensity;
+                        let cos = rotation_angle.cos();
+                        let sin = rotation_angle.sin();
+                        let matrix = [
+                            [cos, -sin, 0.0],
+                            [sin, cos, 0.0],
+                            [0.0, 0.0, 1.0],
+                        ];
+                        
+                        scaled_renderer.with_transform(matrix, |transformed_renderer| {
+                            self.content.as_widget().draw(
+                                &tree.children[0],
+                                transformed_renderer,
+                                theme,
+                                style,
+                                layout,
+                                cursor,
+                                viewport,
+                            );
+                        });
+                    });
+                });
+            }
+        }
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut widget::Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        let state = tree.state.downcast_ref::<WidgetEffectState>();
+        let bounds = layout.bounds();
+
+        // Calculate the displacement for interaction alignment
+        let displacement = state.calculate_displacement(
+            self.mouse_pos,
+            bounds,
+            self.time,
+            self.lsd_intensity,
+            !self.proximity_only,
+        );
+
+        // Adjust cursor position for interaction with transformed content
+        let offset_cursor = match cursor.position() {
+            Some(p) => mouse::Cursor::Available(iced::Point::new(
+                p.x - displacement.x,
+                p.y - displacement.y,
+            )),
+            None => mouse::Cursor::Unavailable,
+        };
+
+        self.content.as_widget_mut().update(
+            &mut tree.children[0],
+            event,
+            layout,
+            offset_cursor,
+            renderer,
+            clipboard,
+            shell,
+            viewport,
+        )
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut widget::Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn widget::Operation,
+    ) {
+        self.content
+            .as_widget_mut()
+            .operate(&mut tree.children[0], layout, renderer, operation);
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &widget::Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        self.content.as_widget().mouse_interaction(
+            &tree.children[0],
+            layout,
+            cursor,
+            viewport,
+            renderer,
+        )
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut widget::Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+    ) -> Option<iced::overlay::Element<'b, Message, Theme, Renderer>> {
+        self.content
+            .as_widget_mut()
+            .overlay(&mut tree.children[0], layout, renderer)
+    }
+}
+
+// --- MAGIC WRAPPERS ---
+
+/// Magic button with animated effects
+pub fn magic_button<'a, Message: Clone + 'a>(
+    element: Element<'a, Message, Theme, Renderer>,
+    ctx: UIContext,
+) -> Element<'a, Message, Theme, Renderer> {
+    if ctx.lsd_enabled {
+        let seed = get_seeded_disparity(ctx.lsd_offset, 1);
+        Element::new(WidgetEffect::new(
+            element,
+            seed,
+            ctx.mouse_pos,
+            false,
+            ctx.time,
+            EffectType::Combined,
+        ))
+    } else {
+        element
+    }
+}
+
+/// Magic container with animated effects
+pub fn magic_container<'a, Message: Clone + 'a>(
+    element: Element<'a, Message, Theme, Renderer>,
+    ctx: UIContext,
+) -> Element<'a, Message, Theme, Renderer> {
+    if ctx.lsd_enabled {
+        let seed = get_seeded_disparity(ctx.lsd_offset, 2);
+        Element::new(WidgetEffect::new(
+            element,
+            seed,
+            ctx.mouse_pos,
+            false,
+            ctx.time,
+            EffectType::Translate,
+        ))
+    } else {
+        element
+    }
+}
+
+/// Magic column with animated effects for each child
+pub fn magic_column<'a, Message: Clone + 'a>(
+    items: Vec<Element<'a, Message, Theme, Renderer>>,
+    ctx: UIContext,
+) -> iced::widget::Column<'a, Message, Theme, Renderer> {
+    let mut col = iced::widget::column!()
+        .spacing(STANDARD_SPACING)
+        .width(Length::Fill);
+
+    if ctx.lsd_enabled {
+        for (i, item) in items.into_iter().enumerate() {
+            let seed = get_seeded_disparity(ctx.lsd_offset, i + 10);
+            
+            let wrapped_item = Element::new(WidgetEffect::new(
+                item,
+                seed,
+                ctx.mouse_pos,
+                false,
+                ctx.time,
+                EffectType::Translate,
+            ));
+
+            col = col.push(wrapped_item);
+        }
+    } else {
+        for item in items {
+            col = col.push(item);
+        }
+    }
+
+    col
+}
+
+/// Magic row with animated effects for each child
+pub fn magic_row<'a, Message: Clone + 'a>(
+    items: Vec<Element<'a, Message, Theme, Renderer>>,
+    ctx: UIContext,
+) -> iced::widget::Row<'a, Message, Theme, Renderer> {
+    let mut row = iced::widget::row!()
+        .spacing(STANDARD_SPACING)
+        .width(Length::Fill);
+
+    if ctx.lsd_enabled {
+        for (i, item) in items.into_iter().enumerate() {
+            let seed = get_seeded_disparity(ctx.lsd_offset, i + 12);
+            
+            let wrapped_item = Element::new(WidgetEffect::new(
+                item,
+                seed,
+                ctx.mouse_pos,
+                false,
+                ctx.time,
+                EffectType::Translate,
+            ));
+
+            row = row.push(wrapped_item);
+        }
+    } else {
+        for item in items {
+            row = row.push(item);
+        }
+    }
+
+    row
+}
+
+/// Magic scrollable with animated effects
+pub fn magic_scrollable<'a, Message: Clone + 'a>(
+    content: iced::widget::Column<'a, Message, Theme, Renderer>,
+    ctx: UIContext,
+) -> Element<'a, Message, Theme, Renderer> {
+    let scrollable_element = scrollable(content);
+    if ctx.lsd_enabled {
+        let seed = get_seeded_disparity(ctx.lsd_offset, 3);
+        Element::new(WidgetEffect::new(
+            scrollable_element.into(),
+            seed,
+            ctx.mouse_pos,
+            false,
+            ctx.time,
+            EffectType::Translate,
+        ))
+    } else {
+        scrollable_element.into()
+    }
+}
+
+// --- HELPER FUNCTIONS ---
+
+/// Generate a seeded disparity value for animation uniqueness
+pub fn get_seeded_disparity(seed: (f32, f32), index: usize) -> (f32, f32) {
+    let x = (seed.0 + index as f32 * 0.618) % 1.0;
+    let y = (seed.1 + index as f32 * 0.382) % 1.0;
+    (x * 2.0 - 1.0, y * 2.0 - 1.0) // Convert to range [-1, 1]
+}
+
+/// Apply smooth interpolation (lerp) between two values
+pub fn lerp(start: f32, end: f32, t: f32) -> f32 {
+    start + (end - start) * t.clamp(0.0, 1.0)
+}
+
+// --- TEXT STYLING FUNCTIONS ---
+
+/// Text with applied styling
+pub fn text<'a, Message: Clone + 'a>(
+    content: iced::widget::Text<'a, Theme>,
+    ctx: UIContext,
+) -> Element<'a, Message, Theme, Renderer> {
+    if ctx.lsd_enabled {
+        let seed = get_seeded_disparity(ctx.lsd_offset, 100);
+        let wrapped_content = Element::from(content);
+        Element::new(WidgetEffect::new(
+            wrapped_content,
+            seed,
+            ctx.mouse_pos,
+            true, // proximity_only for text
+            ctx.time,
+            EffectType::Glow,
+        ))
+    } else {
+        Element::from(content)
+    }
+}
+
+/// SVG with applied styling
+pub fn svg<'a, Message: Clone + 'a>(
+    content: iced::widget::Svg<Renderer>,
+    ctx: UIContext,
+) -> Element<'a, Message, Theme, Renderer> {
+    if ctx.lsd_enabled {
+        let seed = get_seeded_disparity(ctx.lsd_offset, 101);
+        let wrapped_content = Element::from(content);
+        Element::new(WidgetEffect::new(
+            wrapped_content,
+            seed,
+            ctx.mouse_pos,
+            true, // proximity_only for icons
+            ctx.time,
+            EffectType::Glow,
+        ))
+    } else {
+        Element::from(content)
+    }
+}
+
+// --- CONTAINER STYLES ---
+
+pub fn card_style(palette: &Palette, _t: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(palette.surface)),
+        border: Border {
+            color: Color::from_rgba(1.0, 1.0, 1.0, 0.1),
+            width: 1.0,
+            radius: 12.0.into(),
+        },
+        shadow: Shadow {
+            color: Color::from_rgba(0.0, 0.0, 0.0, 0.2),
+            offset: Vector::new(0.0, 4.0),
+            blur_radius: 10.0,
+        },
+        text_color: Some(palette.text_primary),
+        ..Default::default()
+    }
+}
+
+pub fn container_style_transparent(palette: &Palette, _t: &Theme) -> container::Style {
+    container::Style {
+        background: None,
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: 0.0.into(),
+        },
+        text_color: Some(palette.text_primary),
+        ..Default::default()
+    }
+}
+
+pub fn play_button_style(
+    palette: &Palette,
+    _t: &Theme,
+    _status: button::Status,
+) -> button::Style {
+    button::Style {
+        background: Some(Background::Color(palette.accent)),
+        border: Border {
+            color: Color::from_rgba(1.0, 1.0, 1.0, 0.2),
+            width: 1.0,
+            radius: 8.0.into(),
+        },
+        text_color: palette.text_on_accent,
+        ..Default::default()
+    }
+}
+
+pub fn play_button_style_active(
+    palette: &Palette,
+    _t: &Theme,
+    _status: button::Status,
+) -> button::Style {
+    button::Style {
+        background: Some(Background::Color(Color {
+            r: palette.accent.r * 0.8,
+            g: palette.accent.g * 0.8,
+            b: palette.accent.b * 0.8,
+            a: palette.accent.a,
+        })),
+        border: Border {
+            color: Color::from_rgba(1.0, 1.0, 1.0, 0.2),
+            width: 1.0,
+            radius: 8.0.into(),
+        },
+        text_color: palette.text_on_accent,
+        ..Default::default()
+    }
+}
+
+pub fn update_button_style(
+    palette: &Palette,
+    _t: &Theme,
+    _status: button::Status,
+) -> button::Style {
+    button::Style {
+        background: Some(Background::Color(Color::from_rgb(0.1, 0.6, 0.9))),
+        border: Border {
+            color: Color::from_rgba(1.0, 1.0, 1.0, 0.2),
+            width: 1.0,
+            radius: 8.0.into(),
+        },
+        text_color: palette.text_on_accent,
+        ..Default::default()
+    }
+}
+
+pub fn secondary_button_style(
+    palette: &Palette,
+    _t: &Theme,
+    _status: button::Status,
+) -> button::Style {
+    button::Style {
+        background: Some(Background::Color(palette.surface)),
+        border: Border {
+            color: Color::from_rgba(1.0, 1.0, 1.0, 0.1),
+            width: 1.0,
+            radius: 6.0.into(),
+        },
+        text_color: palette.text_primary,
+        ..Default::default()
+    }
+}
+
+pub fn danger_button_style(
+    palette: &Palette,
+    _t: &Theme,
+    _status: button::Status,
+) -> button::Style {
+    button::Style {
+        background: Some(Background::Color(palette.danger)),
+        border: Border {
+            color: Color::from_rgba(1.0, 1.0, 1.0, 0.2),
+            width: 1.0,
+            radius: 8.0.into(),
+        },
+        text_color: Color::WHITE,
+        ..Default::default()
+    }
+}
+
+pub fn icon_button_style(
+    palette: &Palette,
+    _t: &Theme,
+    _status: button::Status,
+) -> button::Style {
+    button::Style {
+        background: Some(Background::Color(Color::TRANSPARENT)),
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: 4.0.into(),
+        },
+        text_color: palette.accent,
+        ..Default::default()
+    }
+}
+
+pub fn checkbox_style(
+    palette: &Palette,
+    _t: &Theme,
+    _status: iced::widget::checkbox::Status,
+) -> iced::widget::checkbox::Style {
+    iced::widget::checkbox::Style {
+        background: Background::Color(palette.surface),
+        border: Border {
+            color: palette.text_secondary,
+            width: 1.0,
+            radius: 4.0.into(),
+        },
+        icon_color: palette.accent,
+        text_color: Some(palette.text_primary),
+    }
+}
+
+pub fn scrollable_style(palette: &Palette, _t: &Theme) -> scrollable::Style {
+    scrollable::Style {
+        container: container::Style {
+            background: None,
+            ..Default::default()
+        },
+        vertical_rail: iced::scrollable::Rail {
+            background: Some(Background::Color(Color::from_rgba(0.5, 0.5, 0.5, 0.2))),
+            border: Border {
+                radius: 4.0.into(),
+                ..Default::default()
+            },
+            scroller: iced::scrollable::Scroller {
+                color: palette.text_secondary,
+                border: Border {
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: 4.0.into(),
+                },
+            },
+        },
+        horizontal_rail: iced::scrollable::Rail {
+            background: Some(Background::Color(Color::from_rgba(0.5, 0.5, 0.5, 0.2))),
+            border: Border {
+                radius: 4.0.into(),
+                ..Default::default()
+            },
+            scroller: iced::scrollable::Scroller {
+                color: palette.text_secondary,
+                border: Border {
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: 4.0.into(),
+                },
+            },
+        },
+        gap: None,
+    }
+}
+
+pub fn slider_style(palette: &Palette, _t: &Theme) -> slider::Style {
+    slider::Style {
+        rail: slider::Rail {
+            colors: (palette.surface, palette.accent),
+            width: 4.0.into(),
+        },
+        handle: slider::Handle {
+            shape: slider::HandleShape::Circle { radius: 10.0 },
+            color: palette.accent,
+            border_width: 1.0,
+            border_color: palette.surface,
+        },
+    }
+}
+
+pub fn pick_list_style(
+    palette: &Palette,
+    _t: &Theme,
+    _status: pick_list::Status,
+) -> pick_list::Style {
+    pick_list::Style {
+        text_color: palette.text_primary,
+        background: Background::Color(palette.surface),
+        border: Border {
+            color: Color::from_rgba(1.0, 1.0, 1.0, 0.2),
+            width: 1.0,
+            radius: 6.0.into(),
+        },
+        handle: menu::Handle::default(),
+        placeholder: palette.text_secondary,
+    }
+}
+
+pub fn text_input_style(palette: &Palette, _t: &Theme) -> text_input::Style {
+    text_input::Style {
+        background: Background::Color(palette.surface),
+        border: Border {
+            color: Color::from_rgba(1.0, 1.0, 1.0, 0.2),
+            width: 1.0,
+            radius: 6.0.into(),
+        },
+        icon: palette.text_secondary,
+        placeholder: palette.text_secondary,
+        value: palette.text_primary,
+        selection: Background::Color(Color::from_rgba(0.5, 0.5, 1.0, 0.3)),
+    }
+}
+
+pub fn progress_bar_style(palette: &Palette, _t: &Theme) -> progress_bar::Style {
+    progress_bar::Style {
+        background: Background::Color(palette.surface),
+        bar: Background::Color(palette.accent),
+        border: Border {
+            radius: 4.0.into(),
+            ..Default::default()
+        },
+    }
+}
+
+pub fn orange_bar_style(palette: &Palette, _t: &Theme) -> progress_bar::Style {
+    progress_bar::Style {
+        background: Background::Color(palette.surface),
+        bar: Background::Color(Color::from_rgb(1.0, 0.6, 0.2)),
+        border: Border {
+            radius: 4.0.into(),
+            ..Default::default()
+        },
+    }
+}
+
+pub fn sub_bar_style(palette: &Palette, _t: &Theme) -> progress_bar::Style {
+    progress_bar::Style {
+        background: Background::Color(Color::from_rgba(0.5, 0.5, 0.5, 0.2)),
+        bar: Background::Color(Color::from_rgba(0.7, 0.7, 0.7, 0.5)),
+        border: Border {
+            radius: 2.0.into(),
+            ..Default::default()
+        },
+    }
+}
+
+pub fn svg_accent(
+    palette: &Palette,
+    _t: &Theme,
+    _status: iced::widget::svg::Status,
+) -> iced::widget::svg::Style {
+    iced::widget::svg::Style {
+        color: Some(palette.accent),
+    }
+}
+
+pub fn modal_container(palette: &Palette, _t: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(palette.background)),
+        border: Border {
+            color: Color::from_rgba(1.0, 1.0, 1.0, 0.2),
+            width: 1.0,
+            radius: 12.0.into(),
+        },
+        shadow: Shadow {
+            color: Color::from_rgba(0.0, 0.0, 0.0, 0.3),
+            offset: Vector::new(0.0, 4.0),
+            blur_radius: 20.0,
+        },
+        ..Default::default()
+    }
+}
+
+pub fn footer_style(palette: &Palette, _t: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(palette.surface)),
+        border: Border {
+            color: Color::from_rgba(1.0, 1.0, 1.0, 0.1),
+            width: 1.0,
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
+// --- UTILITY FUNCTIONS ---
 
 pub fn background_tint_color(palette: &Palette) -> Color {
     if palette.background.r > 0.5 {
@@ -284,96 +1079,6 @@ pub fn generate_palette(config: &crate::config::ThemeConfig) -> Palette {
     }
 }
 
-pub fn card_style(palette: &Palette, _t: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(palette.surface)),
-        border: Border {
-            color: Color::from_rgba(1.0, 1.0, 1.0, 0.1),
-            width: 1.0,
-            radius: 12.0.into(),
-        },
-        shadow: Shadow {
-            color: Color::from_rgba(0.0, 0.0, 0.0, 0.2),
-            offset: Vector::new(0.0, 4.0),
-            blur_radius: 10.0,
-        },
-        text_color: Some(palette.text_primary),
-        ..Default::default()
-    }
-}
-
-pub fn danger_button_style(
-    palette: &Palette,
-    _t: &Theme,
-    _status: button::Status,
-) -> button::Style {
-    button::Style {
-        background: Some(Background::Color(palette.danger)),
-        border: Border {
-            color: Color::from_rgba(1.0, 1.0, 1.0, 0.2),
-            width: 1.0,
-            radius: 8.0.into(),
-        },
-        text_color: Color::WHITE,
-        ..Default::default()
-    }
-}
-
-pub fn magic_column<'a, M: 'a + Clone>(
-    items: Vec<Element<'a, M, Theme, Renderer>>,
-    ctx: UIContext,
-) -> iced::widget::Column<'a, M, Theme, Renderer> {
-    let mut col = iced::widget::column!()
-        .spacing(STANDARD_SPACING)
-        .width(Length::Fill);
-
-    if ctx.lsd_enabled {
-        for (i, item) in items.into_iter().enumerate() {
-            // Generamos una disparidad unica para cada fila de la columna
-            // Esto hace que la columna parezca gelatina en lugar de un bloque rigido
-            let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, i + 10);
-
-            let wrapped_item =
-                Element::new(SmoothTranslate::new(item, (vx, vy), ctx.mouse_pos, false));
-
-            col = col.push(wrapped_item);
-        }
-    } else {
-        for item in items {
-            col = col.push(item);
-        }
-    }
-
-    col
-}
-pub fn magic_row<'a, M: 'a + Clone>(
-    items: Vec<Element<'a, M, Theme, Renderer>>,
-    ctx: UIContext,
-) -> iced::widget::Row<'a, M, Theme, Renderer> {
-    let mut col = iced::widget::row!()
-        .spacing(STANDARD_SPACING)
-        .width(Length::Fill);
-
-    if ctx.lsd_enabled {
-        for (i, item) in items.into_iter().enumerate() {
-            // Generamos una disparidad unica para cada fila de la columna
-            // Esto hace que la columna parezca gelatina en lugar de un bloque rigido
-            let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, i + 12);
-
-            let wrapped_item =
-                Element::new(SmoothTranslate::new(item, (vx, vy), ctx.mouse_pos, false));
-
-            col = col.push(wrapped_item);
-        }
-    } else {
-        for item in items {
-            col = col.push(item);
-        }
-    }
-
-    col
-}
-
 /// Contenedor base para paginas dentro de modales (Settings, Mods, etc.)
 pub fn page_container<'a, Message>(
     content: impl Into<Element<'a, Message, Theme, Renderer>>,
@@ -420,7 +1125,7 @@ where
     container(col).style(move |t| modal_container(&palette, t))
 }
 
-pub fn text_title<'a, M: 'a>(content: &str, ctx: UIContext) -> Element<'a, M, Theme, Renderer> {
+pub fn text_title<'a, Message: 'a>(content: &str, ctx: UIContext) -> Element<'a, Message, Theme, Renderer> {
     text(
         iced_text(content.to_string())
             .size(18)
@@ -430,33 +1135,7 @@ pub fn text_title<'a, M: 'a>(content: &str, ctx: UIContext) -> Element<'a, M, Th
     )
 }
 
-pub fn lsd_magic_text<'a, M: 'a>(
-    label: &'a str,
-    ctx: UIContext,
-) -> Element<'a, M, Theme, Renderer> {
-    let t = ctx.time * 0.15;
-    let vib_x = t.cos() * 0.25;
-    let vib_y = (t * 1.1).sin() * 0.25;
-
-    let content = iced::widget::stack![
-        iced::widget::text(label)
-            .size(14)
-            .color(Color::from_rgb(0.4, 0.4, 0.9)),
-        iced::widget::text(label)
-            .size(14)
-            .color(ctx.palette.text_primary)
-    ];
-
-    // Si el modo esta OFF, mandamos proximity_only: true
-    Element::new(SmoothTranslate::new(
-        content.into(),
-        (vib_x, vib_y),
-        ctx.mouse_pos,
-        !ctx.lsd_enabled,
-    ))
-}
-
-pub fn text_body<'a, M: 'a>(content: &str, ctx: UIContext) -> Element<'a, M, Theme, Renderer> {
+pub fn text_body<'a, Message: 'a>(content: &str, ctx: UIContext) -> Element<'a, Message, Theme, Renderer> {
     text(
         iced_text(content.to_string())
             .size(14)
@@ -465,7 +1144,7 @@ pub fn text_body<'a, M: 'a>(content: &str, ctx: UIContext) -> Element<'a, M, The
     )
 }
 
-pub fn text_caption<'a, M: 'a>(content: &str, ctx: UIContext) -> Element<'a, M, Theme, Renderer> {
+pub fn text_caption<'a, Message: 'a>(content: &str, ctx: UIContext) -> Element<'a, Message, Theme, Renderer> {
     text(
         iced_text(content.to_string())
             .size(11)
@@ -475,1156 +1154,17 @@ pub fn text_caption<'a, M: 'a>(content: &str, ctx: UIContext) -> Element<'a, M, 
 }
 
 /// Una fila estandarizada para listas (usada en Mods, Settings > Storage, etc.)
-pub fn list_item_row<'a, Message: 'a>(
-    label: Element<'a, Message, Theme, Renderer>,
-    actions: Vec<Element<'a, Message, Theme, Renderer>>,
+pub fn list_item<'a, Message: Clone + 'a>(
+    left_label: &str,
+    right_value: &str,
     ctx: UIContext,
 ) -> Element<'a, Message, Theme, Renderer> {
-    container(
-        iced_row![
-            label,
-            Space::new().width(Length::Fill),
-            iced_row(actions)
-                .spacing(10)
-                .align_y(iced::Alignment::Center)
-        ]
-        .align_y(iced::Alignment::Center)
-        .padding(12),
-    )
-    .style(move |t| card_style(&ctx.palette, t))
-    .into()
-}
-
-pub fn labeled_input<'a, M: 'a + Clone>(
-    label: &str,
-    value: &str,
-    on_change: impl Fn(String) -> M + 'static,
-    ctx: UIContext,
-) -> Element<'a, M, Theme, Renderer> {
-    column![
-        text_caption(label, ctx),
-        iced::widget::text_input("", value)
-            .on_input(on_change)
-            .padding(10)
-            .style(move |t, s| text_input_style(&ctx.palette, t, s))
+    iced_row![
+        text_body(left_label, ctx),
+        Space::new().width(Length::Fill),
+        text_body(right_value, ctx)
     ]
-    .spacing(5)
+    .align_y(iced::Alignment::Center)
+    .padding([10, 15])
     .into()
-}
-
-pub fn glass_container(palette: &Palette, _t: &Theme) -> container::Style {
-    let alpha = if palette.background.r > 0.5 {
-        0.6
-    } else {
-        0.85
-    }; // Menos opaco en modo claro
-    container::Style {
-        background: Some(Background::Color(Color::from_rgba(
-            palette.background.r,
-            palette.background.g,
-            palette.background.b,
-            alpha,
-        ))),
-        border: Border {
-            color: Color::from_rgba(
-                palette.text_primary.r,
-                palette.text_primary.g,
-                palette.text_primary.b,
-                0.1,
-            ),
-            width: 1.0,
-            radius: 12.0.into(),
-        },
-        shadow: Shadow {
-            color: Color::from_rgba(0.0, 0.0, 0.0, 0.2),
-            offset: Vector::new(0.0, 4.0),
-            blur_radius: 10.0,
-        },
-        text_color: Some(palette.text_primary),
-        ..Default::default()
-    }
-}
-
-pub fn news_panel_style(palette: &Palette, t: &Theme) -> container::Style {
-    glass_container(&palette, t)
-}
-
-pub fn icon_button_style(palette: &Palette, _t: &Theme, status: button::Status) -> button::Style {
-    match status {
-        button::Status::Hovered | button::Status::Pressed => button::Style {
-            text_color: palette.accent,
-            background: Some(Background::Color(palette.surface_hover)),
-            border: Border {
-                radius: 4.0.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-        _ => button::Style {
-            background: None,
-            text_color: palette.text_secondary,
-            ..Default::default()
-        },
-    }
-}
-
-pub fn play_button_style(palette: &Palette, _t: &Theme, status: button::Status) -> button::Style {
-    let base = button::Style {
-        background: Some(Background::Color(Color::from_rgba(
-            palette.background.r,
-            palette.background.g,
-            palette.background.b,
-            0.8,
-        ))),
-        border: Border {
-            color: Color::from_rgba(palette.accent.r, palette.accent.g, palette.accent.b, 0.3),
-            width: 1.0,
-            radius: 8.0.into(),
-        },
-        text_color: palette.text_primary,
-        ..button::Style::default()
-    };
-    match status {
-        button::Status::Hovered => button::Style {
-            background: Some(Background::Color(Color::from_rgba(
-                palette.surface.r,
-                palette.surface.g,
-                palette.surface.b,
-                0.9,
-            ))),
-            border: Border {
-                color: palette.accent,
-                width: 1.0,
-                radius: 8.0.into(),
-            },
-            text_color: palette.accent,
-            shadow: Shadow {
-                color: Color::from_rgba(palette.accent.r, palette.accent.g, palette.accent.b, 0.2),
-                blur_radius: 10.0,
-                ..Default::default()
-            },
-            ..base
-        },
-        button::Status::Pressed => button::Style {
-            background: Some(Background::Color(palette.accent)),
-            text_color: palette.text_on_accent,
-            ..base
-        },
-        button::Status::Disabled => button::Style {
-            background: Some(Background::Color(Color::from_rgba(0.1, 0.1, 0.1, 0.5))),
-            text_color: palette.text_secondary,
-            ..button::Style::default()
-        },
-        _ => base,
-    }
-}
-
-pub fn play_button_style_active(
-    palette: &Palette,
-    _t: &Theme,
-    status: button::Status,
-) -> button::Style {
-    let base = button::Style {
-        background: Some(Background::Color(Color::from_rgba(0.5, 0.1, 0.1, 0.5))),
-        border: Border {
-            color: Color::from_rgb(0.8, 0.3, 0.3),
-            width: 1.0,
-            radius: 8.0.into(),
-        },
-        text_color: palette.text_primary,
-        ..button::Style::default()
-    };
-    match status {
-        button::Status::Hovered | button::Status::Pressed => button::Style {
-            background: Some(Background::Color(Color::from_rgba(0.7, 0.2, 0.2, 0.6))),
-            border: Border {
-                color: Color::from_rgb(1.0, 0.4, 0.4),
-                ..base.border
-            },
-            text_color: palette.text_primary,
-            shadow: Shadow {
-                color: Color::from_rgba(0.8, 0.2, 0.2, 0.3),
-                blur_radius: 10.0,
-                ..Default::default()
-            },
-            ..base
-        },
-        _ => base,
-    }
-}
-
-pub fn secondary_button_style(
-    palette: &Palette,
-    _t: &Theme,
-    status: button::Status,
-) -> button::Style {
-    let is_light = palette.background.r > 0.5;
-    match status {
-        button::Status::Hovered | button::Status::Pressed => button::Style {
-            background: Some(Background::Color(palette.surface_hover)),
-            text_color: palette.accent,
-            border: Border {
-                color: palette.accent,
-                width: 1.0,
-                radius: 8.0.into(),
-            },
-            ..Default::default()
-        },
-        _ => button::Style {
-            background: Some(Background::Color(if is_light {
-                Color::from_rgba(0.0, 0.0, 0.0, 0.03)
-            } else {
-                Color::from_rgba(1.0, 1.0, 1.0, 0.05)
-            })),
-            text_color: palette.text_secondary,
-            border: Border {
-                color: Color::from_rgba(
-                    palette.text_primary.r,
-                    palette.text_primary.g,
-                    palette.text_primary.b,
-                    0.05,
-                ),
-                width: 1.0,
-                radius: 8.0.into(),
-            },
-            ..Default::default()
-        },
-    }
-}
-
-pub fn ghost_button_style(palette: &Palette, _t: &Theme, status: button::Status) -> button::Style {
-    match status {
-        button::Status::Hovered | button::Status::Pressed => button::Style {
-            background: Some(Background::Color(palette.surface_hover)),
-            text_color: palette.text_primary,
-            border: Border {
-                radius: 8.0.into(),
-                ..Default::default()
-            },
-            ..button::Style::default()
-        },
-        _ => button::Style {
-            background: None,
-            text_color: palette.text_secondary,
-            border: Border {
-                radius: 8.0.into(),
-                ..Default::default()
-            },
-            ..button::Style::default()
-        },
-    }
-}
-
-pub fn orange_bar_style(palette: &Palette, _t: &Theme) -> progress_bar::Style {
-    progress_bar::Style {
-        background: Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.1)),
-        bar: Background::Color(palette.accent),
-        border: Border {
-            radius: 16.0.into(),
-            ..Default::default()
-        },
-    }
-}
-
-pub fn primary_button_style(
-    palette: &Palette,
-    _t: &Theme,
-    status: button::Status,
-) -> button::Style {
-    let mut style = button::Style {
-        background: Some(Background::Color(palette.accent)),
-        text_color: palette.text_on_accent,
-        border: Border {
-            radius: 6.0.into(),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    if status == button::Status::Hovered {
-        style.shadow = Shadow {
-            color: Color::from_rgba(0.0, 0.0, 0.0, 0.2),
-            blur_radius: 5.0,
-            ..Default::default()
-        };
-    }
-    style
-}
-
-pub fn success_button_style(
-    palette: &Palette,
-    _t: &Theme,
-    status: button::Status,
-) -> button::Style {
-    let base = button::Style {
-        background: Some(Background::Color(palette.success)),
-        text_color: Color::BLACK,
-        border: Border {
-            radius: 6.0.into(),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    match status {
-        button::Status::Hovered | button::Status::Pressed => button::Style {
-            background: Some(Background::Color(Color::from_rgb(
-                (&palette.success.r + 0.1).min(1.0),
-                (&palette.success.g + 0.1).min(1.0),
-                (&palette.success.b + 0.1).min(1.0),
-            ))),
-            ..base
-        },
-        button::Status::Disabled => button::Style {
-            background: Some(Background::Color(Color::from_rgba(
-                palette.success.r,
-                palette.success.g,
-                palette.success.b,
-                0.5,
-            ))),
-            text_color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
-            ..base
-        },
-        _ => base,
-    }
-}
-
-pub fn active_tab_style(palette: &Palette, _t: &Theme, _status: button::Status) -> button::Style {
-    button::Style {
-        background: Some(Background::Color(Color::from_rgba(
-            palette.accent.r,
-            palette.accent.g,
-            palette.accent.b,
-            0.15,
-        ))),
-        border: Border {
-            color: palette.accent,
-            width: 1.0,
-            radius: 6.0.into(),
-        },
-        text_color: palette.accent,
-        ..Default::default()
-    }
-}
-
-pub fn active_tab_container_style(palette: &Palette, _t: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgba(
-            palette.accent.r,
-            palette.accent.g,
-            palette.accent.b,
-            0.15,
-        ))),
-        border: Border {
-            color: palette.accent,
-            width: 1.0,
-            radius: 6.0.into(),
-        },
-        text_color: Some(palette.accent),
-        ..Default::default()
-    }
-}
-
-pub fn modal_container(palette: &Palette, _t: &Theme) -> container::Style {
-    let is_light = palette.background.r > 0.5;
-    container::Style {
-        background: Some(Background::Color(palette.background)),
-        border: Border {
-            color: Color::from_rgba(0.0, 0.0, 0.0, if is_light { 0.05 } else { 0.2 }),
-            width: 1.0,
-            radius: 16.0.into(),
-        },
-        shadow: Shadow {
-            color: Color::from_rgba(0.0, 0.0, 0.0, if is_light { 0.1 } else { 0.5 }),
-            offset: Vector::new(0.0, 10.0),
-            blur_radius: 25.0,
-        },
-        text_color: Some(palette.text_primary),
-        ..Default::default()
-    }
-}
-
-pub fn sidebar_style(palette: &Palette, _t: &Theme) -> container::Style {
-    let is_light = palette.background.r > 0.5;
-    container::Style {
-        background: Some(Background::Color(if is_light {
-            Color::from_rgba(0.0, 0.0, 0.0, 0.03)
-        } else {
-            Color::from_rgba(0.0, 0.0, 0.0, 0.2)
-        })),
-        border: Border {
-            color: Color::from_rgba(
-                palette.text_primary.r,
-                palette.text_primary.g,
-                palette.text_primary.b,
-                0.05,
-            ),
-            width: 0.0,
-            radius: 0.0.into(),
-        },
-        text_color: Some(palette.text_primary),
-        ..Default::default()
-    }
-}
-
-pub fn footer_style(palette: &Palette, _t: &Theme) -> container::Style {
-    let is_light = palette.background.r > 0.5;
-    container::Style {
-        background: Some(Background::Color(if is_light {
-            Color::from_rgba(0.0, 0.0, 0.0, 0.05)
-        } else {
-            Color::from_rgba(0.0, 0.0, 0.0, 0.3)
-        })),
-        border: Border {
-            color: Color::from_rgba(
-                palette.text_primary.r,
-                palette.text_primary.g,
-                palette.text_primary.b,
-                0.05,
-            ),
-            width: 1.0,
-            radius: 0.0.into(),
-        },
-        text_color: Some(palette.text_primary),
-        ..Default::default()
-    }
-}
-
-pub fn text_input_style(
-    palette: &Palette,
-    _t: &Theme,
-    status: text_input::Status,
-) -> text_input::Style {
-    let is_light = palette.background.r > 0.5;
-    text_input::Style {
-        background: Background::Color(if is_light {
-            Color::from_rgb(0.92, 0.93, 0.95)
-        } else {
-            Color::from_rgba(0.0, 0.0, 0.0, 0.4)
-        }),
-        border: Border {
-            color: if matches!(status, text_input::Status::Focused { .. }) {
-                palette.accent
-            } else {
-                Color::from_rgba(
-                    palette.text_primary.r,
-                    palette.text_primary.g,
-                    palette.text_primary.b,
-                    0.1,
-                )
-            },
-            width: 1.0,
-            radius: 6.0.into(),
-        },
-        icon: palette.text_secondary,
-        placeholder: palette.text_secondary,
-        value: palette.text_primary,
-        selection: Color::from_rgba(palette.accent.r, palette.accent.g, palette.accent.b, 0.2),
-    }
-}
-
-pub fn slider_style(palette: &Palette, _t: &Theme, _status: slider::Status) -> slider::Style {
-    let is_light = palette.background.r > 0.5;
-    slider::Style {
-        rail: slider::Rail {
-            backgrounds: (
-                Background::Color(palette.accent),
-                Background::Color(if is_light {
-                    Color::from_rgba(0.0, 0.0, 0.0, 0.1)
-                } else {
-                    Color::from_rgba(1.0, 1.0, 1.0, 0.1)
-                }),
-            ),
-            width: 4.0,
-            border: Border {
-                radius: 2.0.into(),
-                ..Default::default()
-            },
-        },
-        handle: slider::Handle {
-            shape: slider::HandleShape::Circle { radius: 8.0 },
-            background: Background::Color(palette.text_primary),
-            border_width: 1.0,
-            border_color: if is_light {
-                Color::from_rgba(0.0, 0.0, 0.0, 0.1)
-            } else {
-                Color::TRANSPARENT
-            },
-        },
-    }
-}
-
-pub fn checkbox_style(palette: &Palette, _t: &Theme, status: checkbox::Status) -> checkbox::Style {
-    let base = checkbox::Style {
-        background: Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.3)),
-        icon_color: Color::BLACK,
-        border: Border {
-            color: Color::from_rgba(1.0, 1.0, 1.0, 0.1),
-            width: 1.0,
-            radius: 4.0.into(),
-        },
-        text_color: Some(palette.text_primary),
-    };
-    match status {
-        checkbox::Status::Active { is_checked } | checkbox::Status::Hovered { is_checked } => {
-            if is_checked {
-                checkbox::Style {
-                    background: Background::Color(palette.accent),
-                    icon_color: Color::BLACK,
-                    border: Border {
-                        color: palette.accent,
-                        ..base.border
-                    },
-                    ..base
-                }
-            } else {
-                if matches!(status, checkbox::Status::Hovered { .. }) {
-                    checkbox::Style {
-                        border: Border {
-                            color: palette.text_primary,
-                            ..base.border
-                        },
-                        ..base
-                    }
-                } else {
-                    base
-                }
-            }
-        }
-        _ => base,
-    }
-}
-
-pub fn sub_bar_style(_palette: &Palette, _t: &Theme) -> progress_bar::Style {
-    progress_bar::Style {
-        background: Background::Color(Color::TRANSPARENT),
-        bar: Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.4)),
-        border: Border {
-            radius: 2.0.into(),
-            ..Default::default()
-        },
-    }
-}
-
-pub fn update_button_style(
-    &palette: &Palette,
-    _t: &Theme,
-    status: button::Status,
-) -> button::Style {
-    let base = button::Style {
-        background: Some(Background::Color(Color::from_rgba(0.035, 0.05, 0.1, 0.8))),
-        border: Border {
-            color: Color::from_rgba(0.27, 0.65, 1.0, 0.3),
-            width: 1.0,
-            radius: 8.0.into(),
-        },
-        text_color: palette.text_primary,
-        ..button::Style::default()
-    };
-    match status {
-        button::Status::Hovered => button::Style {
-            background: Some(Background::Color(Color::from_rgba(0.05, 0.1, 0.2, 0.9))),
-            border: Border {
-                color: Color::from_rgb(0.4, 0.7, 1.0),
-                width: 1.0,
-                radius: 8.0.into(),
-            },
-            text_color: Color::from_rgb(0.4, 0.7, 1.0),
-            shadow: Shadow {
-                color: Color::from_rgba(0.2, 0.5, 1.0, 0.2),
-                blur_radius: 10.0,
-                ..Default::default()
-            },
-            ..base
-        },
-        button::Status::Pressed => button::Style {
-            background: Some(Background::Color(Color::from_rgb(0.27, 0.6, 1.0))),
-            text_color: Color::BLACK,
-            ..base
-        },
-        _ => base,
-    }
-}
-
-pub fn dropdown_trigger_style(
-    palette: &Palette,
-    _t: &Theme,
-    status: button::Status,
-) -> button::Style {
-    let is_light = palette.background.r > 0.5;
-    let base = button::Style {
-        text_color: palette.text_primary,
-        background: Some(Background::Color(if is_light {
-            Color::from_rgb(0.92, 0.93, 0.95)
-        } else {
-            Color::from_rgba(0.0, 0.0, 0.0, 0.3)
-        })),
-        border: Border {
-            color: Color::from_rgba(
-                palette.text_primary.r,
-                palette.text_primary.g,
-                palette.text_primary.b,
-                0.1,
-            ),
-            width: 1.0,
-            radius: 8.0.into(),
-        },
-        ..Default::default()
-    };
-    match status {
-        button::Status::Hovered | button::Status::Pressed => button::Style {
-            border: Border {
-                color: palette.accent,
-                ..base.border
-            },
-            ..base
-        },
-        _ => base,
-    }
-}
-
-pub fn pick_list_style(
-    palette: &Palette,
-    _t: &Theme,
-    status: pick_list::Status,
-) -> pick_list::Style {
-    let is_light = palette.background.r > 0.5;
-    let base = pick_list::Style {
-        text_color: palette.text_primary,
-        placeholder_color: palette.text_secondary,
-        handle_color: palette.text_secondary,
-        background: Background::Color(if is_light {
-            Color::from_rgb(0.92, 0.93, 0.95)
-        } else {
-            Color::from_rgba(0.0, 0.0, 0.0, 0.3)
-        }),
-        border: Border {
-            color: Color::from_rgba(
-                palette.text_primary.r,
-                palette.text_primary.g,
-                palette.text_primary.b,
-                0.1,
-            ),
-            width: 1.0,
-            radius: 8.0.into(),
-        },
-    };
-    match status {
-        pick_list::Status::Hovered | pick_list::Status::Opened { .. } => pick_list::Style {
-            border: Border {
-                color: palette.accent,
-                ..base.border
-            },
-            handle_color: palette.accent,
-            ..base
-        },
-        _ => base,
-    }
-}
-
-pub fn menu_style(palette: &Palette, _t: &Theme) -> menu::Style {
-    menu::Style {
-        text_color: palette.text_primary,
-        background: Background::Color(palette.background),
-        border: Border {
-            color: Color::from_rgba(palette.accent.r, palette.accent.g, palette.accent.b, 0.2),
-            width: 1.0,
-            radius: 8.0.into(),
-        },
-        selected_text_color: palette.text_on_accent,
-        selected_background: Background::Color(palette.accent),
-        shadow: Shadow {
-            color: Color::BLACK,
-            offset: Vector::new(0.0, 4.0),
-            blur_radius: 10.0,
-        },
-    }
-}
-
-pub fn svg_muted(
-    palette: &Palette,
-    _t: &Theme,
-    _status: iced::widget::svg::Status,
-) -> iced::widget::svg::Style {
-    iced::widget::svg::Style {
-        color: Some(if palette.background.r > 0.5 {
-            Color::from_rgb(0.3, 0.3, 0.4)
-        } else {
-            Color::from_rgb(0.5, 0.5, 0.5)
-        }),
-    }
-}
-
-pub fn svg_accent(
-    palette: &Palette,
-    _t: &Theme,
-    _status: iced::widget::svg::Status,
-) -> iced::widget::svg::Style {
-    iced::widget::svg::Style {
-        color: Some(palette.accent),
-    }
-}
-
-pub fn scrollable_style(
-    palette: &Palette,
-    _t: &Theme,
-    status: scrollable::Status,
-) -> scrollable::Style {
-    let is_hovered = matches!(status, scrollable::Status::Hovered { .. });
-    let rail = scrollable::Rail {
-        background: Some(Background::Color(Color::TRANSPARENT)),
-        border: Border {
-            radius: 10.0.into(),
-            ..Default::default()
-        },
-        scroller: scrollable::Scroller {
-            background: Background::Color(if is_hovered {
-                palette.accent
-            } else {
-                Color::from_rgba(1.0, 1.0, 1.0, 0.1)
-            }),
-            border: Border {
-                radius: 10.0.into(),
-                ..Default::default()
-            },
-        },
-    };
-    scrollable::Style {
-        container: container::Style {
-            background: Some(Background::Color(Color::TRANSPARENT)),
-            ..Default::default()
-        },
-        vertical_rail: rail,
-        horizontal_rail: rail,
-        gap: None,
-        auto_scroll: scrollable::AutoScroll {
-            background: Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.5)),
-            border: Border {
-                radius: 8.0.into(),
-                ..Default::default()
-            },
-            shadow: Shadow::default(),
-            icon: palette.text_primary,
-        },
-    }
-}
-
-pub fn container_style_transparent(_palette: &Palette, _t: &Theme) -> container::Style {
-    container::Style::default()
-}
-
-impl<'a, Message> SmoothTranslate<'a, Message> {
-    pub fn new(
-        content: Element<'a, Message, Theme, Renderer>,
-        offset: (f32, f32),
-        mouse_pos: iced::Point,
-        proximity_only: bool,
-    ) -> Self {
-        // En un caso real, pasariamos 'time' en el constructor.
-        // Aqui usaremos offset.0 como un "seed" de tiempo aproximado.
-        Self {
-            content,
-            offset: Vector::new(offset.0, offset.1),
-            mouse_pos,
-            proximity_only,
-            time: offset.0.abs() + offset.1.abs(), // Truco: usamos el offset como fuente de variacion
-        }
-    }
-
-    // Helper para mantener la firma limpia si ya pasas ctx en otros lados
-    // Si usas las funciones `magic_*`, estas ya tienen acceso a ctx.time.
-    // Asegurate de que tus funciones `magic_*` pasen el tiempo aqui si es posible,
-    // si no, el lerp funcionara "por frame" (aprox 60fps), lo cual es aceptable visualmente.
-}
-
-impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Message> {
-    fn size(&self) -> Size<Length> {
-        self.content.as_widget().size()
-    }
-
-    fn layout(
-        &mut self,
-        tree: &mut widget::Tree,
-        renderer: &Renderer,
-        limits: &layout::Limits,
-    ) -> layout::Node {
-        self.content
-            .as_widget_mut()
-            .layout(&mut tree.children[0], renderer, limits)
-    }
-
-    fn tag(&self) -> widget::tree::Tag {
-        widget::tree::Tag::of::<SmoothTranslateState>()
-    }
-
-    fn state(&self) -> widget::tree::State {
-        widget::tree::State::new(SmoothTranslateState::new())
-    }
-
-    fn children(&self) -> Vec<widget::Tree> {
-        // CORRECCIoN: Declaramos que tenemos un hijo (el contenido)
-        vec![widget::Tree::new(&self.content)]
-    }
-
-    fn diff(&self, tree: &mut widget::Tree) {
-        // CORRECCIoN: Diffing correcto del hijo
-        tree.diff_children(std::slice::from_ref(&self.content));
-    }
-
-    fn draw(
-        &self,
-        tree: &widget::Tree,
-        renderer: &mut Renderer,
-        theme: &Theme,
-        style: &renderer::Style,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        viewport: &Rectangle,
-    ) {
-        let state = tree.state.downcast_ref::<SmoothTranslateState>();
-        let bounds = layout.bounds();
-
-        // Logica de "Derretimiento"
-        if self.proximity_only {
-            self.content.as_widget().draw(
-                &tree.children[0],
-                renderer,
-                theme,
-                style,
-                layout,
-                cursor,
-                viewport,
-            );
-            return;
-        }
-
-        // Recuperar intensidad del estado (o podriamos pasarla si SmoothTranslate la guardara)
-        let intensity = state.intensity.get();
-        let displacement =
-            state.calculate_displacement(self.mouse_pos, bounds, self.time, intensity, true);
-
-        renderer.with_translation(displacement, |r| {
-            self.content.as_widget().draw(
-                &tree.children[0],
-                r,
-                theme,
-                style,
-                layout,
-                cursor,
-                viewport,
-            );
-        });
-    }
-
-    fn update(
-        &mut self,
-        tree: &mut widget::Tree,
-        event: &Event,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        renderer: &Renderer,
-        clipboard: &mut dyn Clipboard,
-        shell: &mut Shell<'_, Message>,
-        viewport: &Rectangle,
-    ) {
-        let state = tree.state.downcast_ref::<SmoothTranslateState>();
-        let bounds = layout.bounds();
-
-        // Calculamos el desplazamiento actual para alinear la interaccion
-        let intensity = state.intensity.get();
-        let displacement = state.calculate_displacement(
-            self.mouse_pos,
-            bounds,
-            self.time,
-            intensity,
-            !self.proximity_only,
-        );
-
-        // Trasladamos el cursor inversamente para que los eventos coincidan con la posicion visual
-        let offset_cursor = match cursor.position() {
-            Some(p) => mouse::Cursor::Available(iced::Point::new(
-                p.x - displacement.x,
-                p.y - displacement.y,
-            )),
-            None => mouse::Cursor::Unavailable,
-        };
-
-        self.content.as_widget_mut().update(
-            &mut tree.children[0],
-            event,
-            layout,
-            offset_cursor,
-            renderer,
-            clipboard,
-            shell,
-            viewport,
-        )
-    }
-
-    fn operate(
-        &mut self,
-        tree: &mut widget::Tree,
-        layout: Layout<'_>,
-        renderer: &Renderer,
-        operation: &mut dyn widget::Operation,
-    ) {
-        // Operamos sobre el hijo (esto incluye logica de scroll, foco, etc.)
-        self.content
-            .as_widget_mut()
-            .operate(&mut tree.children[0], layout, renderer, operation);
-    }
-
-    /* FIXME: Overlay breaks in iced 0.14 with current signature
-    fn overlay<'b>(
-        &'b mut self,
-        tree: &'b mut widget::Tree,
-        layout: Layout<'_>,
-        renderer: &Renderer,
-        translation: Vector,
-    ) -> Option<widget::overlay::Element<'b, Message, Theme, Renderer>> {
-        self.content.as_widget_mut().overlay(
-            &mut tree.children[0],
-            layout,
-            renderer,
-            translation,
-        )
-    }
-    */
-}
-
-fn get_seeded_disparity(offset: (f32, f32), seed: usize) -> (f32, f32) {
-    let s = (seed as f32 * 0.618033).fract() * 6.28;
-    // Mezcla el offset global con una fase aleatoria
-    let nx = offset.0 * s.cos() - offset.1 * s.sin();
-    let ny = offset.0 * s.sin() + offset.1 * s.cos();
-    (nx + (seed as f32), ny + (seed as f32)) // Añadimos seed al tiempo
-}
-
-pub fn text<'a, M: 'a>(
-    content: iced::widget::Text<'a, Theme, Renderer>,
-    ctx: UIContext,
-) -> Element<'a, M, Theme, Renderer> {
-    let element: Element<'a, M, Theme, Renderer> = content.into();
-    if ctx.lsd_enabled && ctx.lsd_intensity > 0.02 {
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 1);
-        let vx = vx * ctx.lsd_intensity;
-        let vy = vy * ctx.lsd_intensity;
-
-        Element::new(SmoothTranslate::new(
-            element,
-            (vx, vy),
-            ctx.mouse_pos,
-            false,
-        ))
-    } else {
-        element
-    }
-}
-
-pub fn svg<'a, M: 'a>(content: impl Into<Element<'a, M>>, ctx: UIContext) -> Element<'a, M> {
-    let element = content.into();
-    if ctx.lsd_enabled && ctx.lsd_intensity > 0.02 {
-        let (vx, vy) = get_seeded_disparity((ctx.lsd_offset.0 + 0.5, ctx.lsd_offset.1 + 0.5), 1);
-        let vx = vx * ctx.lsd_intensity;
-        let vy = vy * ctx.lsd_intensity;
-
-        Element::new(SmoothTranslate::new(
-            element,
-            (vx, vy),
-            ctx.mouse_pos,
-            false,
-        ))
-    } else {
-        element
-    }
-}
-
-pub fn magic_pick_list<'a, M>(
-    element: Element<'a, M, Theme, Renderer>,
-    ctx: UIContext,
-) -> Element<'a, M, Theme, Renderer>
-where
-    M: 'a + Clone,
-{
-    if ctx.lsd_enabled && ctx.lsd_intensity > 0.01 {
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 2);
-        Element::new(SmoothTranslate::new(
-            element,
-            (vx * ctx.lsd_intensity, vy * ctx.lsd_intensity),
-            ctx.mouse_pos,
-            false,
-        ))
-    } else {
-        element
-    }
-}
-
-pub fn magic_text_input<'a, M>(
-    element: Element<'a, M, Theme, Renderer>,
-    ctx: UIContext,
-) -> Element<'a, M, Theme, Renderer>
-where
-    M: 'a + Clone,
-{
-    if ctx.lsd_enabled && ctx.lsd_intensity > 0.02 {
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 3);
-        let vx = vx * ctx.lsd_intensity;
-        let vy = vy * ctx.lsd_intensity;
-
-        Element::new(SmoothTranslate::new(
-            element,
-            (vx, vy),
-            ctx.mouse_pos,
-            false,
-        ))
-    } else {
-        element
-    }
-}
-
-pub fn magic_button<'a, M>(
-    element: Element<'a, M, Theme, Renderer>,
-    ctx: UIContext,
-) -> Element<'a, M, Theme, Renderer>
-where
-    M: 'a + Clone,
-{
-    if ctx.lsd_enabled && ctx.lsd_intensity > 0.01 {
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 4);
-        Element::new(SmoothTranslate::new(
-            element,
-            (vx * ctx.lsd_intensity, vy * ctx.lsd_intensity),
-            ctx.mouse_pos,
-            false,
-        ))
-    } else {
-        element
-    }
-}
-
-pub fn magic_checkbox<'a, M>(
-    element: Element<'a, M, Theme, Renderer>,
-    ctx: UIContext,
-) -> Element<'a, M, Theme, Renderer>
-where
-    M: 'a + Clone,
-{
-    if ctx.lsd_enabled && ctx.lsd_intensity > 0.01 {
-        // Semilla 5 para checkboxes
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 5);
-        Element::new(SmoothTranslate::new(
-            element,
-            (vx * ctx.lsd_intensity, vy * ctx.lsd_intensity),
-            ctx.mouse_pos,
-            false,
-        ))
-    } else {
-        element
-    }
-}
-
-pub fn magic_image<'a, M>(
-    element: Element<'a, M, Theme, Renderer>,
-    ctx: UIContext,
-) -> Element<'a, M, Theme, Renderer>
-where
-    M: 'a + Clone,
-{
-    if ctx.lsd_enabled && ctx.lsd_intensity > 0.01 {
-        // Semilla 1.5 para imagenes (similar a svg)
-        let (vx, vy) = get_seeded_disparity((ctx.lsd_offset.0 + 0.3, ctx.lsd_offset.1 + 0.3), 1);
-        Element::new(SmoothTranslate::new(
-            element,
-            (vx * ctx.lsd_intensity, vy * ctx.lsd_intensity),
-            ctx.mouse_pos,
-            false,
-        ))
-    } else {
-        element
-    }
-}
-
-pub fn magic_container<'a, M>(
-    element: Element<'a, M, Theme, Renderer>,
-    ctx: UIContext,
-) -> Element<'a, M, Theme, Renderer>
-where
-    M: 'a + Clone,
-{
-    if ctx.lsd_enabled && ctx.lsd_intensity > 0.02 {
-        // Semilla 6 para contenedores (mas sutil)
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 6);
-        let vx = vx * ctx.lsd_intensity;
-        let vy = vy * ctx.lsd_intensity;
-
-        Element::new(SmoothTranslate::new(
-            element,
-            (vx, vy),
-            ctx.mouse_pos,
-            false,
-        ))
-    } else {
-        element
-    }
-}
-
-pub fn magic_scrollable<'a, M>(
-    element: Element<'a, M, Theme, Renderer>,
-    ctx: UIContext,
-) -> Element<'a, M, Theme, Renderer>
-where
-    M: 'a + Clone,
-{
-    if ctx.lsd_enabled && ctx.lsd_intensity > 0.01 {
-        // Semilla 5 para scrollables (lento)
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 5);
-        Element::new(SmoothTranslate::new(
-            element,
-            (vx * ctx.lsd_intensity, vy * ctx.lsd_intensity),
-            ctx.mouse_pos,
-            false,
-        ))
-    } else {
-        element
-    }
-}
-
-pub fn magic_slider<'a, M>(
-    element: Element<'a, M, Theme, Renderer>,
-    ctx: UIContext,
-) -> Element<'a, M, Theme, Renderer>
-where
-    M: 'a + Clone,
-{
-    if ctx.lsd_enabled {
-        // Semilla 7 para sliders (vibrante)
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 7);
-        Element::new(SmoothTranslate::new(
-            element,
-            (vx, vy),
-            ctx.mouse_pos,
-            false,
-        ))
-    } else {
-        element
-    }
-}
-
-pub fn magic_tooltip<'a, M>(
-    element: Element<'a, M, Theme, Renderer>,
-    ctx: UIContext,
-) -> Element<'a, M, Theme, Renderer>
-where
-    M: 'a + Clone,
-{
-    if ctx.lsd_enabled {
-        // Semilla 8 para tooltips
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 8);
-        Element::new(SmoothTranslate::new(
-            element,
-            (vx, vy),
-            ctx.mouse_pos,
-            false,
-        ))
-    } else {
-        element
-    }
 }

@@ -344,6 +344,7 @@ struct RusTale {
     cursor_position: iced::Point, // Rastrear ratón para efectos
     last_mouse_move_time: std::time::Instant,
     lsd_enabled_time: Option<std::time::Instant>, // Para activación progresiva
+    lsd_intensity: f32, // Valor actual (0.0 a 1.0) para la transición suave
 }
 
 impl RusTale {
@@ -441,6 +442,7 @@ impl RusTale {
                 } else {
                     None
                 },
+                lsd_intensity: if initial_settings.theme.lsd_mode { 1.0 } else { 0.0 },
             },
             Task::batch(vec![
                 Task::done(Message::Initialize),
@@ -509,9 +511,10 @@ impl RusTale {
 
         // SOLUCION: El tick solo debe existir si el modo LSD está ACTIVO y la ventana VISIBLE.
         // Si el LSD está apagado, Iced funcionará por eventos (0% CPU idle).
-        let tick_sub = if self.is_window_visible && self.settings.theme.lsd_mode {
-            // [OPTIMIZATION] Reducimos de 16ms (60fps) a 33ms (30fps).
-            // Esto reduce la carga del modo LSD a la mitad automáticamente.
+        let needs_visual_tick = self.settings.theme.lsd_mode || self.lsd_intensity > 0.001;
+
+        let tick_sub = if self.is_window_visible && needs_visual_tick {
+            // 30 FPS es suficiente para UI, ahorra batería vs 60 FPS
             iced::time::every(std::time::Duration::from_millis(33)).map(Message::Tick)
         } else {
             Subscription::none()
@@ -576,10 +579,17 @@ impl RusTale {
                 return Task::none();
             }
             Message::Tick(_now) => {
-                // Bloqueo de seguridad: si desactivas el LSD pero quedaba un evento en cola.
-                if !self.settings.theme.lsd_mode {
-                    return Task::none();
-                }
+                // --- TRANSICIÓN SUAVE DE INTENSIDAD ---
+                let target = if self.settings.theme.lsd_mode { 1.0 } else { 0.0 };
+                
+                // Lerp (Interpolación Lineal) para suavizar el cambio
+                // 0.05 determina la velocidad de la transición (aprox 1 segundo al 60fps)
+                self.lsd_intensity += (target - self.lsd_intensity) * 0.05;
+
+                // Optimización: Si estamos muy cerca de 0, forzamos 0 para apagar cálculos
+                if self.lsd_intensity < 0.001 { self.lsd_intensity = 0.0; }
+                // Si estamos muy cerca de 1, forzamos 1
+                if self.lsd_intensity > 0.999 { self.lsd_intensity = 1.0; }
 
                 let t = self.start_time.elapsed().as_secs_f32();
                 self.lsd_offset = (t, t);
@@ -1723,11 +1733,8 @@ impl RusTale {
         let stillness = (elapsed_idle / 3.0).clamp(0.0, 1.0);
         let lsd_intensity = if self.lsd_preview {
             1.0 // Fuerza máxima instantánea al pasar el mouse por encima (Preview)
-        } else if let Some(t) = self.lsd_enabled_time {
-            let elapsed = t.elapsed().as_secs_f32();
-            (elapsed / theme::LSD_RAMP_UP_SECONDS).min(1.0)
         } else {
-            0.0
+            self.lsd_intensity // Use the smoothly interpolated value
         };
 
         let ctx = theme::UIContext {

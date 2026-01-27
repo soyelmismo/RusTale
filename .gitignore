@@ -1,9 +1,33 @@
-Cargo.lock
-target/
-.env
-*.txt
-*.log
-TODO.md
+```
+# Compiled and build artifacts
+*.o
+*.obj
 *.exe
-*.rc
-.vscode/settings.json
+*.dll
+*.so
+*.a
+*.out
+
+# Dependencies
+target/
+**/target/
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Editors
+.vscode/
+.idea/
+
+# Coverage reports
+coverage/
+htmlcov/
+*.coverage
+
+# Environment
+.env
+.env.local
+.env.*
+```
