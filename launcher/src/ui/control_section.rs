@@ -176,8 +176,13 @@ pub fn view<'a>(
     };
 
     let actions = row![
-        play_btn,
-        column![settings_btn, mods_btn].width(45).spacing(8)
+        theme::magic_button(play_btn.into(), ctx),
+        column![
+            theme::magic_button(settings_btn.into(), ctx),
+            theme::magic_button(mods_btn.into(), ctx)
+        ]
+        .width(45)
+        .spacing(8)
     ]
     .spacing(10)
     .height(90);

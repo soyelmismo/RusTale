@@ -33,7 +33,10 @@
         "select": "Select profile",
         "add": "Add profile",
         "name_placeholder": "Name...",
-        "new_name_placeholder": "New name..."
+        "new_name_placeholder": "New name...",
+        "uuid_copy": "Copy UUID",
+        "generate_uuid": "Generate Random UUID",
+        "view_edit_uuid": "View/Edit UUID"
     },
     "settings": {
         "title": "Settings",
@@ -85,7 +88,8 @@
         "max": "Max",
         "jvm_args": "JVM arguments",
         "jvm_args_placeholder": "JVM args",
-        "move_to": "Move to...",
+        "move_to": "Move everything to...",
+        "use_data_from": "I already installed it in...",
         "open_folder": "Open folder",
         "theme": "Theme",
         "theme_preset": "Color preset",

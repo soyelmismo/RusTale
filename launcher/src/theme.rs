@@ -4,7 +4,8 @@ use iced::widget::{
     scrollable, slider, text as iced_text, text_input,
 };
 use iced::{
-    Background, Border, Color, Element, Length, Rectangle, Renderer, Shadow, Size, Theme, Vector,
+    Background, Border, Color, Element, Length, Point, Rectangle, Renderer, Shadow, Size, Theme,
+    Vector,
 };
 
 use iced::advanced::layout::{self, Layout};
@@ -13,18 +14,24 @@ use iced::advanced::renderer::{self, Renderer as _};
 use iced::advanced::widget::{self, Widget};
 use iced::advanced::{Clipboard, Shell};
 use iced::event::Event;
+use std::cell::Cell;
 
 // --- CONSTANTS ---
 pub const ACCENT_GREEN: Color = Color::from_rgb(0.2, 0.8, 0.2);
 pub const STANDARD_PADDING: f32 = 20.0;
 pub const STANDARD_SPACING: u32 = 15;
 
+pub const LSD_RAMP_UP_SECONDS: f32 = 5.0;
+
 #[derive(Debug, Clone, Copy)]
 pub struct UIContext {
     pub palette: Palette,
     pub lsd_offset: (f32, f32),
     pub lsd_enabled: bool,
+    pub lsd_intensity: f32, // Factor de 0.0 a 1.0 (activación progresiva)
     pub time: f32,
+    pub mouse_pos: Point,     // Posicion real del raton para efectos magneticos
+    pub mouse_stillness: f32, // 0.0 (se mueve) a 1.0 (quieto por X segundos)
 }
 
 // --- PALETTE SYSTEM ---
@@ -40,6 +47,145 @@ pub struct Palette {
     pub text_on_accent: Color,
     pub success: Color,
     pub danger: Color,
+}
+
+#[derive(Debug, Default)]
+struct SmoothTranslateState {
+    smoothed_stillness: Cell<f32>,
+    last_mouse_pos: Cell<iced::Point>,
+    last_time: Cell<f32>,
+    current_repulsion: Cell<Vector>,
+    current_velocity: Cell<Vector>, // Para inercia de masa (reaccion tardia)
+    intensity: Cell<f32>,           // Estado persistente de intensidad
+}
+
+impl SmoothTranslateState {
+    pub fn new() -> Self {
+        Self {
+            smoothed_stillness: Cell::new(0.0),
+            last_mouse_pos: Cell::new(iced::Point::ORIGIN),
+            last_time: Cell::new(0.0),
+            current_repulsion: Cell::new(Vector::new(0.0, 0.0)),
+            current_velocity: Cell::new(Vector::new(0.0, 0.0)),
+            intensity: Cell::new(0.0),
+        }
+    }
+
+    fn calculate_displacement(
+        &self,
+        mouse_pos: iced::Point,
+        bounds: Rectangle,
+        time: f32,
+        intensity: f32,
+        lsd_enabled: bool,
+    ) -> Vector {
+        if !lsd_enabled {
+            return Vector::new(0.0, 0.0);
+        }
+
+        // Actualizamos intensidad en el estado
+        self.intensity.set(intensity);
+
+        // --- 1. LoGICA DE REPULSIoN (Bordes) + ATRACCIoN (Centro) ---
+        let center = bounds.center();
+        let center_dist = mouse_pos.distance(center);
+
+        let closest_x = mouse_pos.x.clamp(bounds.x, bounds.x + bounds.width);
+        let closest_y = mouse_pos.y.clamp(bounds.y, bounds.y + bounds.height);
+        let closest_point = iced::Point::new(closest_x, closest_y);
+
+        let dist_to_boundary = mouse_pos.distance(closest_point);
+        let is_inside = dist_to_boundary < 0.1;
+
+        let radius = 100.0;
+        let mut target_displacement = Vector::new(0.0, 0.0);
+
+        if is_inside {
+            // --- COMERZAR "CAPTURA" AL ACERCARSE AL CENTRO ---
+            // Radio de pegado: 40% de la dimension minima
+            let capture_radius = bounds.width.min(bounds.height) * 0.45;
+            // 0.0 en el centro exacto, 1.0 en el borde del radio de captura
+            let capture_factor = (center_dist / capture_radius.max(5.0)).clamp(0.0, 1.0);
+
+            // Vector de atraccion (seguir al mouse)
+            let attract_v = Vector::new(mouse_pos.x - center.x, mouse_pos.y - center.y);
+
+            // Vector de repulsión interna (empujar hacia el borde)
+            let mut repel_v = Vector::new(closest_point.x - center.x, closest_point.y - center.y);
+            let mag = (repel_v.x * repel_v.x + repel_v.y * repel_v.y).sqrt();
+            if mag > 0.1 {
+                // Reducido a 8.0 para que sea un empujoncito leve
+                repel_v = Vector::new((repel_v.x / mag) * 8.0, (repel_v.y / mag) * 8.0);
+            }
+
+            // Interpolamos: Centro (attract) -> Bordes (repel)
+            // Cuando capt_factor es 0 (centro), seguimos al mouse al 100%
+            target_displacement.x =
+                attract_v.x * (1.0 - capture_factor) + repel_v.x * capture_factor;
+            target_displacement.y =
+                attract_v.y * (1.0 - capture_factor) + repel_v.y * capture_factor;
+        } else if dist_to_boundary < radius {
+            // --- REPULSIÓN EXTERNA ---
+            let dx = closest_point.x - mouse_pos.x;
+            let dy = closest_point.y - mouse_pos.y;
+            let mag = (dx * dx + dy * dy).sqrt();
+
+            if mag > 0.1 {
+                // Usamos un exponente más alto (3.0) para que la fuerza caiga mucho más rápido con la distancia
+                let force = (1.0 - dist_to_boundary / radius).powf(3.0);
+                // Reducimos el multiplicador de 30.0 a 12.0
+                target_displacement =
+                    Vector::new((dx / mag) * force * 12.0, (dy / mag) * force * 12.0);
+            }
+        }
+
+        // APLICAR INTENSIDAD PROGRESIVA A LA FUERZA
+        let target_repulsion = Vector::new(
+            target_displacement.x * intensity,
+            target_displacement.y * intensity,
+        );
+
+        // --- 2. FÍSICA "LENTA Y TONTA" (Aceleración mínima + Mucha viscosidad) ---
+        let current_pos = self.current_repulsion.get();
+        let mut current_vel = self.current_velocity.get();
+
+        // Aceleración bajísima (0.005): Tarda una eternidad en empezar a moverse
+        let accel_x = (target_repulsion.x - current_pos.x) * 0.005;
+        let accel_y = (target_repulsion.y - current_pos.y) * 0.005;
+
+        current_vel.x += accel_x;
+        current_vel.y += accel_y;
+
+        // Fricción muy alta (0.94): Se siente como si estuviera en almíbar, flota mucho
+        current_vel.x *= 0.94;
+        current_vel.y *= 0.94;
+
+        let next_repulsion =
+            Vector::new(current_pos.x + current_vel.x, current_pos.y + current_vel.y);
+
+        self.current_velocity.set(current_vel);
+        self.current_repulsion.set(next_repulsion);
+
+        // --- 3. JITTER "CANSADO" (Frecuencia bajísima) ---
+        let center_dist = mouse_pos.distance(bounds.center());
+        let jitter_multiplier = (1.0 + (center_dist / 200.0)).min(2.5);
+
+        let jitter = Vector::new(
+            (time * 0.4).sin() * 0.1 * jitter_multiplier,
+            (time * 0.3).cos() * 0.1 * jitter_multiplier,
+        );
+
+        Vector::new(next_repulsion.x + jitter.x, next_repulsion.y + jitter.y)
+    }
+}
+
+// 2. WIDGET WRAPPER
+pub struct SmoothTranslate<'a, Message> {
+    content: Element<'a, Message, Theme, Renderer>,
+    offset: Vector,
+    mouse_pos: iced::Point, // Para interactividad futura
+    proximity_only: bool, // Si true, no hace efecto a menos que el raton este cerca (para textos pequeños)
+    time: f32,            // Tiempo global pasado desde main.rs
 }
 
 pub fn background_tint_color(palette: &Palette) -> Color {
@@ -76,7 +222,7 @@ pub fn generate_palette(config: &crate::config::ThemeConfig) -> Palette {
     use crate::config::BaseThemeMode;
     let mut accent = hex_to_color(&config.accent_hex).unwrap_or(Color::from_rgb8(255, 168, 69));
 
-    // 0. Aplicar saturación ANTES de los cálculos de modo
+    // 0. Aplicar saturacion ANTES de los calculos de modo
     if (config.saturation - 1.0).abs() > 0.01 {
         let gray = accent.r * 0.299 + accent.g * 0.587 + accent.b * 0.114;
         accent.r = (gray + (accent.r - gray) * config.saturation).clamp(0.0, 1.0);
@@ -173,17 +319,62 @@ pub fn danger_button_style(
     }
 }
 
-/// Envuelve cualquier contenido en la "columna estándar" de RusTale
-/// con el espaciado y padding que te gusta del menu de juego.
-pub fn standard_column<'a, Message>(
-    items: Vec<Element<'a, Message, Theme, Renderer>>,
-) -> iced::widget::Column<'a, Message, Theme, Renderer> {
-    iced::widget::column(items)
+pub fn magic_column<'a, M: 'a + Clone>(
+    items: Vec<Element<'a, M, Theme, Renderer>>,
+    ctx: UIContext,
+) -> iced::widget::Column<'a, M, Theme, Renderer> {
+    let mut col = iced::widget::column!()
         .spacing(STANDARD_SPACING)
-        .width(Length::Fill)
+        .width(Length::Fill);
+
+    if ctx.lsd_enabled {
+        for (i, item) in items.into_iter().enumerate() {
+            // Generamos una disparidad unica para cada fila de la columna
+            // Esto hace que la columna parezca gelatina en lugar de un bloque rigido
+            let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, i + 10);
+
+            let wrapped_item =
+                Element::new(SmoothTranslate::new(item, (vx, vy), ctx.mouse_pos, false));
+
+            col = col.push(wrapped_item);
+        }
+    } else {
+        for item in items {
+            col = col.push(item);
+        }
+    }
+
+    col
+}
+pub fn magic_row<'a, M: 'a + Clone>(
+    items: Vec<Element<'a, M, Theme, Renderer>>,
+    ctx: UIContext,
+) -> iced::widget::Row<'a, M, Theme, Renderer> {
+    let mut col = iced::widget::row!()
+        .spacing(STANDARD_SPACING)
+        .width(Length::Fill);
+
+    if ctx.lsd_enabled {
+        for (i, item) in items.into_iter().enumerate() {
+            // Generamos una disparidad unica para cada fila de la columna
+            // Esto hace que la columna parezca gelatina en lugar de un bloque rigido
+            let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, i + 12);
+
+            let wrapped_item =
+                Element::new(SmoothTranslate::new(item, (vx, vy), ctx.mouse_pos, false));
+
+            col = col.push(wrapped_item);
+        }
+    } else {
+        for item in items {
+            col = col.push(item);
+        }
+    }
+
+    col
 }
 
-/// Contenedor base para páginas dentro de modales (Settings, Mods, etc.)
+/// Contenedor base para paginas dentro de modales (Settings, Mods, etc.)
 pub fn page_container<'a, Message>(
     content: impl Into<Element<'a, Message, Theme, Renderer>>,
 ) -> iced::widget::Container<'a, Message, Theme, Renderer> {
@@ -243,36 +434,26 @@ pub fn lsd_magic_text<'a, M: 'a>(
     label: &'a str,
     ctx: UIContext,
 ) -> Element<'a, M, Theme, Renderer> {
-    // Si el LSD global está apagado, devolvemos texto normal
-    if !ctx.lsd_enabled {
-        return iced::widget::text(label)
-            .size(14)
-            .color(ctx.palette.text_primary)
-            .font(iced::font::Font::MONOSPACE)
-            .into();
-    }
+    let t = ctx.time * 0.15;
+    let vib_x = t.cos() * 0.25;
+    let vib_y = (t * 1.1).sin() * 0.25;
 
-    // Calculamos el offset base de vibración (el widget lo escalará segun proximidad)
-    let t = ctx.time * 2.0;
-    let vib_x = t.cos() * 5.0;
-    let vib_y = (t * 1.3).sin() * 5.0;
-
-    // Capas de color para el efecto fantasma psicodélico
     let content = iced::widget::stack![
-        // Capa de brillo psicodélico (Color cambiante)
-        iced_text(label).size(14).color(Color::from_rgb(
-            (t.sin() * 0.5 + 0.5).clamp(0.0, 1.0),
-            ((t + 2.0).sin() * 0.5 + 0.5).clamp(0.0, 1.0),
-            0.8
-        )),
-        // Capa principal
-        iced_text(label)
+        iced::widget::text(label)
+            .size(14)
+            .color(Color::from_rgb(0.4, 0.4, 0.9)),
+        iced::widget::text(label)
             .size(14)
             .color(ctx.palette.text_primary)
-            .font(iced::font::Font::MONOSPACE)
     ];
 
-    Element::new(SmoothTranslate::new(content.into(), (vib_x, vib_y)))
+    // Si el modo esta OFF, mandamos proximity_only: true
+    Element::new(SmoothTranslate::new(
+        content.into(),
+        (vib_x, vib_y),
+        ctx.mouse_pos,
+        !ctx.lsd_enabled,
+    ))
 }
 
 pub fn text_body<'a, M: 'a>(content: &str, ctx: UIContext) -> Element<'a, M, Theme, Renderer> {
@@ -1030,20 +1211,28 @@ pub fn container_style_transparent(_palette: &Palette, _t: &Theme) -> container:
     container::Style::default()
 }
 
-// --- LSD MODE WIDGETS ---
-
-pub struct SmoothTranslate<'a, Message> {
-    content: Element<'a, Message, Theme, Renderer>,
-    offset: Vector,
-}
-
 impl<'a, Message> SmoothTranslate<'a, Message> {
-    pub fn new(content: Element<'a, Message, Theme, Renderer>, offset: (f32, f32)) -> Self {
+    pub fn new(
+        content: Element<'a, Message, Theme, Renderer>,
+        offset: (f32, f32),
+        mouse_pos: iced::Point,
+        proximity_only: bool,
+    ) -> Self {
+        // En un caso real, pasariamos 'time' en el constructor.
+        // Aqui usaremos offset.0 como un "seed" de tiempo aproximado.
         Self {
             content,
             offset: Vector::new(offset.0, offset.1),
+            mouse_pos,
+            proximity_only,
+            time: offset.0.abs() + offset.1.abs(), // Truco: usamos el offset como fuente de variacion
         }
     }
+
+    // Helper para mantener la firma limpia si ya pasas ctx en otros lados
+    // Si usas las funciones `magic_*`, estas ya tienen acceso a ctx.time.
+    // Asegurate de que tus funciones `magic_*` pasen el tiempo aqui si es posible,
+    // si no, el lerp funcionara "por frame" (aprox 60fps), lo cual es aceptable visualmente.
 }
 
 impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Message> {
@@ -1057,7 +1246,27 @@ impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Messa
         renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
-        self.content.as_widget_mut().layout(tree, renderer, limits)
+        self.content
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits)
+    }
+
+    fn tag(&self) -> widget::tree::Tag {
+        widget::tree::Tag::of::<SmoothTranslateState>()
+    }
+
+    fn state(&self) -> widget::tree::State {
+        widget::tree::State::new(SmoothTranslateState::new())
+    }
+
+    fn children(&self) -> Vec<widget::Tree> {
+        // CORRECCIoN: Declaramos que tenemos un hijo (el contenido)
+        vec![widget::Tree::new(&self.content)]
+    }
+
+    fn diff(&self, tree: &mut widget::Tree) {
+        // CORRECCIoN: Diffing correcto del hijo
+        tree.diff_children(std::slice::from_ref(&self.content));
     }
 
     fn draw(
@@ -1070,84 +1279,39 @@ impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Messa
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
+        let state = tree.state.downcast_ref::<SmoothTranslateState>();
         let bounds = layout.bounds();
-        let center = bounds.center();
 
-        // 1. Calcular intensidad por proximidad
-        let intensity = if let Some(cursor_pos) = cursor.position() {
-            let dx = cursor_pos.x - center.x;
-            let dy = cursor_pos.y - center.y;
-            let distance = (dx * dx + dy * dy).sqrt();
-
-            let max_radius = 200.0; // Radio de activación en pixeles
-            // Mapeo 0.0 a 1.0 con suavizado parabólico
-            (1.0 - (distance / max_radius)).clamp(0.0, 1.0).powi(2)
-        } else {
-            0.0
-        };
-
-        // 2. Aplicar el offset escalado por la intensidad
-        // Solo aplicamos traslación si hay intensidad para ahorrar recursos
-        if intensity > 0.01 {
-            let dynamic_offset = Vector::new(self.offset.x * intensity, self.offset.y * intensity);
-
-            // IMPORTANTE: Pasamos un cursor falso al contenido hijo
-            // para que nada dentro de la vibración crea que tiene el ratón encima.
-            let fake_cursor = mouse::Cursor::Unavailable;
-
-            renderer.with_translation(dynamic_offset, |renderer| {
-                self.content.as_widget().draw(
-                    tree,
-                    renderer,
-                    theme,
-                    style,
-                    layout,
-                    fake_cursor,
-                    viewport,
-                );
-            });
-        } else {
-            // Sin intensidad, renderizamos sin traslación
-            let fake_cursor = mouse::Cursor::Unavailable;
+        // Logica de "Derretimiento"
+        if self.proximity_only {
             self.content.as_widget().draw(
-                tree,
+                &tree.children[0],
                 renderer,
                 theme,
                 style,
                 layout,
-                fake_cursor,
+                cursor,
                 viewport,
             );
+            return;
         }
-    }
 
-    fn tag(&self) -> widget::tree::Tag {
-        self.content.as_widget().tag()
-    }
+        // Recuperar intensidad del estado (o podriamos pasarla si SmoothTranslate la guardara)
+        let intensity = state.intensity.get();
+        let displacement =
+            state.calculate_displacement(self.mouse_pos, bounds, self.time, intensity, true);
 
-    fn state(&self) -> widget::tree::State {
-        self.content.as_widget().state()
-    }
-
-    fn children(&self) -> Vec<widget::Tree> {
-        self.content.as_widget().children()
-    }
-
-    fn diff(&self, tree: &mut widget::Tree) {
-        self.content.as_widget().diff(tree);
-    }
-
-    fn mouse_interaction(
-        &self,
-        _tree: &widget::Tree,
-        _layout: Layout<'_>,
-        _cursor: mouse::Cursor,
-        _viewport: &Rectangle,
-        _renderer: &Renderer,
-    ) -> mouse::Interaction {
-        // El widget visual NO debe tener interacción propia,
-        // dejamos que el mouse_area superior se encargue.
-        mouse::Interaction::None
+        renderer.with_translation(displacement, |r| {
+            self.content.as_widget().draw(
+                &tree.children[0],
+                r,
+                theme,
+                style,
+                layout,
+                cursor,
+                viewport,
+            );
+        });
     }
 
     fn update(
@@ -1161,8 +1325,37 @@ impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Messa
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
+        let state = tree.state.downcast_ref::<SmoothTranslateState>();
+        let bounds = layout.bounds();
+
+        // Calculamos el desplazamiento actual para alinear la interaccion
+        let intensity = state.intensity.get();
+        let displacement = state.calculate_displacement(
+            self.mouse_pos,
+            bounds,
+            self.time,
+            intensity,
+            !self.proximity_only,
+        );
+
+        // Trasladamos el cursor inversamente para que los eventos coincidan con la posicion visual
+        let offset_cursor = match cursor.position() {
+            Some(p) => mouse::Cursor::Available(iced::Point::new(
+                p.x - displacement.x,
+                p.y - displacement.y,
+            )),
+            None => mouse::Cursor::Unavailable,
+        };
+
         self.content.as_widget_mut().update(
-            tree, event, layout, cursor, renderer, clipboard, shell, viewport,
+            &mut tree.children[0],
+            event,
+            layout,
+            offset_cursor,
+            renderer,
+            clipboard,
+            shell,
+            viewport,
         )
     }
 
@@ -1173,19 +1366,36 @@ impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Messa
         renderer: &Renderer,
         operation: &mut dyn widget::Operation,
     ) {
+        // Operamos sobre el hijo (esto incluye logica de scroll, foco, etc.)
         self.content
             .as_widget_mut()
-            .operate(tree, layout, renderer, operation);
+            .operate(&mut tree.children[0], layout, renderer, operation);
     }
+
+    /* FIXME: Overlay breaks in iced 0.14 with current signature
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut widget::Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        translation: Vector,
+    ) -> Option<widget::overlay::Element<'b, Message, Theme, Renderer>> {
+        self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout,
+            renderer,
+            translation,
+        )
+    }
+    */
 }
 
 fn get_seeded_disparity(offset: (f32, f32), seed: usize) -> (f32, f32) {
     let s = (seed as f32 * 0.618033).fract() * 6.28;
-
+    // Mezcla el offset global con una fase aleatoria
     let nx = offset.0 * s.cos() - offset.1 * s.sin();
     let ny = offset.0 * s.sin() + offset.1 * s.cos();
-
-    (nx * 0.8, ny * 0.8)
+    (nx + (seed as f32), ny + (seed as f32)) // Añadimos seed al tiempo
 }
 
 pub fn text<'a, M: 'a>(
@@ -1193,9 +1403,17 @@ pub fn text<'a, M: 'a>(
     ctx: UIContext,
 ) -> Element<'a, M, Theme, Renderer> {
     let element: Element<'a, M, Theme, Renderer> = content.into();
-    if ctx.lsd_enabled {
+    if ctx.lsd_enabled && ctx.lsd_intensity > 0.02 {
         let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 1);
-        Element::new(SmoothTranslate::new(element, (vx, vy)))
+        let vx = vx * ctx.lsd_intensity;
+        let vy = vy * ctx.lsd_intensity;
+
+        Element::new(SmoothTranslate::new(
+            element,
+            (vx, vy),
+            ctx.mouse_pos,
+            false,
+        ))
     } else {
         element
     }
@@ -1203,9 +1421,209 @@ pub fn text<'a, M: 'a>(
 
 pub fn svg<'a, M: 'a>(content: impl Into<Element<'a, M>>, ctx: UIContext) -> Element<'a, M> {
     let element = content.into();
-    if ctx.lsd_enabled {
+    if ctx.lsd_enabled && ctx.lsd_intensity > 0.02 {
         let (vx, vy) = get_seeded_disparity((ctx.lsd_offset.0 + 0.5, ctx.lsd_offset.1 + 0.5), 1);
-        Element::new(SmoothTranslate::new(element, (vx * 1.3, vy * 1.3)))
+        let vx = vx * ctx.lsd_intensity;
+        let vy = vy * ctx.lsd_intensity;
+
+        Element::new(SmoothTranslate::new(
+            element,
+            (vx, vy),
+            ctx.mouse_pos,
+            false,
+        ))
+    } else {
+        element
+    }
+}
+
+pub fn magic_pick_list<'a, M>(
+    element: Element<'a, M, Theme, Renderer>,
+    ctx: UIContext,
+) -> Element<'a, M, Theme, Renderer>
+where
+    M: 'a + Clone,
+{
+    if ctx.lsd_enabled && ctx.lsd_intensity > 0.01 {
+        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 2);
+        Element::new(SmoothTranslate::new(
+            element,
+            (vx * ctx.lsd_intensity, vy * ctx.lsd_intensity),
+            ctx.mouse_pos,
+            false,
+        ))
+    } else {
+        element
+    }
+}
+
+pub fn magic_text_input<'a, M>(
+    element: Element<'a, M, Theme, Renderer>,
+    ctx: UIContext,
+) -> Element<'a, M, Theme, Renderer>
+where
+    M: 'a + Clone,
+{
+    if ctx.lsd_enabled && ctx.lsd_intensity > 0.02 {
+        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 3);
+        let vx = vx * ctx.lsd_intensity;
+        let vy = vy * ctx.lsd_intensity;
+
+        Element::new(SmoothTranslate::new(
+            element,
+            (vx, vy),
+            ctx.mouse_pos,
+            false,
+        ))
+    } else {
+        element
+    }
+}
+
+pub fn magic_button<'a, M>(
+    element: Element<'a, M, Theme, Renderer>,
+    ctx: UIContext,
+) -> Element<'a, M, Theme, Renderer>
+where
+    M: 'a + Clone,
+{
+    if ctx.lsd_enabled && ctx.lsd_intensity > 0.01 {
+        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 4);
+        Element::new(SmoothTranslate::new(
+            element,
+            (vx * ctx.lsd_intensity, vy * ctx.lsd_intensity),
+            ctx.mouse_pos,
+            false,
+        ))
+    } else {
+        element
+    }
+}
+
+pub fn magic_checkbox<'a, M>(
+    element: Element<'a, M, Theme, Renderer>,
+    ctx: UIContext,
+) -> Element<'a, M, Theme, Renderer>
+where
+    M: 'a + Clone,
+{
+    if ctx.lsd_enabled && ctx.lsd_intensity > 0.01 {
+        // Semilla 5 para checkboxes
+        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 5);
+        Element::new(SmoothTranslate::new(
+            element,
+            (vx * ctx.lsd_intensity, vy * ctx.lsd_intensity),
+            ctx.mouse_pos,
+            false,
+        ))
+    } else {
+        element
+    }
+}
+
+pub fn magic_image<'a, M>(
+    element: Element<'a, M, Theme, Renderer>,
+    ctx: UIContext,
+) -> Element<'a, M, Theme, Renderer>
+where
+    M: 'a + Clone,
+{
+    if ctx.lsd_enabled && ctx.lsd_intensity > 0.01 {
+        // Semilla 1.5 para imagenes (similar a svg)
+        let (vx, vy) = get_seeded_disparity((ctx.lsd_offset.0 + 0.3, ctx.lsd_offset.1 + 0.3), 1);
+        Element::new(SmoothTranslate::new(
+            element,
+            (vx * ctx.lsd_intensity, vy * ctx.lsd_intensity),
+            ctx.mouse_pos,
+            false,
+        ))
+    } else {
+        element
+    }
+}
+
+pub fn magic_container<'a, M>(
+    element: Element<'a, M, Theme, Renderer>,
+    ctx: UIContext,
+) -> Element<'a, M, Theme, Renderer>
+where
+    M: 'a + Clone,
+{
+    if ctx.lsd_enabled && ctx.lsd_intensity > 0.02 {
+        // Semilla 6 para contenedores (mas sutil)
+        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 6);
+        let vx = vx * ctx.lsd_intensity;
+        let vy = vy * ctx.lsd_intensity;
+
+        Element::new(SmoothTranslate::new(
+            element,
+            (vx, vy),
+            ctx.mouse_pos,
+            false,
+        ))
+    } else {
+        element
+    }
+}
+
+pub fn magic_scrollable<'a, M>(
+    element: Element<'a, M, Theme, Renderer>,
+    ctx: UIContext,
+) -> Element<'a, M, Theme, Renderer>
+where
+    M: 'a + Clone,
+{
+    if ctx.lsd_enabled && ctx.lsd_intensity > 0.01 {
+        // Semilla 5 para scrollables (lento)
+        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 5);
+        Element::new(SmoothTranslate::new(
+            element,
+            (vx * ctx.lsd_intensity, vy * ctx.lsd_intensity),
+            ctx.mouse_pos,
+            false,
+        ))
+    } else {
+        element
+    }
+}
+
+pub fn magic_slider<'a, M>(
+    element: Element<'a, M, Theme, Renderer>,
+    ctx: UIContext,
+) -> Element<'a, M, Theme, Renderer>
+where
+    M: 'a + Clone,
+{
+    if ctx.lsd_enabled {
+        // Semilla 7 para sliders (vibrante)
+        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 7);
+        Element::new(SmoothTranslate::new(
+            element,
+            (vx, vy),
+            ctx.mouse_pos,
+            false,
+        ))
+    } else {
+        element
+    }
+}
+
+pub fn magic_tooltip<'a, M>(
+    element: Element<'a, M, Theme, Renderer>,
+    ctx: UIContext,
+) -> Element<'a, M, Theme, Renderer>
+where
+    M: 'a + Clone,
+{
+    if ctx.lsd_enabled {
+        // Semilla 8 para tooltips
+        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 8);
+        Element::new(SmoothTranslate::new(
+            element,
+            (vx, vy),
+            ctx.mouse_pos,
+            false,
+        ))
     } else {
         element
     }

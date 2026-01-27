@@ -506,20 +506,28 @@ impl ModsState {
     ) -> Element<'a, ModsMessage, Theme, Renderer> {
         let is_c = ws.width < 600.0;
         let ts = row![
-            tab_btn(
-                &localization.t("mods.installed"),
-                self.current_tab == ModTab::Installed,
-                is_c,
+            theme::magic_button(
+                tab_btn(
+                    &localization.t("mods.installed"),
+                    self.current_tab == ModTab::Installed,
+                    is_c,
+                    ctx
+                )
+                .on_press(ModsMessage::SwitchTab(ModTab::Installed))
+                .into(),
+                ctx
+            ),
+            theme::magic_button(
+                tab_btn(
+                    &localization.t("mods.browse"),
+                    self.current_tab == ModTab::Browse,
+                    is_c,
+                    ctx
+                )
+                .on_press(ModsMessage::SwitchTab(ModTab::Browse))
+                .into(),
                 ctx
             )
-            .on_press(ModsMessage::SwitchTab(ModTab::Installed)),
-            tab_btn(
-                &localization.t("mods.browse"),
-                self.current_tab == ModTab::Browse,
-                is_c,
-                ctx
-            )
-            .on_press(ModsMessage::SwitchTab(ModTab::Browse))
         ]
         .spacing(10);
 
@@ -541,13 +549,16 @@ impl ModsState {
             },
         );
 
-        let view_content = theme::standard_column(vec![
-            container(ts)
-                .padding([0, theme::STANDARD_PADDING as u16])
-                .style(move |t| theme::container_style_transparent(&ctx.palette, t))
-                .into(),
-            theme::page_container(cnt).into(),
-        ]);
+        let view_content = theme::magic_column(
+            vec![
+                container(ts)
+                    .padding([0, theme::STANDARD_PADDING as u16])
+                    .style(move |t| theme::container_style_transparent(&ctx.palette, t))
+                    .into(),
+                theme::page_container(cnt).into(),
+            ],
+            ctx,
+        );
 
         theme::modal_shell(
             &localization.t("mods.title").to_uppercase(),
@@ -583,6 +594,41 @@ impl ModsState {
             let h = row![
                 theme::text_title(&localization.t("mods.core_patches"), ctx),
                 Space::new().width(Length::Fill),
+                theme::magic_button(
+                    button(
+                        row![
+                            theme::svg(
+                                svg(util::icons::icon(util::icons::FOLDER))
+                                    .width(14)
+                                    .height(14)
+                                    .style(move |t: &Theme, s| theme::svg_accent(&palette, t, s)),
+                                ctx
+                            ),
+                            theme::text_caption(&localization.t("mods.open_folder"), ctx)
+                        ]
+                        .spacing(5)
+                        .align_y(Alignment::Center)
+                    )
+                    .on_press(ModsMessage::OpenPatchFolder)
+                    .style(move |t: &Theme, s| theme::secondary_button_style(&palette, t, s))
+                    .padding(5)
+                    .into(),
+                    ctx,
+                )
+            ]
+            .align_y(Alignment::Center);
+
+            let mut pl = column![Element::from(h)].spacing(10);
+            for p in &self.patch_mods {
+                pl = pl.push(patch_row(p, &self.temp_settings, localization, ctx));
+            }
+            content_items.push(theme::magic_container(pl.into(), ctx));
+        }
+
+        let hj = row![
+            theme::text_title(&localization.t("mods.jar_mods"), ctx),
+            Space::new().width(Length::Fill),
+            theme::magic_button(
                 button(
                     row![
                         theme::svg(
@@ -597,39 +643,12 @@ impl ModsState {
                     .spacing(5)
                     .align_y(Alignment::Center)
                 )
-                .on_press(ModsMessage::OpenPatchFolder)
+                .on_press(ModsMessage::OpenJarFolder)
                 .style(move |t: &Theme, s| theme::secondary_button_style(&palette, t, s))
                 .padding(5)
-            ]
-            .align_y(Alignment::Center);
-
-            let mut pl = column![Element::from(h)].spacing(10);
-            for p in &self.patch_mods {
-                pl = pl.push(patch_row(p, &self.temp_settings, localization, ctx));
-            }
-            content_items.push(pl.into());
-        }
-
-        let hj = row![
-            theme::text_title(&localization.t("mods.jar_mods"), ctx),
-            Space::new().width(Length::Fill),
-            button(
-                row![
-                    theme::svg(
-                        svg(util::icons::icon(util::icons::FOLDER))
-                            .width(14)
-                            .height(14)
-                            .style(move |t: &Theme, s| theme::svg_accent(&palette, t, s)),
-                        ctx
-                    ),
-                    theme::text_caption(&localization.t("mods.open_folder"), ctx)
-                ]
-                .spacing(5)
-                .align_y(Alignment::Center)
+                .into(),
+                ctx,
             )
-            .on_press(ModsMessage::OpenJarFolder)
-            .style(move |t: &Theme, s| theme::secondary_button_style(&palette, t, s))
-            .padding(5)
         ]
         .align_y(Alignment::Center);
 
@@ -644,12 +663,16 @@ impl ModsState {
                 ctx,
             ));
         }
-        content_items.push(ml.into());
+        content_items.push(theme::magic_container(ml.into(), ctx));
 
-        scrollable(theme::standard_column(content_items))
-            .height(Length::Fill)
-            .style(move |t: &Theme, s| theme::scrollable_style(&palette, t, s))
-            .into()
+        theme::magic_scrollable(
+            scrollable(theme::magic_column(content_items, ctx))
+                .height(Length::Fill)
+                .style(move |t: &Theme, s| theme::scrollable_style(&palette, t, s))
+                .into(),
+            ctx,
+        )
+        .into()
     }
 
     fn view_browse<'a>(
@@ -660,16 +683,24 @@ impl ModsState {
     ) -> Element<'a, ModsMessage, Theme, Renderer> {
         let palette = ctx.palette;
         let sb = row![
-            text_input(&localization.t("mods.search"), &self.search_query)
-                .on_input(ModsMessage::SearchChanged)
-                .on_submit(ModsMessage::SearchSubmit)
-                .padding(10)
-                .style(move |t: &Theme, s| theme::text_input_style(&palette, t, s))
-                .width(Length::Fill),
-            button(theme::text_body(&localization.t("mods.browse"), ctx))
-                .on_press(ModsMessage::SearchSubmit)
-                .style(move |t: &Theme, s| theme::primary_button_style(&palette, t, s))
-                .padding(10)
+            theme::magic_text_input(
+                text_input(&localization.t("mods.search"), &self.search_query)
+                    .on_input(ModsMessage::SearchChanged)
+                    .on_submit(ModsMessage::SearchSubmit)
+                    .padding(10)
+                    .style(move |t: &Theme, s| theme::text_input_style(&palette, t, s))
+                    .width(Length::Fill)
+                    .into(),
+                ctx,
+            ),
+            theme::magic_button(
+                button(theme::text_body(&localization.t("mods.browse"), ctx))
+                    .on_press(ModsMessage::SearchSubmit)
+                    .style(move |t: &Theme, s| theme::primary_button_style(&palette, t, s))
+                    .padding(10)
+                    .into(),
+                ctx,
+            )
         ]
         .spacing(10);
         let c: Element<'a, ModsMessage, Theme, Renderer> = if self.loading {
@@ -695,13 +726,19 @@ impl ModsState {
                     .collect::<Vec<_>>(),
             )
             .spacing(10);
-            container(
-                scrollable(l)
-                    .height(Length::Fill)
-                    .style(move |t: &Theme, s| theme::scrollable_style(&palette, t, s)),
+            theme::magic_container(
+                container(theme::magic_scrollable(
+                    scrollable(l)
+                        .height(Length::Fill)
+                        .style(move |t: &Theme, s| theme::scrollable_style(&palette, t, s))
+                        .into(),
+                    ctx,
+                ))
+                .padding(0)
+                .style(move |t| theme::container_style_transparent(&palette, t))
+                .into(),
+                ctx,
             )
-            .padding(0)
-            .style(move |t| theme::container_style_transparent(&palette, t))
             .into()
         };
         let pr = button(theme::text_body(&localization.t("mods.prev"), ctx))
@@ -713,7 +750,7 @@ impl ModsState {
             pr
         };
         let pg = row![
-            pr,
+            theme::magic_button(pr.into(), ctx),
             theme::text_body(
                 &localization
                     .t("mods.page")
@@ -721,15 +758,19 @@ impl ModsState {
                     .replace("{1}", "?"), // Remote page count not easily known here
                 ctx
             ),
-            button(theme::text_body(&localization.t("mods.next"), ctx))
-                .on_press(ModsMessage::NextPage)
-                .style(move |t: &Theme, s| theme::secondary_button_style(&palette, t, s))
-                .padding(if is_c { 6 } else { 10 })
+            theme::magic_button(
+                button(theme::text_body(&localization.t("mods.next"), ctx))
+                    .on_press(ModsMessage::NextPage)
+                    .style(move |t: &Theme, s| theme::secondary_button_style(&palette, t, s))
+                    .padding(if is_c { 6 } else { 10 })
+                    .into(),
+                ctx,
+            )
         ]
         .spacing(if is_c { 10 } else { 20 })
         .align_y(Alignment::Center)
         .width(Length::Fill);
-        theme::standard_column(vec![sb.into(), c.into(), pg.into()]).into()
+        theme::magic_column(vec![sb.into(), c.into(), pg.into()], ctx).into()
     }
 
     fn view_remote_card<'a>(
@@ -761,11 +802,15 @@ impl ModsState {
 
         let th: Element<'a, ModsMessage, Theme, Renderer> =
             if let Some(h) = self.thumbnails.get(&cf.id) {
-                image(h.clone())
-                    .width(50)
-                    .height(50)
-                    .content_fit(ContentFit::Cover)
-                    .into()
+                theme::magic_image(
+                    image(h.clone())
+                        .width(50)
+                        .height(50)
+                        .content_fit(ContentFit::Cover)
+                        .into(),
+                    ctx,
+                )
+                .into()
             } else {
                 container(Space::new())
                     .width(50)
@@ -774,29 +819,33 @@ impl ModsState {
                     .into()
             };
 
-        theme::list_item_row(
-            row![
-                th,
-                column![
-                    theme::text_body(&cf.name, ctx),
-                    theme::text_caption(&cf.summary, ctx),
-                    theme::text(
-                        text(format!(
-                            "{}: {:.0}",
-                            localization.t("mods.downloads"),
-                            cf.download_count
-                        ))
-                        .size(10),
-                        ctx,
-                    )
+        theme::magic_container(
+            theme::list_item_row(
+                row![
+                    th,
+                    column![
+                        theme::text_body(&cf.name, ctx),
+                        theme::text_caption(&cf.summary, ctx),
+                        theme::text(
+                            text(format!(
+                                "{}: {:.0}",
+                                localization.t("mods.downloads"),
+                                cf.download_count
+                            ))
+                            .size(10),
+                            ctx,
+                        )
+                    ]
+                    .spacing(4)
+                    .width(Length::Fill)
                 ]
-                .spacing(4)
-                .width(Length::Fill)
-            ]
-            .spacing(15)
-            .align_y(Alignment::Center)
+                .spacing(15)
+                .align_y(Alignment::Center)
+                .into(),
+                vec![theme::magic_button(ab.into(), ctx)],
+                ctx,
+            )
             .into(),
-            vec![ab.into()],
             ctx,
         )
     }
@@ -815,45 +864,62 @@ pub fn mod_row<'a>(
     };
 
     let tb = if mi.enabled {
-        button(theme::text_caption(&localization.t("mods.disable"), ctx))
-            .style(move |t: &Theme, s| theme::secondary_button_style(&palette, t, s))
+        theme::magic_button(
+            button(theme::text_caption(&localization.t("mods.disable"), ctx))
+                .style(move |t: &Theme, s| theme::secondary_button_style(&palette, t, s))
+                .on_press(ModsMessage::ToggleLocal(mi.clone()))
+                .into(),
+            ctx,
+        )
     } else {
-        button(theme::text_caption(&localization.t("mods.enable"), ctx))
-            .style(move |t: &Theme, s| theme::primary_button_style(&palette, t, s))
-    }
-    .on_press(ModsMessage::ToggleLocal(mi.clone()));
+        theme::magic_button(
+            button(theme::text_caption(&localization.t("mods.enable"), ctx))
+                .style(move |t: &Theme, s| theme::primary_button_style(&palette, t, s))
+                .on_press(ModsMessage::ToggleLocal(mi.clone()))
+                .into(),
+            ctx,
+        )
+    };
 
-    let db = button(theme::svg(
-        svg(util::icons::icon(util::icons::TRASH))
-            .width(14)
-            .height(14)
-            .style(|_, _| iced::widget::svg::Style {
-                color: Some(Color::BLACK),
-            }),
-        ctx,
-    ))
-    .on_press(ModsMessage::DeleteLocal(mi.clone()))
-    .style(move |t: &Theme, s| theme::danger_button_style(&palette, t, s))
-    .padding(8);
-
-    theme::list_item_row(
-        row![
-            theme::text_body(&mi.name, ctx),
-            Space::new().width(10),
-            theme::text(
-                text(if mi.enabled {
-                    localization.t("mods.active")
-                } else {
-                    localization.t("mods.disabled")
-                })
-                .size(12)
-                .color(sc),
-                ctx,
-            ),
-        ]
-        .align_y(Alignment::Center)
+    let db = theme::magic_button(
+        button(theme::svg(
+            svg(util::icons::icon(util::icons::TRASH))
+                .width(14)
+                .height(14)
+                .style(|_, _| iced::widget::svg::Style {
+                    color: Some(Color::BLACK),
+                }),
+            ctx,
+        ))
+        .on_press(ModsMessage::DeleteLocal(mi.clone()))
+        .style(move |t: &Theme, s| theme::danger_button_style(&palette, t, s))
+        .padding(8)
         .into(),
-        vec![tb.into(), db.into()],
+        ctx,
+    );
+
+    theme::magic_container(
+        theme::list_item_row(
+            row![
+                theme::text_body(&mi.name, ctx),
+                Space::new().width(10),
+                theme::text(
+                    text(if mi.enabled {
+                        localization.t("mods.active")
+                    } else {
+                        localization.t("mods.disabled")
+                    })
+                    .size(12)
+                    .color(sc),
+                    ctx,
+                ),
+            ]
+            .align_y(Alignment::Center)
+            .into(),
+            vec![tb.into(), db.into()],
+            ctx,
+        )
+        .into(),
         ctx,
     )
 }
@@ -896,57 +962,73 @@ fn patch_row<'a>(
     };
 
     let tb = if p.enabled {
-        button(theme::text_caption(&localization.t("mods.disable"), ctx))
-            .style(move |t: &Theme, s| theme::secondary_button_style(&palette, t, s))
-            .on_press(ModsMessage::ToggleZipPatch(p.mod_id.clone(), false))
+        theme::magic_button(
+            button(theme::text_caption(&localization.t("mods.disable"), ctx))
+                .style(move |t: &Theme, s| theme::secondary_button_style(&palette, t, s))
+                .on_press(ModsMessage::ToggleZipPatch(p.mod_id.clone(), false))
+                .into(),
+            ctx,
+        )
     } else {
-        button(theme::text_caption(&localization.t("mods.enable"), ctx))
-            .style(move |t: &Theme, s| theme::primary_button_style(&palette, t, s))
-            .on_press(ModsMessage::ToggleZipPatch(p.mod_id.clone(), true))
+        theme::magic_button(
+            button(theme::text_caption(&localization.t("mods.enable"), ctx))
+                .style(move |t: &Theme, s| theme::primary_button_style(&palette, t, s))
+                .on_press(ModsMessage::ToggleZipPatch(p.mod_id.clone(), true))
+                .into(),
+            ctx,
+        )
     };
 
-    let db = button(theme::svg(
-        svg(util::icons::icon(util::icons::TRASH))
-            .width(14)
-            .height(14)
-            .style(|_, _| iced::widget::svg::Style {
-                color: Some(Color::BLACK),
-            }),
-        ctx,
-    ))
-    .on_press(ModsMessage::UninstallZipPatch(
-        p.mod_id.clone(),
-        _curr.clone(),
-    ))
-    .style(move |t: &Theme, s| theme::danger_button_style(&palette, t, s))
-    .padding(5);
-
-    theme::list_item_row(
-        row![
-            theme::text(text("📦").size(20), ctx),
-            column![
-                theme::text_body(&p.mod_name, ctx),
-                row![
-                    theme::text(
-                        text(if p.enabled {
-                            localization.t("mods.active")
-                        } else {
-                            localization.t("mods.disabled")
-                        })
-                        .size(10)
-                        .color(sc),
-                        ctx,
-                    ),
-                    theme::text_body("|", ctx),
-                    theme::text_caption(&p.install_date.format("%Y-%m-%d").to_string(), ctx),
-                ]
-                .spacing(5)
-            ]
-        ]
-        .spacing(10)
-        .align_y(Alignment::Center)
+    let db = theme::magic_button(
+        button(theme::svg(
+            svg(util::icons::icon(util::icons::TRASH))
+                .width(14)
+                .height(14)
+                .style(|_, _| iced::widget::svg::Style {
+                    color: Some(Color::BLACK),
+                }),
+            ctx,
+        ))
+        .on_press(ModsMessage::UninstallZipPatch(
+            p.mod_id.clone(),
+            _curr.clone(),
+        ))
+        .style(move |t: &Theme, s| theme::danger_button_style(&palette, t, s))
+        .padding(5)
         .into(),
-        vec![tb.into(), db.into()],
+        ctx,
+    );
+
+    theme::magic_container(
+        theme::list_item_row(
+            row![
+                theme::text(text("📦").size(20), ctx),
+                column![
+                    theme::text_body(&p.mod_name, ctx),
+                    row![
+                        theme::text(
+                            text(if p.enabled {
+                                localization.t("mods.active")
+                            } else {
+                                localization.t("mods.disabled")
+                            })
+                            .size(10)
+                            .color(sc),
+                            ctx,
+                        ),
+                        theme::text_body("|", ctx),
+                        theme::text_caption(&p.install_date.format("%Y-%m-%d").to_string(), ctx),
+                    ]
+                    .spacing(5)
+                ]
+            ]
+            .spacing(10)
+            .align_y(Alignment::Center)
+            .into(),
+            vec![tb.into(), db.into()],
+            ctx,
+        )
+        .into(),
         ctx,
     )
 }

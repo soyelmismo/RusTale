@@ -120,10 +120,13 @@ impl NewsSection {
             self.view_posts(localization, is_disabled, ctx)
         };
 
-        let inner_content = theme::standard_column(vec![
-            header_section(self.loading, localization, is_disabled, ctx),
-            main_area,
-        ]);
+        let inner_content = theme::magic_column(
+            vec![
+                header_section(self.loading, localization, is_disabled, ctx),
+                main_area,
+            ],
+            ctx,
+        );
 
         container(inner_content)
             .padding(theme::STANDARD_PADDING)
@@ -191,7 +194,7 @@ impl NewsSection {
                     if !is_disabled {
                         btn = btn.on_press(NewsMessage::LoadNews);
                     }
-                    btn
+                    theme::magic_button(btn.into(), ctx)
                 }
             ]
             .spacing(10)
@@ -231,18 +234,21 @@ impl NewsSection {
         ctx: theme::UIContext,
     ) -> Element<'a, NewsMessage, Theme, Renderer> {
         let palette = ctx.palette;
-        let posts_list = scrollable(
-            column(
-                self.posts
-                    .iter()
-                    .map(|post| self.view_post(post, loc, is_disabled, ctx))
-                    .collect::<Vec<_>>(),
+        let posts_list = theme::magic_scrollable(
+            scrollable(
+                column(
+                    self.posts
+                        .iter()
+                        .map(|post| self.view_post(post, loc, is_disabled, ctx))
+                        .collect::<Vec<_>>(),
+                )
+                .spacing(8),
             )
-            .spacing(8),
-        )
-        .height(Length::Fill)
-        .style(move |t: &Theme, s| theme::scrollable_style(&palette, t, s));
-
+            .height(Length::Fill)
+            .style(move |t: &Theme, s| theme::scrollable_style(&palette, t, s))
+            .into(),
+            ctx,
+        );
         if self.error.is_some() {
             column![
                 posts_list,
@@ -253,7 +259,7 @@ impl NewsSection {
                     if !is_disabled {
                         btn = btn.on_press(NewsMessage::LoadNews);
                     }
-                    btn
+                    theme::magic_button(btn.into(), ctx)
                 })
                 .width(Length::Fill)
                 .center_x(Length::Fill)
@@ -277,11 +283,15 @@ impl NewsSection {
         let image_content: Element<'a, NewsMessage, Theme, Renderer> =
             if let Some(cover) = &post.cover_image {
                 if let Some(handle) = self.images.get(&cover.s3_key) {
-                    image(handle.clone())
-                        .width(100)
-                        .height(56)
-                        .content_fit(ContentFit::Cover)
-                        .into()
+                    theme::magic_image(
+                        image(handle.clone())
+                            .width(100)
+                            .height(56)
+                            .border_radius(8)
+                            .content_fit(ContentFit::Cover)
+                            .into(),
+                        ctx,
+                    )
                 } else {
                     placeholder_image()
                 }
@@ -335,10 +345,13 @@ impl NewsSection {
         if !is_disabled {
             btn = btn.on_press(NewsMessage::OpenPost(post.get_post_url()));
         }
-        btn.style(move |t: &Theme, s| theme::ghost_button_style(&palette, t, s))
-            .width(Length::Fill)
-            .padding(8)
-            .into()
+        theme::magic_button(
+            btn.style(move |t: &Theme, s| theme::ghost_button_style(&palette, t, s))
+                .width(Length::Fill)
+                .padding(8)
+                .into(),
+            ctx,
+        )
     }
 }
 
@@ -409,8 +422,12 @@ fn header_section<'a>(
             if !is_disabled {
                 btn = btn.on_press(NewsMessage::OpenAllNews);
             }
-            btn.style(move |t: &Theme, s| theme::ghost_button_style(&palette, t, s))
-                .padding(4)
+            theme::magic_button(
+                btn.style(move |t: &Theme, s| theme::ghost_button_style(&palette, t, s))
+                    .padding(4)
+                    .into(),
+                ctx,
+            )
         }
     ]
     .align_y(Alignment::Center)

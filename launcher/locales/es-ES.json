@@ -33,7 +33,10 @@
         "select": "Seleccionar perfil",
         "add": "Añadir perfil",
         "name_placeholder": "Nombre...",
-        "new_name_placeholder": "Nuevo nombre..."
+        "new_name_placeholder": "Nuevo nombre...",
+        "uuid_copy": "Copiar UUID",
+        "generate_uuid": "Generar UUID aleatorio",
+        "view_edit_uuid": "Ver/editar UUID"
     },
     "settings": {
         "title": "Ajustes",
@@ -85,7 +88,8 @@
         "max": "Máx",
         "jvm_args": "Argumentos JVM",
         "jvm_args_placeholder": "Args JVM",
-        "move_to": "Mover a...",
+        "move_to": "Mover todo a...",
+        "use_data_from": "Ya lo instalé en...",
         "open_folder": "Abrir",
         "theme": "Tema",
         "theme_preset": "Ajuste de color",

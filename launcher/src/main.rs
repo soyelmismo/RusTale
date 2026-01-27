@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use clap::Parser;
 use futures::SinkExt;
-use iced::widget::{Space, column, container, image, row, stack};
+use iced::widget::{Space, column, container, image, row, shader, stack};
 use iced::{
     Color, ContentFit, Element, Length, Size, Subscription, Task, Theme, clipboard, window,
 };
@@ -37,7 +37,7 @@ use crate::lang::Localization;
 use crate::settings::{SettingsMessage, SettingsState};
 use crate::ui::mods_modal::{ModsMessage, ModsState};
 use crate::ui::news_section::{NewsMessage, NewsSection};
-use crate::ui::{control_section, profile_card}; // Import the struct
+use crate::ui::{control_section, lsd_shader, profile_card}; // Import the struct
 
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about = None)]
@@ -112,6 +112,17 @@ fn is_running_as_java_proxy() -> bool {
 }
 
 pub fn main() -> iced::Result {
+    // [GPU OPTIMIZATION 1] ----------------------------
+    // Forzamos a WGPU a usar el modo de alto rendimiento antes de inicializar nada.
+    // Esto evita que use la integrada o renderizado por software (WARP/LLVMpipe).
+    unsafe { std::env::set_var("WGPU_POWER_PREF", "high") };
+
+    // Opcional: Forzar Vulkan o DX12 si Auto falla
+    #[cfg(target_os = "windows")]
+    // std::env::set_var("WGPU_BACKEND", "dx12");
+    #[cfg(target_os = "linux")]
+    // std::env::set_var("WGPU_BACKEND", "vulkan");
+    // ------------------------------------------------
     if is_running_as_java_proxy() {
         let mode_env = std::env::var("AURORA_MODE").unwrap_or_default();
         let mode = match mode_env.as_str() {
@@ -220,6 +231,15 @@ pub fn main() -> iced::Result {
 
         ..Default::default()
     })
+    // [GPU OPTIMIZATION 2] ----------------------------
+    // Añadimos configuración de Antialiasing desactivado.
+    // MSAA consume mucha GPU en shaders de pantalla completa.
+    // La fuente de Iced ya hace su propio AA.
+    .settings(iced::Settings {
+        antialiasing: false,
+        ..Default::default()
+    })
+    // ------------------------------------------------
     .run()
 }
 
@@ -227,6 +247,7 @@ pub fn main() -> iced::Result {
 pub enum Message {
     None,
     Tick(std::time::Instant),
+    CursorMoved(iced::Point),
     Initialize,
     Mods(ModsMessage),                        // New type of wrapper message
     ModsLoaded(Result<Vec<ModInfo>, String>), // Result of the load
@@ -320,6 +341,9 @@ struct RusTale {
     lsd_offset: (f32, f32),
     start_time: std::time::Instant,
     lsd_preview: bool,
+    cursor_position: iced::Point, // Rastrear ratón para efectos
+    last_mouse_move_time: std::time::Instant,
+    lsd_enabled_time: Option<std::time::Instant>, // Para activación progresiva
 }
 
 impl RusTale {
@@ -410,6 +434,13 @@ impl RusTale {
                 lsd_offset: (0.0, 0.0),
                 start_time: std::time::Instant::now(),
                 lsd_preview: false,
+                cursor_position: iced::Point::ORIGIN,
+                last_mouse_move_time: std::time::Instant::now(),
+                lsd_enabled_time: if initial_settings.theme.lsd_mode {
+                    Some(std::time::Instant::now())
+                } else {
+                    None
+                },
             },
             Task::batch(vec![
                 Task::done(Message::Initialize),
@@ -463,16 +494,37 @@ impl RusTale {
             _ => Message::None,
         });
 
-        // SOLUCION: Mantener el tick vivo si el modal está abierto para evitar lag de arranque/parada
-        let tick_sub =
-            if self.settings.theme.lsd_mode || self.lsd_preview || self.settings_state.is_open {
-                // Si el modal está abierto, mantenemos el tick vivo para evitar el lag de arranque/parada
-                iced::time::every(std::time::Duration::from_millis(16)).map(Message::Tick)
-            } else {
-                Subscription::none()
-            };
+        // Mouse listener para efectos magnéticos
+        let mouse_sub = if self.is_window_visible && self.settings.theme.lsd_mode {
+            iced::event::listen_with(|event, _status, _window_id| {
+                if let iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) = event {
+                    Some(Message::CursorMoved(position))
+                } else {
+                    None
+                }
+            })
+        } else {
+            Subscription::none()
+        };
 
-        Subscription::batch(vec![game_runner, tray_sub, menu_sub, window_sub, tick_sub])
+        // SOLUCION: El tick solo debe existir si el modo LSD está ACTIVO y la ventana VISIBLE.
+        // Si el LSD está apagado, Iced funcionará por eventos (0% CPU idle).
+        let tick_sub = if self.is_window_visible && self.settings.theme.lsd_mode {
+            // [OPTIMIZATION] Reducimos de 16ms (60fps) a 33ms (30fps).
+            // Esto reduce la carga del modo LSD a la mitad automáticamente.
+            iced::time::every(std::time::Duration::from_millis(33)).map(Message::Tick)
+        } else {
+            Subscription::none()
+        };
+
+        Subscription::batch(vec![
+            game_runner,
+            tray_sub,
+            menu_sub,
+            window_sub,
+            tick_sub,
+            mouse_sub,
+        ])
     }
 
     fn reconcile_local_server(&mut self) {
@@ -517,25 +569,23 @@ impl RusTale {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Tick(_now) => {
-                let is_effect_active = self.settings.theme.lsd_mode || self.lsd_preview;
+            Message::CursorMoved(pos) => {
+                self.cursor_position = pos;
+                self.last_mouse_move_time = std::time::Instant::now();
 
-                if is_effect_active {
-                    let t = self.start_time.elapsed().as_secs_f32();
-                    let smooth_t = t * 0.4;
-
-                    // Calculamos el offset normalmente
-                    let x = (smooth_t).sin() * 2.5 + (smooth_t * 1.5).cos() * 1.0;
-                    let y = (smooth_t * 0.8).cos() * 2.5 + (smooth_t * 1.2).sin() * 1.0;
-
-                    self.lsd_offset = (x, y);
-                } else {
-                    // En lugar de resetear a 0 bruscamente, solo dejamos de actualizar si el offset ya es 0
-                    // o lo forzamos a 0 si la suscripción sigue viva un frame más
-                    self.lsd_offset = (0.0, 0.0);
-                }
                 return Task::none();
             }
+            Message::Tick(_now) => {
+                // Bloqueo de seguridad: si desactivas el LSD pero quedaba un evento en cola.
+                if !self.settings.theme.lsd_mode {
+                    return Task::none();
+                }
+
+                let t = self.start_time.elapsed().as_secs_f32();
+                self.lsd_offset = (t, t);
+                return Task::none();
+            }
+
             _ => {}
         }
 
@@ -563,6 +613,7 @@ impl RusTale {
                 | Message::LauncherUpdate(_)
                 | Message::CheckStatus
                 | Message::BackgroundLoaded(_)
+                | Message::Tick(_)
                 | Message::News(_) => {}
                 _ => return Task::none(),
             }
@@ -582,6 +633,10 @@ impl RusTale {
             Message::ModsLoaded(res) => Task::done(Message::Mods(ModsMessage::ModsLoaded(res))),
             Message::ModsLoadedComplex(res) => {
                 Task::done(Message::Mods(ModsMessage::ModsLoadedComplex(res)))
+            }
+            Message::CursorMoved(pos) => {
+                self.cursor_position = pos;
+                Task::none()
             }
 
             Message::Initialize => Task::perform(
@@ -1130,12 +1185,12 @@ impl RusTale {
                         // GUARDIA: Solo actuar si el valor es diferente al actual
                         if self.settings.theme.lsd_mode != *val {
                             self.settings.theme.lsd_mode = *val;
-                            // Sincronizar el estado temporal para que el checkbox visual se actualice
                             self.settings_state.temp_settings.theme.lsd_mode = *val;
 
-                            // CRITICO: Si lo desactivamos, forzamos que el preview sea false
-                            // para evitar que la vibración residual reactive el ciclo.
-                            if !*val {
+                            if *val {
+                                self.lsd_enabled_time = Some(std::time::Instant::now());
+                            } else {
+                                self.lsd_enabled_time = None;
                                 self.lsd_preview = false;
                             }
                         }
@@ -1658,11 +1713,31 @@ impl RusTale {
 
     fn view(&self) -> Element<'_, Message> {
         let palette = &self.palette;
+        // === CALCULAR QUIETUD ===
+        // Calcula cuánto tiempo (en segundos) ha pasado desde el último movimiento
+        let elapsed_idle = self.last_mouse_move_time.elapsed().as_secs_f32();
+
+        // Normalizamos:
+        // 0.0 seg -> 0.0 (movimiento)
+        // 3.0 seg -> 1.0 (quietud total)
+        let stillness = (elapsed_idle / 3.0).clamp(0.0, 1.0);
+        let lsd_intensity = if self.lsd_preview {
+            1.0 // Fuerza máxima instantánea al pasar el mouse por encima (Preview)
+        } else if let Some(t) = self.lsd_enabled_time {
+            let elapsed = t.elapsed().as_secs_f32();
+            (elapsed / theme::LSD_RAMP_UP_SECONDS).min(1.0)
+        } else {
+            0.0
+        };
+
         let ctx = theme::UIContext {
             palette: *palette,
             lsd_offset: self.lsd_offset,
             lsd_enabled: self.settings.theme.lsd_mode || self.lsd_preview,
+            lsd_intensity,
             time: self.start_time.elapsed().as_secs_f32(),
+            mouse_pos: self.cursor_position,
+            mouse_stillness: stillness,
         };
 
         let tint_color = theme::background_tint_color(palette);
@@ -1705,21 +1780,29 @@ impl RusTale {
         let show_news = self.settings.enable_news && self.window_size.width > 750.0;
 
         let main_content: Element<'_, Message> = if show_news {
-            let left_column = container(left_column_content)
-                .width(Length::FillPortion(1))
+            let left_column = theme::magic_container(
+                container(left_column_content)
+                    .width(Length::FillPortion(1))
+                    .height(Length::Fill)
+                    .padding(30)
+                    .style(move |t| theme::glass_container(&palette, t))
+                    .into(),
+                ctx,
+            );
+
+            let right_column = theme::magic_container(
+                container(
+                    self.news_section
+                        .view(&self.localization, is_interaction_disabled, ctx)
+                        .map(Message::News),
+                )
+                .width(Length::FillPortion(2))
                 .height(Length::Fill)
                 .padding(30)
-                .style(move |t| theme::glass_container(&palette, t));
-
-            let right_column = container(
-                self.news_section
-                    .view(&self.localization, is_interaction_disabled, ctx)
-                    .map(Message::News),
-            )
-            .width(Length::FillPortion(2))
-            .height(Length::Fill)
-            .padding(30)
-            .style(move |t| theme::container_style_transparent(&palette, t));
+                .style(move |t| theme::container_style_transparent(&palette, t))
+                .into(),
+                ctx,
+            );
 
             row![left_column, right_column]
                 .width(Length::Fill)
@@ -1737,11 +1820,15 @@ impl RusTale {
                 30
             };
 
-            let left_column = container(left_column_content)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .padding(padding) // Padding dinámico
-                .style(move |t| theme::glass_container(&palette, t));
+            let left_column = theme::magic_container(
+                container(left_column_content)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .padding(padding) // Padding dinámico
+                    .style(move |t| theme::glass_container(&palette, t))
+                    .into(),
+                ctx,
+            );
 
             if self.window_size.width > 500.0 {
                 row![
@@ -1765,13 +1852,28 @@ impl RusTale {
             }
         };
 
-        let bg: Element<'_, Message> = if let Some(handle) = &self.bg_handle {
+        let bg: Element<'_, Message> = if self.settings.theme.lsd_mode {
+            // USAR EL SHADER GPU
+            // Usamos un shader widget que ocupa todo el espacio
+            shader(lsd_shader::LiquidLsd::new(
+                self.start_time,
+                self.cursor_position,
+                palette.accent,
+                palette.background,
+                lsd_intensity,
+            ))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+        } else if let Some(handle) = &self.bg_handle {
+            // Fondo original
             image(handle.clone())
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .content_fit(ContentFit::Cover)
                 .into()
         } else {
+            // Fondo negro fallback
             container(Space::new())
                 .width(Length::Fill)
                 .height(Length::Fill)

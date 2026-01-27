@@ -12,14 +12,16 @@ winres = "0.1.12"
 
 [dependencies]
 # UI Framework
-# It's VITAL to activate the features 'image', 'svg' and 'tokio'
 iced = { version = "0.14.0", features = [
     "image",
     "svg",
     "tokio",
     "advanced",
     "canvas",
+    "wgpu"
 ] }
+
+iced_renderer = "0.14.0"
 
 # Async Runtime
 tokio = { version = "1.49.0", features = ["full"] }
@@ -95,6 +97,7 @@ urlencoding = "2.1.3"
 
 single-instance = "0.3.3"
 
+bytemuck = { version = "1.24.0", features = ["derive"] } 
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18.2"
