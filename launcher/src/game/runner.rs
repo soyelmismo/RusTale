@@ -266,7 +266,7 @@ impl Recipe for Runner {
                             crate::config::OnlineFixMode::Local => {
                                 // Local configuration
                                 aurora_env_value = "local".to_string();
-                                auth_url = format!("http://127.0.0.000001:{}", server_port);
+                                auth_url = format!("http://127.0.0.1:{}", server_port);
 
                                 // Start local server
                                 let server_username = player_name.clone();
@@ -286,23 +286,42 @@ impl Recipe for Runner {
                                         .await;
                                     } else {
                                         println!(
-                                            "[Runner] Connected to existing Auth Server. Updating paths..."
+                                            "[Runner] Connected to existing Auth Server. Updating state..."
                                         );
 
                                         let client = reqwest::Client::new();
-                                        let update_url = format!(
-                                            "http://127.0.0.1:{}/internal/update-path",
-                                            port_clone
-                                        );
-                                        let body = serde_json::json!({
+                                        let base_url = format!("http://127.0.0.1:{}", port_clone);
+
+                                        // 1. Actualizar Path
+                                        let update_path_url =
+                                            format!("{}/internal/update-path", base_url);
+                                        let body_path = serde_json::json!({
                                             "game_dir": server_game_dir.to_string_lossy().to_string()
                                         });
-
-                                        if let Err(e) =
-                                            client.post(update_url).json(&body).send().await
+                                        if let Err(e) = client
+                                            .post(update_path_url)
+                                            .json(&body_path)
+                                            .send()
+                                            .await
                                         {
                                             eprintln!(
                                                 "[Runner] Failed to update Auth Server path: {}",
+                                                e
+                                            );
+                                        }
+
+                                        // 2. Actualizar Identidad (NUEVO)
+                                        let update_id_url =
+                                            format!("{}/internal/update-identity", base_url);
+                                        let body_id = serde_json::json!({
+                                            "username": server_username,
+                                            "uuid": server_uuid
+                                        });
+                                        if let Err(e) =
+                                            client.post(update_id_url).json(&body_id).send().await
+                                        {
+                                            eprintln!(
+                                                "[Runner] Failed to update Auth Server identity: {}",
                                                 e
                                             );
                                         }

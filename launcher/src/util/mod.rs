@@ -92,7 +92,7 @@ pub fn get_saved_port() -> u16 {
 #[cfg(target_os = "windows")]
 pub unsafe fn get_parent_pid() -> u32 {
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32First, Process32Next, PROCESSENTRY32, TH32CS_SNAPPROCESS,
+        CreateToolhelp32Snapshot, PROCESSENTRY32, Process32First, Process32Next, TH32CS_SNAPPROCESS,
     };
     use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 
@@ -172,7 +172,7 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
 
     // 2. Scan for server.jar
     proxy_log("Scanning arguments...");
-    
+
     // We do NOT filter AOT args here anymore, because we want to patch them if present.
     // final_args.retain(|arg| !arg.starts_with("-XX:AOTCache"));
 
@@ -208,8 +208,12 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
                     .unwrap_or(std::path::Path::new("."));
 
                 let possible_original = server_dir.join("HytaleServer.original");
-                
-                let filename_low = original_jar_path.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+
+                let filename_low = original_jar_path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_lowercase();
                 let is_vanilla_name = filename_low == "hytaleserver.jar";
 
                 // Determine which jar we are actually going to use
@@ -217,12 +221,14 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
                     proxy_log("Using specific JAR directly (Dedicated Server or pre-patched).");
                     original_jar_path.clone()
                 } else if possible_original.exists() {
-                    proxy_log("Detected persistent swap (HytaleServer.original exists). Using HytaleServer.jar as patched.");
+                    proxy_log(
+                        "Detected persistent swap (HytaleServer.original exists). Using HytaleServer.jar as patched.",
+                    );
                     original_jar_path.clone()
                 } else {
                     let patched_jar_name = format!("HytaleServer.{}.{}.jar", mode_str, port);
                     let side_by_side_path = server_dir.join(patched_jar_name);
-                    
+
                     if side_by_side_path.exists() {
                         proxy_log("Persistent patched JAR found (side-by-side). Using it.");
                     } else {
@@ -243,63 +249,72 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
 
                 // Check/Generate AOT for the TARGET JAR
                 let target_aot_path = target_jar_path.with_extension("aot");
-                
+
                 if !target_aot_path.exists() {
-                     proxy_log(&format!("AOT Cache for {:?} missing. Generating...", target_jar_path));
-                     
-                     // Collect JVM args for AOT generation
-                     let jvm_args: String = args.iter()
+                    proxy_log(&format!(
+                        "AOT Cache for {:?} missing. Generating...",
+                        target_jar_path
+                    ));
+
+                    // Collect JVM args for AOT generation
+                    let jvm_args: String = args
+                        .iter()
                         .filter(|a| a.starts_with("-D") || a.starts_with("-X"))
                         .cloned()
                         .collect::<Vec<_>>()
                         .join(" ");
 
-                     // Get application args (everything after -jar)
-                     let app_args: Vec<String> = args.iter()
+                    // Get application args (everything after -jar)
+                    let app_args: Vec<String> = args
+                        .iter()
                         .skip_while(|a| *a != "-jar")
-                        .skip(2) 
+                        .skip(2)
                         .cloned()
                         .collect();
 
-                     if let Err(e) = crate::game::patcher::generate_server_aot(
-                         &java_real,
-                         &target_jar_path,
-                         &jvm_args,
-                         &app_args
-                     ) {
-                         proxy_log(&format!("AOT Generation Warning: {}", e));
-                     } else {
-                         proxy_log("AOT Generation Completed.");
-                     }
+                    if let Err(e) = crate::game::patcher::generate_server_aot(
+                        &java_real,
+                        &target_jar_path,
+                        &jvm_args,
+                        &app_args,
+                    ) {
+                        proxy_log(&format!("AOT Generation Warning: {}", e));
+                    } else {
+                        proxy_log("AOT Generation Completed.");
+                    }
                 }
 
                 // Apply replacements in final_args
                 // 1. Replace JAR path with the target one
                 if let Some(idx) = final_args.iter().position(|x| x == arg) {
-                     final_args[idx] = target_jar_path.to_string_lossy().to_string();
+                    final_args[idx] = target_jar_path.to_string_lossy().to_string();
                 }
-                
+
                 // 2. Scan for AOT arg to update it to the target AOT
                 // ONLY if the AOT file exists, otherwise delete the arg to avoid crashes
-                let aot_arg_pos = final_args.iter().position(|r| r.starts_with("-XX:AOTCache"));
-                
+                let aot_arg_pos = final_args
+                    .iter()
+                    .position(|r| r.starts_with("-XX:AOTCache"));
+
                 if let Some(idx) = aot_arg_pos {
                     if target_aot_path.exists() {
-                        final_args[idx] = format!("-XX:AOTCache={}", target_aot_path.to_string_lossy());
+                        final_args[idx] =
+                            format!("-XX:AOTCache={}", target_aot_path.to_string_lossy());
                         proxy_log(&format!("Updated AOT Arg to: {}", final_args[idx]));
 
                         // Add logging for AOT to debug mapping issues
                         if !final_args.iter().any(|a| a.starts_with("-Xlog:aot")) {
-                            final_args.push("-Xlog:aot".to_string());
+                            final_args.insert(0, "-Xlog:aot".to_string());
                         }
                     } else {
-                        proxy_log("AOT Cache not found. Removing AOT argument to avoid startup failure.");
+                        proxy_log(
+                            "AOT Cache not found. Removing AOT argument to avoid startup failure.",
+                        );
                         final_args.remove(idx);
                     }
                 }
                 // Break after handling the server jar arg
                 break;
-
             } else {
                 proxy_log(&format!("File not found: {:?}", original_jar_path));
             }
@@ -318,7 +333,9 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
 
     // Detect if we should show the console
     // Show console ONLY if it is a server AND NOT singleplayer
-    let is_server_jar = args.iter().any(|a| a.to_lowercase().contains("hytaleserver.jar"));
+    let is_server_jar = args
+        .iter()
+        .any(|a| a.to_lowercase().contains("hytaleserver.jar"));
     let is_singleplayer = args.iter().any(|a| a == "--singleplayer");
     let is_dedicated_server_flag = std::env::var("RUSTALE_IS_SERVER").is_ok();
 
@@ -346,7 +363,10 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
             use std::os::windows::io::AsRawHandle;
             let handle = child.as_raw_handle() as _;
             if let Err(e) = job.add_process(handle) {
-                proxy_log(&format!("[WARN] Failed to assign child to JobObject: {}", e));
+                proxy_log(&format!(
+                    "[WARN] Failed to assign child to JobObject: {}",
+                    e
+                ));
                 None
             } else {
                 proxy_log("[INFO] Child assigned to JobObject (auto-kill enabled)");
@@ -359,8 +379,10 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
 
         // --- PARENT WATCHDOG START ---
         unsafe {
-            use windows_sys::Win32::System::Threading::{OpenProcess, WaitForMultipleObjects, INFINITE};
             use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
+            use windows_sys::Win32::System::Threading::{
+                INFINITE, OpenProcess, WaitForMultipleObjects,
+            };
             const SYNCHRONIZE: u32 = 1048576; // 0x00100000
             use std::os::windows::io::AsRawHandle;
 
@@ -368,18 +390,19 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
             if parent_pid != 0 {
                 let parent_handle = OpenProcess(SYNCHRONIZE, 0, parent_pid);
                 if !parent_handle.is_null() {
-                    let child_handle = child.as_raw_handle() as windows_sys::Win32::Foundation::HANDLE;
+                    let child_handle =
+                        child.as_raw_handle() as windows_sys::Win32::Foundation::HANDLE;
                     let handles = [child_handle, parent_handle];
-                    
+
                     // Wait for either the child to exit (normal) or parent to exit (orphan scenario)
                     let result = WaitForMultipleObjects(2, handles.as_ptr(), 0, INFINITE);
-                    
+
                     if result == WAIT_OBJECT_0 + 1 {
                         // Parent died (Index 1)
                         proxy_log("[INFO] Parent process died. Killing child...");
                         let _ = child.kill();
                     }
-                    
+
                     windows_sys::Win32::Foundation::CloseHandle(parent_handle);
                 }
             }
@@ -387,7 +410,7 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
         // --- PARENT WATCHDOG END ---
 
         let status = child.wait()?;
-        
+
         // Explicitly drop job after wait
         drop(job);
 

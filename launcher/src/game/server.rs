@@ -16,6 +16,12 @@ struct UpdatePathRequest {
     game_dir: String,
 }
 
+#[derive(Deserialize)]
+struct UpdateIdentityRequest {
+    username: String,
+    uuid: String,
+}
+
 // ==================== DATA STRUCTURES (hytFormats.go ported) ====================
 
 #[derive(Deserialize, Debug)]
@@ -277,6 +283,12 @@ pub async fn start_server(
         .and(state_filter.clone())
         .then(handle_update_path);
 
+    let internal_update_identity = warp::path!("internal" / "update-identity")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(state_filter.clone())
+        .then(handle_update_identity);
+
     // 1. GET /my-account/game-profile
     let game_profile = warp::path!("my-account" / "game-profile")
         .and(warp::get())
@@ -456,6 +468,7 @@ pub async fn start_server(
         .or(analytics)
         .or(event)
         .or(internal_update_path)
+        .or(internal_update_identity)
         .or(catch_unknown)
         .boxed();
 
@@ -1126,4 +1139,20 @@ async fn handle_update_path(
     } else {
         warp::reply::with_status("Path does not exist", warp::http::StatusCode::BAD_REQUEST)
     }
+}
+
+async fn handle_update_identity(
+    body: UpdateIdentityRequest,
+    state: Arc<tokio::sync::Mutex<ServerState>>,
+) -> impl warp::Reply {
+    let mut state = state.lock().await;
+    println!(
+        ">>> [INTERNAL] Updating Identity to: {} ({})",
+        body.username, body.uuid
+    );
+
+    state.username = body.username;
+    state.uuid = body.uuid;
+
+    warp::reply::with_status("Identity updated", warp::http::StatusCode::OK)
 }
