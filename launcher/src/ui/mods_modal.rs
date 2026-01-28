@@ -4,10 +4,12 @@ use crate::game::mods::ModInfo;
 use crate::game::zip_mods::PatchManifest;
 use crate::{theme, util};
 use iced::widget::{
-    Space, button, column, container, image, row, scrollable, svg, text_input,
+    Space, button, column, container, image, row, scrollable, svg, text_input, Id,
 };
 use iced::{Alignment, Color, ContentFit, Element, Length, Renderer, Size, Task, Theme};
 use std::collections::{HashMap, HashSet};
+
+const MODS_SCROLL_ID: &str = "mods_scroll_area";
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ModTab {
@@ -667,6 +669,7 @@ impl ModsState {
 
         theme::magic_scrollable(
             scrollable(theme::magic_column(content_items, ctx))
+                .id(Id::new(MODS_SCROLL_ID))
                 .height(Length::Fill)
                 .style(move |t: &Theme, s| theme::scrollable_style(&palette, t, s))
                 .into(),

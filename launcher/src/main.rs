@@ -531,15 +531,18 @@ impl RusTale {
             Subscription::none()
         };
 
-        // SOLUCION: El tick solo debe existir si el modo LSD esta ACTIVO y la ventana VISIBLE.
-        // Si el LSD esta apagado, Iced funcionara por eventos (0% CPU idle).
-        let tick_sub = if self.is_window_visible && self.settings.theme.lsd_mode {
-            // [OPTIMIZATION] Reducimos de 16ms (60fps) a 33ms (30fps).
-            // Esto reduce la carga del modo LSD a la mitad automaticamente.
-            iced::time::every(std::time::Duration::from_millis(33)).map(Message::Tick)
-        } else {
-            Subscription::none()
-        };
+        let tick_sub = if self.is_window_visible {
+    if self.settings.theme.lsd_mode {
+        iced::time::every(std::time::Duration::from_millis(33)).map(Message::Tick)
+    } else if self.settings_state.is_open {
+        iced::time::every(std::time::Duration::from_millis(66)).map(Message::Tick)
+    } else {
+        Subscription::none()
+    }
+} else {
+    Subscription::none()
+};
+
 
         Subscription::batch(vec![
             game_runner,

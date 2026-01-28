@@ -459,33 +459,34 @@ pub fn text_title<'a, M: 'a>(content: impl Into<String>, ctx: UIContext) -> Elem
     )
 }
 
-pub fn lsd_magic_text<'a, M: 'a>(
-    label: &'a str,
-    ctx: UIContext,
-) -> Element<'a, M, Theme, Renderer> {
-    let t = ctx.time * 0.15;
-    let vib_x = t.cos() * 0.25;
-    let vib_y = (t * 1.1).sin() * 0.25;
+pub fn lsd_magic_text<'a, M: 'a>(label: &'a str, ctx: UIContext) -> Element<'a, M, Theme, Renderer> {
+    let mut row = iced::widget::row![].spacing(0);
+    
+    for (i, c) in label.chars().enumerate() {
+        // Creamos una variación única por cada letra
+        let t = ctx.time * 2.0 + (i as f32 * 0.5);
+        let off_x = (t * 1.5).sin() * 2.5; // Movimiento sutil de 2.5px
+        let off_y = (t * 1.1).cos() * 2.5;
 
-    let content = iced::widget::stack![
-        iced::widget::text(label)
+        let char_el = iced::widget::text(c.to_string())
             .size(14)
-            .color(Color::from_rgb(0.4, 0.4, 0.9)),
-        iced::widget::text(label)
-            .size(14)
-            .color(ctx.palette.text_primary)
-    ];
+            .font(iced::font::Font::MONOSPACE)
+            // Color neón que resalta sobre el fondo
+            .color(Color::from_rgb(1.0, 0.4, 0.2)); 
 
-    // Si el modo esta OFF, mandamos proximity_only: true
-    Element::new(SmoothTranslate::new(
-        content.into(),
-        (vib_x, vib_y),
-        ctx.mouse_pos,
-        !ctx.lsd_enabled,
-        ctx.lsd_intensity,
-        ctx.lsd_enabled,
-    ))
+        row = row.push(Element::new(SmoothTranslate::new(
+            char_el.into(),
+            (off_x, off_y),
+            ctx.mouse_pos,
+            false, // Que se mueva siempre
+            1.0,   // Fuerza máxima
+            true,  // Ignorar modo global OFF
+        )));
+    }
+
+    row.into()
 }
+
 
 pub fn text_body<'a, M: 'a>(content: impl Into<String>, ctx: UIContext) -> Element<'a, M, Theme, Renderer> {
     text_lsd_letters(
@@ -1486,8 +1487,15 @@ impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Messa
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
-        let state = tree.state.downcast_ref::<SmoothTranslateState>();
         let bounds = layout.bounds();
+
+        // --- FRUSTUM CULLING 2D ---
+        // Si los bordes del widget no chocan con el viewport, salimos de la función.
+        if !viewport.intersects(&bounds) {
+            return;
+        }
+
+        let state = tree.state.downcast_ref::<SmoothTranslateState>();
 
         // Logica de "Derretimiento"
         if self.proximity_only {
@@ -1886,20 +1894,18 @@ pub fn magic_scrollable<'a, M>(
 where
     M: 'a + Clone,
 {
-    if ctx.lsd_enabled {
-        // Semilla 5 para scrollables (lento)
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 5);
-        Element::new(SmoothTranslate::new(
-            element,
-            (vx * ctx.lsd_intensity, vy * ctx.lsd_intensity),
-            ctx.mouse_pos,
-            false,
-            ctx.lsd_intensity,
-            ctx.lsd_enabled,
-        ))
-    } else {
-        element
-    }
+    // SIEMPRE envolvemos en SmoothTranslate para mantener el árbol de widgets estable.
+    // Si lsd_enabled es false, SmoothTranslate simplemente no aplicará efectos,
+    // pero el widget "padre" seguirá siendo el mismo para el motor de Iced.
+    let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 5);
+    Element::new(SmoothTranslate::new(
+        element,
+        (vx * ctx.lsd_intensity, vy * ctx.lsd_intensity),
+        ctx.mouse_pos,
+        !ctx.lsd_enabled, // proximity_only si está desactivado
+        ctx.lsd_intensity,
+        ctx.lsd_enabled,
+    ))
 }
 
 pub fn magic_slider<'a, M>(

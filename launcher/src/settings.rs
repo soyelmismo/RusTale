@@ -3,9 +3,12 @@ use crate::config::GameSettings;
 use crate::{theme, util};
 use iced::widget::{
     Space, button, checkbox, column, container, pick_list, row, scrollable, slider, svg,
-    text_input,
+    text_input, Id,
 };
 use iced::{Alignment, Element, Length, Size};
+
+// ID estático para el área de scroll
+const SETTINGS_SCROLL_ID: &str = "settings_scroll_area";
 
 const CHANNELS: &[&str] = &["release", "pre-release"];
 
@@ -404,7 +407,7 @@ impl SettingsState {
                 // === SOLUCION ANTI-BUCLE INFINITO ===
                 {
                     let text_content = column![
-                        container(theme::lsd_magic_text("LSD", ctx)).height(20),
+                        theme::lsd_magic_text("LSD", ctx),
                         theme::text_muted(localization.t("settings.lsd_desc"), ctx),
                     ]
                     .spacing(2)
@@ -1210,6 +1213,7 @@ impl SettingsState {
                 .style(move |t| theme::sidebar_style(&palette, t)),
             container(theme::magic_scrollable(
                 scrollable(content)
+                    .id(Id::new(SETTINGS_SCROLL_ID))
                     .style(move |t, status| theme::scrollable_style(&palette, t, status))
                     .into(),
                 ctx,
