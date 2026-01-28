@@ -90,34 +90,36 @@ pub fn get_saved_port() -> u16 {
 }
 
 #[cfg(target_os = "windows")]
-unsafe fn get_parent_pid() -> u32 {
+pub unsafe fn get_parent_pid() -> u32 {
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Process32First, Process32Next, PROCESSENTRY32, TH32CS_SNAPPROCESS,
     };
     use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 
-    let pid = GetCurrentProcessId();
-    let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if snapshot == windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
-        return 0;
-    }
+    unsafe {
+        let pid = GetCurrentProcessId();
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snapshot == windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
+            return 0;
+        }
 
-    let mut entry: PROCESSENTRY32 = std::mem::zeroed();
-    entry.dwSize = std::mem::size_of::<PROCESSENTRY32>() as u32;
+        let mut entry: PROCESSENTRY32 = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32>() as u32;
 
-    if Process32First(snapshot, &mut entry) != 0 {
-        loop {
-            if entry.th32ProcessID == pid {
-                windows_sys::Win32::Foundation::CloseHandle(snapshot);
-                return entry.th32ParentProcessID;
-            }
-            if Process32Next(snapshot, &mut entry) == 0 {
-                break;
+        if Process32First(snapshot, &mut entry) != 0 {
+            loop {
+                if entry.th32ProcessID == pid {
+                    windows_sys::Win32::Foundation::CloseHandle(snapshot);
+                    return entry.th32ParentProcessID;
+                }
+                if Process32Next(snapshot, &mut entry) == 0 {
+                    break;
+                }
             }
         }
+        windows_sys::Win32::Foundation::CloseHandle(snapshot);
+        0
     }
-    windows_sys::Win32::Foundation::CloseHandle(snapshot);
-    0
 }
 
 pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
@@ -357,9 +359,9 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
 
         // --- PARENT WATCHDOG START ---
         unsafe {
-            use windows_sys::Win32::System::Threading::{
-                OpenProcess, WaitForMultipleObjects, SYNCHRONIZE, INFINITE, WAIT_OBJECT_0
-            };
+            use windows_sys::Win32::System::Threading::{OpenProcess, WaitForMultipleObjects, INFINITE};
+            use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
+            const SYNCHRONIZE: u32 = 1048576; // 0x00100000
             use std::os::windows::io::AsRawHandle;
 
             let parent_pid = get_parent_pid();
