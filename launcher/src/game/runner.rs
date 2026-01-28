@@ -266,7 +266,7 @@ impl Recipe for Runner {
                             crate::config::OnlineFixMode::Local => {
                                 // Local configuration
                                 aurora_env_value = "local".to_string();
-                                auth_url = format!("http://127.0.0.1:{}", server_port);
+                                auth_url = format!("http://127.0.0.000001:{}", server_port);
 
                                 // Start local server
                                 let server_username = player_name.clone();
