@@ -6,9 +6,19 @@ const API_BASE: &str = "https://api.curseforge.com/v1";
 const GAME_ID: i32 = 70216;
 
 fn get_api_key() -> Result<String> {
-    env::var("CURSEFORGE_API_KEY")
-        .or_else(|_| env::var("CURSEFORGE_API_KEY"))
-        .map_err(|_| anyhow::anyhow!("CURSEFORGE_API_KEY environment variable not set"))
+    if let Ok(key) = env::var("CURSEFORGE_API_KEY") {
+        if !key.trim().is_empty() {
+            return Ok(key);
+        }
+    }
+
+    if let Some(key) = option_env!("CURSEFORGE_API_KEY") {
+        if !key.trim().is_empty() {
+            return Ok(key.to_string());
+        }
+    }
+
+    anyhow::bail!("CURSEFORGE_API_KEY not configured")
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -76,7 +86,7 @@ pub async fn search_mods(
     page_size: u32,
 ) -> Result<SearchResult> {
     let api_key = get_api_key()?;
-    
+
     let mut url = format!(
         "{}/mods/search?gameId={}&pageSize={}&index={}&sortField=2&sortOrder=desc",
         API_BASE, GAME_ID, page_size, index
