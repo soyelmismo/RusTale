@@ -33,7 +33,7 @@ pub async fn fetch_remote_tokens(
     player_name: &str,
     player_uuid: &str,
 ) -> Result<AuthTokens> {
-    // Usamos el endpoint child que es el estándar para launchers
+    // Usamos el endpoint child que es el estandar para launchers
     let url = format!("{}/game-session/child", auth_server_url);
 
     println!("[Auth] Fetching tokens from: {}", url);

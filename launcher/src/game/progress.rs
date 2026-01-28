@@ -46,8 +46,8 @@ impl ProgressTracker {
             accumulated_weight += step.weight;
         }
 
-        // Si la fase reportada no está en nuestra lista (ej. un paso nuevo no registrado),
-        // devolvemos un cálculo seguro o el ultimo valor conocido.
+        // Si la fase reportada no esta en nuestra lista (ej. un paso nuevo no registrado),
+        // devolvemos un calculo seguro o el ultimo valor conocido.
         if !found {
             // Fallback: si no conocemos el paso, asumimos 0% de progreso extra
             // o podrias retornar sub_progress si quieres comportamiento por defecto.

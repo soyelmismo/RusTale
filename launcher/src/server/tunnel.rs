@@ -77,7 +77,7 @@ pub async fn start_playit(
 
     let mut child = Command::new(&bin_path)
         .arg("--stdout")
-        .arg("--secret-path")
+        .arg("--secret_path")
         .arg(playit_dir.join("secret.json")) // Guardar secreto en la misma carpeta tools/playit
         .current_dir(&playit_dir)
         .stdout(Stdio::piped())

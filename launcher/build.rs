@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
-    // Compilar recursos de Windows (icono y versión)
+    // Compilar recursos de Windows (icono y version)
     #[cfg(target_os = "windows")]
     {
         let mut res = winres::WindowsResource::new();
@@ -17,7 +17,7 @@ fn main() {
     let root_dir = PathBuf::from(manifest_dir).parent().unwrap().to_path_buf();
     let aurora_dir = root_dir.join("aurora");
 
-    // Detectar extensión segun sistema operativo
+    // Detectar extension segun sistema operativo
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
     let (lib_name, ext) = match target_os.as_str() {
         "windows" => ("aurora", "dll"),
@@ -29,7 +29,7 @@ fn main() {
     println!("cargo:rerun-if-changed=../aurora/src/lib.rs");
     println!("cargo:rerun-if-changed=../aurora/Cargo.toml");
 
-    // Definir carpeta de compilación separada para evitar DEADLOCK
+    // Definir carpeta de compilacion separada para evitar DEADLOCK
     // Usaremos target/aurora_build en lugar de target/
     let aurora_target_dir = root_dir.join("target").join("aurora_build");
 
@@ -51,7 +51,7 @@ fn main() {
         panic!("Aurora library build failed!");
     }
 
-    // Ruta donde quedó el DLL compilado (dentro de aurora_build)
+    // Ruta donde quedo el DLL compilado (dentro de aurora_build)
     // Nota: Cargo siempre pone los artefactos en 'debug' o 'release' dentro del target dir
     let lib_out_dir = aurora_target_dir.join(&profile);
     let lib_path = lib_out_dir.join(format!("{}.{}", lib_name, ext));

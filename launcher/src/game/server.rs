@@ -350,7 +350,7 @@ pub async fn start_server(
         .and(state_filter.clone())
         .then(move |body: SessionRequest, state| handle_session_new(port, body, state));
 
-    // 9. POST /game-session/refresh (Mantener sesión viva)
+    // 9. POST /game-session/refresh (Mantener sesion viva)
     let session_refresh = warp::path!("game-session" / "refresh")
         .and(warp::post())
         .and(warp::body::json())
@@ -363,7 +363,7 @@ pub async fn start_server(
         .map(|| warp::reply::with_status("", warp::http::StatusCode::NO_CONTENT));
 
     // 11. POST /game-session/authorize (Paso 1 del Join Server: Cliente pide permiso)
-    // También mapea /server-join/auth-grant que a veces usa el cliente antiguo
+    // Tambien mapea /server-join/auth-grant que a veces usa el cliente antiguo
     let session_authorize = warp::path!("game-session" / "authorize")
         .or(warp::path!("server-join" / "auth-grant"))
         .unify()
@@ -373,7 +373,7 @@ pub async fn start_server(
         .then(move |body: AuthorizeRequest, state| handle_session_authorize(port, body, state));
 
     // 12. POST /game-session/exchange (Paso 2 del Join Server: Servidor valida permiso)
-    // También mapea /server-join/auth-token
+    // Tambien mapea /server-join/auth-token
     let session_exchange = warp::path!("game-session" / "exchange")
         .or(warp::path!("server-join" / "auth-token"))
         .unify()
@@ -474,7 +474,7 @@ pub async fn start_server(
     {
         match std::net::TcpListener::bind(addr) {
             Ok(_) => {
-                // El puerto está libre. El listener se dropea aqui, liberando el puerto.
+                // El puerto esta libre. El listener se dropea aqui, liberando el puerto.
             }
             Err(_) => {
                 eprintln!("Port {} is already in use.", port);
@@ -758,7 +758,7 @@ async fn handle_session_new(
 ) -> impl warp::Reply {
     let state = state.lock().await;
 
-    // USAMOS la variable 'body' imprimiéndola. Rust ya no se quejará.
+    // USAMOS la variable 'body' imprimiendola. Rust ya no se quejara.
     println!(">>> [SESSION NEW] Solicitud recibida");
     println!("    Scopes solicitados: {:?}", body.scopes);
     println!("    Extra fields: {:?}", body.extra);
@@ -853,13 +853,13 @@ async fn handle_session_authorize(
 ) -> impl warp::Reply {
     let state = state.lock().await;
 
-    // Aqui vemos qué servidor está intentando conectarse
+    // Aqui vemos que servidor esta intentando conectarse
     println!(">>> [SESSION AUTHORIZE] Un servidor pide permiso");
     println!("    Server Audience ID: {:?}", body.audience);
     println!("    Scopes: {:?}", body.scopes);
     println!("    Extra fields: {:?}", body.extra);
 
-    // Simulamos validación del token de identidad (en prod habria que verificar firma)
+    // Simulamos validacion del token de identidad (en prod habria que verificar firma)
     if body.identity_token.is_empty() {
         println!("    ! Advertencia: Identity Token vacio");
     }

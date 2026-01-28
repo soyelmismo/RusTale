@@ -32,7 +32,7 @@ pub fn get_jwks() -> JwkSet {
     let verifying_key = lock.verifying_key();
     let public_bytes = verifying_key.to_bytes();
 
-    // Codificación Base64 URL-Safe sin Padding (Requisito RFC 8037)
+    // Codificacion Base64 URL-Safe sin Padding (Requisito RFC 8037)
     let x_b64 = URL_SAFE_NO_PAD.encode(public_bytes);
 
     JwkSet {

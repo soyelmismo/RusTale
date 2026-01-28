@@ -1,8 +1,8 @@
 use crate::config::GameSettings;
 use crate::game::LauncherStatus;
 use crate::{Message, theme, util};
-use iced::widget::{ProgressBar, Space, button, column, container, row, svg, text};
-use iced::{Alignment, Element, Font, Length};
+use iced::widget::{ProgressBar, Space, button, column, container, row, svg};
+use iced::{Alignment, Element, Length};
 
 pub fn view<'a>(
     status: &'a LauncherStatus,
@@ -33,10 +33,10 @@ pub fn view<'a>(
     };
 
     let is_long_text = play_button_text.len() > 9;
-    let (font_size, icon_size, spacing_val) = if is_long_text {
-        (13, 16.0, 6)
+    let (icon_size, spacing_val) = if is_long_text {
+        (16.0, 6)
     } else {
-        (16, 20.0, 10)
+        (20.0, 10)
     };
 
     let version_display = if settings.game_version == 0 {
@@ -50,31 +50,15 @@ pub fn view<'a>(
 
     let info_section = column![
         row![
-            theme::text(
-                text(localization.t("launcher.info.channel"))
-                    .size(10)
-                    .color(palette.text_secondary),
-                ctx
-            ),
+            theme::text_micro(localization.t("launcher.info.channel"), ctx),
             Space::new().width(Length::Fill),
-            theme::text(
-                text(&settings.channel).size(12).color(palette.text_primary),
-                ctx
-            )
+            theme::text_small(&settings.channel, ctx)
         ]
         .width(Length::Fill),
         row![
-            theme::text(
-                text(localization.t("launcher.info.version"))
-                    .size(10)
-                    .color(palette.text_secondary),
-                ctx
-            ),
+            theme::text_micro(localization.t("launcher.info.version"), ctx),
             Space::new().width(Length::Fill),
-            theme::text(
-                text(version_display).size(12).color(palette.text_primary),
-                ctx
-            )
+            theme::text_small(version_display, ctx)
         ]
         .width(Length::Fill),
     ]
@@ -90,13 +74,7 @@ pub fn view<'a>(
                         .style(move |t, s| theme::svg_accent(&palette, t, s)),
                     ctx
                 ),
-                theme::text(
-                    text(play_button_text)
-                        .size(font_size + 4)
-                        .font(Font::MONOSPACE)
-                        .align_y(iced::alignment::Vertical::Center),
-                    ctx
-                )
+                theme::text_title(play_button_text, ctx)
             ]
             .spacing(spacing_val)
             .align_y(Alignment::Center),
@@ -134,7 +112,7 @@ pub fn view<'a>(
             svg(util::icons::icon(util::icons::SETTINGS))
                 .width(18)
                 .height(18)
-                .style(move |t, s| theme::svg_accent(&palette, t, s)),
+                .style(move |t, s| theme::svg_accent(&palette, t, s))
         )
         .width(Length::Fill)
         .height(Length::Fill)
@@ -156,7 +134,7 @@ pub fn view<'a>(
             svg(util::icons::icon(util::icons::PUZZLE))
                 .width(18)
                 .height(18)
-                .style(move |t, s| theme::svg_accent(&palette, t, s)),
+                .style(move |t, s| theme::svg_accent(&palette, t, s))
         )
         .width(Length::Fill)
         .height(Length::Fill)
@@ -188,8 +166,7 @@ pub fn view<'a>(
     .height(90);
 
     // Aplicar LSD al status text
-    let status_text_widget =
-        theme::text(text(status_text).size(14).color(palette.text_primary), ctx);
+    let status_text_widget = theme::text_body(status_text, ctx);
 
     column![
         info_section,
@@ -197,23 +174,13 @@ pub fn view<'a>(
             column![
                 column![
                     row![
-                        theme::text(
-                            text(if *status == LauncherStatus::Migrating {
-                                localization.t("launcher.status.migrating")
-                            } else {
-                                localization.t("launcher.status.general")
-                            })
-                            .size(11)
-                            .color(palette.text_secondary),
-                            ctx
-                        ),
+                        theme::text_caption(if *status == LauncherStatus::Migrating {
+                            localization.t("launcher.status.migrating")
+                        } else {
+                            localization.t("launcher.status.general")
+                        }, ctx),
                         Space::new().width(Length::Fill),
-                        theme::text(
-                            text(format!("{:.0}%", download_progress))
-                                .size(11)
-                                .color(palette.text_primary),
-                            ctx
-                        )
+                        theme::text_caption(format!("{:.0}%", download_progress), ctx)
                     ],
                     container(
                         ProgressBar::new(0.0..=100.0, download_progress)
@@ -230,19 +197,9 @@ pub fn view<'a>(
                     Element::from(
                         column![
                             row![
-                                theme::text(
-                                    text(localization.t("launcher.status.step"))
-                                        .size(10)
-                                        .color(palette.text_secondary),
-                                    ctx
-                                ),
+                                theme::text_micro(localization.t("launcher.status.step"), ctx),
                                 Space::new().width(Length::Fill),
-                                theme::text(
-                                    text(format!("{:.0}%", sub_progress))
-                                        .size(10)
-                                        .color(palette.text_secondary),
-                                    ctx
-                                )
+                                theme::text_micro(format!("{:.0}%", sub_progress), ctx)
                             ],
                             container(
                                 ProgressBar::new(0.0..=100.0, sub_progress)

@@ -30,7 +30,7 @@ impl Localization {
             .expect("CRITICAL: en-US.json missing inside binary!");
 
         Self {
-            current_data: fallback_json.clone(), // Empezamos en inglés
+            current_data: fallback_json.clone(), // Empezamos en ingles
             fallback_data: fallback_json,
             available_languages: Vec::new(),
         }

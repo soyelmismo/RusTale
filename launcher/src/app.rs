@@ -4,7 +4,7 @@ use tokio::fs;
 
 use crate::config;
 
-/// Inicializa la aplicación: crea directorios necesarios y realiza limpiezas previas.
+/// Inicializa la aplicacion: crea directorios necesarios y realiza limpiezas previas.
 /// Equivalente a startup() y env.CreateFolders() en Go.
 pub async fn initialize() -> Result<()> {
     let base_dir = config::get_app_dir();
@@ -48,7 +48,7 @@ async fn cleanup_launcher(base_dir: &PathBuf) {
     let jre_cache = base_dir.join("cache").join("jre");
     cleanup_partials(&jre_cache).await;
 
-    // --- NUEVO: Limpiar posibles DLLs inyectados huérfanos (Linux) ---
+    // --- NUEVO: Limpiar posibles DLLs inyectados huerfanos (Linux) ---
     #[cfg(target_os = "linux")]
     {
         let natives_dir = base_dir.join("cache").join("natives");
@@ -58,12 +58,12 @@ async fn cleanup_launcher(base_dir: &PathBuf) {
         }
     }
 
-    // Rotación básica de logs (Placeholder para lógica más compleja)
+    // Rotacion basica de logs (Placeholder para logica mas compleja)
     let logs_dir = base_dir.join("logs");
-    cleanup_old_files(&logs_dir, 7).await; // Borrar logs de más de 7 dias
+    cleanup_old_files(&logs_dir, 7).await; // Borrar logs de mas de 7 dias
 }
 
-// Función auxiliar nueva
+// Funcion auxiliar nueva
 async fn cleanup_partials(dir: &PathBuf) {
     if !dir.exists() {
         return;

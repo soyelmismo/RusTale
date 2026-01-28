@@ -1,12 +1,13 @@
 use crate::config::OnlineFixMode;
 use crate::server::config::ServerConfig;
+use crate::server::assets::{find_best_client_version, validate_client_version, generate_server_args_with_direct_assets};
 use anyhow::{Context, Result};
 use rand::Rng;
 use std::path::PathBuf;
 use tokio::process::Command;
 use tokio::sync::mpsc;
 
-pub async fn run_server_flow(config: ServerConfig) -> Result<()> {
+pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     println!("--- RusTale Dedicated Server ---");
     println!(
         "Mode: {} | Port: 5520 | Version: {}",
@@ -118,7 +119,7 @@ pub async fn run_server_flow(config: ServerConfig) -> Result<()> {
     let install_dir = root_dir.join(&config.branch).join(&version_dir_name);
 
     let client = reqwest::Client::builder()
-        .user_agent("RusTale-Server/0.0.1")
+        .user_agent(format!("RusTale-Server/{}", env!("CARGO_PKG_VERSION")))
         .build()?;
 
     // 2. Tools (JRE, Butler)
@@ -157,7 +158,7 @@ pub async fn run_server_flow(config: ServerConfig) -> Result<()> {
     let _butler_path =
         crate::game::patcher::install_butler(&client, &root_dir, &callback, None).await?;
 
-    // 3. Resolver Versión y Descargar Servidor
+    // 3. Resolver Version y Descargar Servidor
     println!("[2/5] Checking Game Server files...");
 
     let target_ver_num = if config.game_version == "latest" {
@@ -176,22 +177,43 @@ pub async fn run_server_flow(config: ServerConfig) -> Result<()> {
         println!("Checking for local game files in main installation...");
         let mut source_candidate = None;
 
+        // Find the best matching client version
+        let best_version = match find_best_client_version(&main_app_dir, &config.branch, &config.game_version.to_string()) {
+            Ok(version) => {
+                println!("Found matching client version: {}", version);
+                version
+            }
+            Err(e) => {
+                println!("Warning: {}", e);
+                // Fallback to original logic
+                let target_ver_num = if config.game_version == "latest" {
+                    crate::game::patcher::find_latest_version(&client, &config.branch).await?
+                } else {
+                    config
+                        .game_version
+                        .parse::<i32>()
+                        .context("Invalid version number")?
+                };
+                target_ver_num.to_string()
+            }
+        };
+
         // Candidate 1: Specific version folder
         let specific = main_app_dir
             .join(&config.branch)
-            .join(target_ver_num.to_string());
+            .join(&best_version);
         if specific.exists() && specific.join("Server").exists() {
             source_candidate = Some(specific);
         }
 
         // Candidate 2: Latest folder (check version.json)
-        if source_candidate.is_none() {
+        if source_candidate.is_none() && best_version == "latest" {
             let latest = main_app_dir.join(&config.branch).join("latest");
             if latest.exists() {
                 if let Ok(ver) =
                     crate::game::install::get_local_version(&main_app_dir, &config.branch).await
                 {
-                    if ver == target_ver_num {
+                    if ver.to_string() == config.game_version {
                         source_candidate = Some(latest);
                     }
                 }
@@ -200,22 +222,37 @@ pub async fn run_server_flow(config: ServerConfig) -> Result<()> {
 
         if let Some(src) = source_candidate {
             println!(
-                "Found matching version {} at {:?}. Copying files...",
-                target_ver_num, src
+                "Found matching version {} at {:?}. Processing files...",
+                best_version, src
             );
             let _ = tokio::fs::create_dir_all(&install_dir).await;
 
-            // Copy Assets.zip
+            // Handle Assets.zip based on use_direct_assets setting
             let src_assets = src.join("Assets.zip");
-            let dst_assets = install_dir.join("Assets.zip");
-            if src_assets.exists() && !dst_assets.exists() {
-                println!("Copying Assets.zip (~3GB)...");
-                if let Err(e) = tokio::fs::copy(&src_assets, &dst_assets).await {
-                    eprintln!("Failed to copy Assets.zip: {}", e);
+            if config.use_direct_assets {
+                // Validate client version has required files
+                if let Err(e) = validate_client_version(&main_app_dir, &config.branch, &best_version) {
+                    eprintln!("Client validation failed: {}", e);
+                } else {
+                    println!("Using assets directly from client installation (no copying)");
+                    // Update server args to use direct asset path
+                    config.server_args = generate_server_args_with_direct_assets(
+                        &config.server_args,
+                        &src_assets
+                    );
+                }
+            } else {
+                // Original behavior: copy Assets.zip
+                let dst_assets = install_dir.join("Assets.zip");
+                if src_assets.exists() && !dst_assets.exists() {
+                    println!("Copying Assets.zip (~3GB)...");
+                    if let Err(e) = tokio::fs::copy(&src_assets, &dst_assets).await {
+                        eprintln!("Failed to copy Assets.zip: {}", e);
+                    }
                 }
             }
 
-            // Copy Server folder
+            // Copy Server folder (always needed)
             let src_server = src.join("Server");
             let dst_server = install_dir.join("Server");
             if src_server.exists() && !dst_server.exists() {
@@ -309,7 +346,7 @@ pub async fn run_server_flow(config: ServerConfig) -> Result<()> {
         println!("Using existing patched JAR: {}", patched_jar_name);
     }
 
-    // 5. Preparar Entorno de Ejecución
+    // 5. Preparar Entorno de Ejecucion
     println!("[4/5] Preparing Runtime...");
 
     let java_exec = crate::java::get_java_exec(&root_dir)?;
@@ -371,6 +408,8 @@ pub async fn run_server_flow(config: ServerConfig) -> Result<()> {
     cmd.stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit())
         .stdin(std::process::Stdio::inherit());
+
+    cmd.env("RUSTALE_IS_SERVER", "1");
 
     cmd.kill_on_drop(true);
 

@@ -4,7 +4,7 @@ use crate::game::mods::ModInfo;
 use crate::game::zip_mods::PatchManifest;
 use crate::{theme, util};
 use iced::widget::{
-    Space, button, column, container, image, row, scrollable, svg, text, text_input,
+    Space, button, column, container, image, row, scrollable, svg, text_input,
 };
 use iced::{Alignment, Color, ContentFit, Element, Length, Renderer, Size, Task, Theme};
 use std::collections::{HashMap, HashSet};
@@ -508,7 +508,7 @@ impl ModsState {
         let ts = row![
             theme::magic_button(
                 tab_btn(
-                    &localization.t("mods.installed"),
+                    localization.t("mods.installed"),
                     self.current_tab == ModTab::Installed,
                     is_c,
                     ctx
@@ -519,7 +519,7 @@ impl ModsState {
             ),
             theme::magic_button(
                 tab_btn(
-                    &localization.t("mods.browse"),
+                    localization.t("mods.browse"),
                     self.current_tab == ModTab::Browse,
                     is_c,
                     ctx
@@ -561,7 +561,7 @@ impl ModsState {
         );
 
         theme::modal_shell(
-            &localization.t("mods.title").to_uppercase(),
+            localization.t("mods.title").to_uppercase(),
             view_content,
             None,
             ModsMessage::Close,
@@ -579,7 +579,7 @@ impl ModsState {
     ) -> Element<'a, ModsMessage, Theme, Renderer> {
         let palette = ctx.palette;
         if self.installed_mods.is_empty() && self.patch_mods.is_empty() {
-            return container(theme::text_body(&localization.t("mods.no_mods"), ctx))
+            return container(theme::text_body(localization.t("mods.no_mods"), ctx))
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .center_x(Length::Fill)
@@ -592,7 +592,7 @@ impl ModsState {
 
         if !self.patch_mods.is_empty() {
             let h = row![
-                theme::text_title(&localization.t("mods.core_patches"), ctx),
+                theme::text_title(localization.t("mods.core_patches"), ctx),
                 Space::new().width(Length::Fill),
                 theme::magic_button(
                     button(
@@ -604,7 +604,7 @@ impl ModsState {
                                     .style(move |t: &Theme, s| theme::svg_accent(&palette, t, s)),
                                 ctx
                             ),
-                            theme::text_caption(&localization.t("mods.open_folder"), ctx)
+                            theme::text_caption(localization.t("mods.open_folder"), ctx)
                         ]
                         .spacing(5)
                         .align_y(Alignment::Center)
@@ -626,7 +626,7 @@ impl ModsState {
         }
 
         let hj = row![
-            theme::text_title(&localization.t("mods.jar_mods"), ctx),
+            theme::text_title(localization.t("mods.jar_mods"), ctx),
             Space::new().width(Length::Fill),
             theme::magic_button(
                 button(
@@ -638,7 +638,7 @@ impl ModsState {
                                 .style(move |t: &Theme, s| theme::svg_accent(&palette, t, s)),
                             ctx
                         ),
-                        theme::text_caption(&localization.t("mods.open_folder"), ctx)
+                        theme::text_caption(localization.t("mods.open_folder"), ctx)
                     ]
                     .spacing(5)
                     .align_y(Alignment::Center)
@@ -659,7 +659,7 @@ impl ModsState {
             }
         } else if self.patch_mods.is_empty() {
             ml = ml.push(theme::text_caption(
-                &localization.t("mods.no_mods_jar"),
+                localization.t("mods.no_mods_jar"),
                 ctx,
             ));
         }
@@ -684,7 +684,7 @@ impl ModsState {
         let palette = ctx.palette;
         let sb = row![
             theme::magic_text_input(
-                text_input(&localization.t("mods.search"), &self.search_query)
+                text_input(localization.t("mods.search"), &self.search_query)
                     .on_input(ModsMessage::SearchChanged)
                     .on_submit(ModsMessage::SearchSubmit)
                     .padding(10)
@@ -694,7 +694,7 @@ impl ModsState {
                 ctx,
             ),
             theme::magic_button(
-                button(theme::text_body(&localization.t("mods.browse"), ctx))
+                button(theme::text_body(localization.t("mods.browse"), ctx))
                     .on_press(ModsMessage::SearchSubmit)
                     .style(move |t: &Theme, s| theme::primary_button_style(&palette, t, s))
                     .padding(10)
@@ -704,17 +704,14 @@ impl ModsState {
         ]
         .spacing(10);
         let c: Element<'a, ModsMessage, Theme, Renderer> = if self.loading {
-            container(theme::text_body(&localization.t("mods.loading"), ctx))
+            container(theme::text_body(localization.t("mods.loading"), ctx))
                 .center_x(Length::Fill)
                 .center_y(Length::Fill)
                 .height(Length::Fill)
                 .style(move |t| theme::container_style_transparent(&palette, t))
                 .into()
         } else if let Some(err) = &self.error {
-            container(theme::text(
-                text(err).color(Color::from_rgb(1.0, 0.4, 0.4)),
-                ctx,
-            ))
+            container(theme::text_body(err, ctx))
             .center_x(Length::Fill)
             .style(move |t| theme::container_style_transparent(&palette, t))
             .into()
@@ -741,7 +738,7 @@ impl ModsState {
             )
             .into()
         };
-        let pr = button(theme::text_body(&localization.t("mods.prev"), ctx))
+        let pr = button(theme::text_body(localization.t("mods.prev"), ctx))
             .style(move |t: &Theme, s| theme::secondary_button_style(&palette, t, s))
             .padding(if is_c { 6 } else { 10 });
         let pr = if self.current_page > 0 {
@@ -759,7 +756,7 @@ impl ModsState {
                 ctx
             ),
             theme::magic_button(
-                button(theme::text_body(&localization.t("mods.next"), ctx))
+                button(theme::text_body(localization.t("mods.next"), ctx))
                     .on_press(ModsMessage::NextPage)
                     .style(move |t: &Theme, s| theme::secondary_button_style(&palette, t, s))
                     .padding(if is_c { 6 } else { 10 })
@@ -786,15 +783,15 @@ impl ModsState {
 
         let ab = if isi {
             button(theme::text_caption(
-                &localization.t("launcher.status.downloading"),
+                localization.t("launcher.status.downloading"),
                 ctx,
             ))
             .style(move |t: &Theme, s| theme::ghost_button_style(&ctx.palette, t, s))
         } else if isin {
-            button(theme::text_caption(&localization.t("mods.installed"), ctx))
+            button(theme::text_caption(localization.t("mods.installed"), ctx))
                 .style(move |t: &Theme, s| theme::success_button_style(&ctx.palette, t, s))
         } else {
-            button(theme::text_caption(&localization.t("mods.install"), ctx))
+            button(theme::text_caption(localization.t("mods.install"), ctx))
                 .on_press(ModsMessage::InstallMod(cf.clone()))
                 .style(move |t: &Theme, s| theme::primary_button_style(&ctx.palette, t, s))
         }
@@ -826,15 +823,11 @@ impl ModsState {
                     column![
                         theme::text_body(&cf.name, ctx),
                         theme::text_caption(&cf.summary, ctx),
-                        theme::text(
-                            text(format!(
-                                "{}: {:.0}",
-                                localization.t("mods.downloads"),
-                                cf.download_count
-                            ))
-                            .size(10),
-                            ctx,
-                        )
+                        theme::text_micro(format!(
+                            "{}: {:.0}",
+                            localization.t("mods.downloads"),
+                            cf.download_count
+                        ), ctx)
                     ]
                     .spacing(4)
                     .width(Length::Fill)
@@ -857,15 +850,10 @@ pub fn mod_row<'a>(
     ctx: theme::UIContext,
 ) -> Element<'a, ModsMessage, Theme, Renderer> {
     let palette = ctx.palette;
-    let sc = if mi.enabled {
-        theme::ACCENT_GREEN
-    } else {
-        palette.text_secondary
-    };
 
     let tb = if mi.enabled {
         theme::magic_button(
-            button(theme::text_caption(&localization.t("mods.disable"), ctx))
+            button(theme::text_caption(localization.t("mods.disable"), ctx))
                 .style(move |t: &Theme, s| theme::secondary_button_style(&palette, t, s))
                 .on_press(ModsMessage::ToggleLocal(mi.clone()))
                 .into(),
@@ -873,7 +861,7 @@ pub fn mod_row<'a>(
         )
     } else {
         theme::magic_button(
-            button(theme::text_caption(&localization.t("mods.enable"), ctx))
+            button(theme::text_caption(localization.t("mods.enable"), ctx))
                 .style(move |t: &Theme, s| theme::primary_button_style(&palette, t, s))
                 .on_press(ModsMessage::ToggleLocal(mi.clone()))
                 .into(),
@@ -903,16 +891,11 @@ pub fn mod_row<'a>(
             row![
                 theme::text_body(&mi.name, ctx),
                 Space::new().width(10),
-                theme::text(
-                    text(if mi.enabled {
-                        localization.t("mods.active")
-                    } else {
-                        localization.t("mods.disabled")
-                    })
-                    .size(12)
-                    .color(sc),
-                    ctx,
-                ),
+                theme::text_small(if mi.enabled {
+                    localization.t("mods.active")
+                } else {
+                    localization.t("mods.disabled")
+                }, ctx),
             ]
             .align_y(Alignment::Center)
             .into(),
@@ -955,15 +938,10 @@ fn patch_row<'a>(
     ctx: theme::UIContext,
 ) -> Element<'a, ModsMessage, Theme, Renderer> {
     let palette = ctx.palette;
-    let sc = if p.enabled {
-        theme::ACCENT_GREEN
-    } else {
-        palette.text_secondary
-    };
 
     let tb = if p.enabled {
         theme::magic_button(
-            button(theme::text_caption(&localization.t("mods.disable"), ctx))
+            button(theme::text_caption(localization.t("mods.disable"), ctx))
                 .style(move |t: &Theme, s| theme::secondary_button_style(&palette, t, s))
                 .on_press(ModsMessage::ToggleZipPatch(p.mod_id.clone(), false))
                 .into(),
@@ -971,7 +949,7 @@ fn patch_row<'a>(
         )
     } else {
         theme::magic_button(
-            button(theme::text_caption(&localization.t("mods.enable"), ctx))
+            button(theme::text_caption(localization.t("mods.enable"), ctx))
                 .style(move |t: &Theme, s| theme::primary_button_style(&palette, t, s))
                 .on_press(ModsMessage::ToggleZipPatch(p.mod_id.clone(), true))
                 .into(),
@@ -1002,20 +980,23 @@ fn patch_row<'a>(
     theme::magic_container(
         theme::list_item_row(
             row![
-                theme::text(text("📦").size(20), ctx),
+                theme::svg(
+                    svg(util::icons::icon(util::icons::ZIP))
+                        .width(20)
+                        .height(20)
+                        .style(|_, _| iced::widget::svg::Style {
+                            color: Some(Color::BLACK),
+                        }),
+                    ctx,
+                ),
                 column![
                     theme::text_body(&p.mod_name, ctx),
                     row![
-                        theme::text(
-                            text(if p.enabled {
-                                localization.t("mods.active")
-                            } else {
-                                localization.t("mods.disabled")
-                            })
-                            .size(10)
-                            .color(sc),
-                            ctx,
-                        ),
+                        theme::text_micro(if p.enabled {
+                            localization.t("mods.active")
+                        } else {
+                            localization.t("mods.disabled")
+                        }, ctx),
                         theme::text_body("|", ctx),
                         theme::text_caption(&p.install_date.format("%Y-%m-%d").to_string(), ctx),
                     ]

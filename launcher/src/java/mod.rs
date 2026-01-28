@@ -157,7 +157,7 @@ pub fn get_java_exec(base_dir: &PathBuf) -> Result<String> {
         .context("Invalid Java path encoding")
 }
 
-fn is_jre_installed_at(jre_dir: &PathBuf) -> bool {
+pub fn is_jre_installed_at(jre_dir: &PathBuf) -> bool {
     // We already have the dir, but we can't easily use GamePaths here
     // without potentially changing the logic (is_jre_installed_at is called with latest_dir).
     // However, if we want to use the unified paths:

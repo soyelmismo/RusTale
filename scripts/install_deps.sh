@@ -19,7 +19,7 @@ if [[ "$OS" == *"Ubuntu"* ]] || [[ "$OS" == *"Debian"* ]] || [[ "$OS" == *"Pop"*
     
 elif [[ "$OS" == *"Fedora"* ]] || [[ "$OS" == *"CentOS"* ]] || [[ "$OS" == *"Red Hat"* ]]; then
     echo "Installing dependencies for RHEL/Fedora-based system..."
-    # Intenta usar dnf, si no está disponible usa yum
+    # Intenta usar dnf, si no esta disponible usa yum
     if command -v dnf &> /dev/null; then
         sudo dnf install -y libxdo-devel
     else

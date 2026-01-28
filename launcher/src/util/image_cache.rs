@@ -5,23 +5,23 @@ use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
-/// Intenta cargar la imagen de forma SINCRONA (bloqueante) si existe en caché.
+/// Intenta cargar la imagen de forma SINCRONA (bloqueante) si existe en cache.
 /// Ideal para el background en el arranque, evitando el retraso de 1 segundo.
-/// Retorna `Some(Handle)` si la imagen está en caché, `None` si no existe.
+/// Retorna `Some(Handle)` si la imagen esta en cache, `None` si no existe.
 pub fn load_image_sync_if_exists(url: &str) -> Option<image::Handle> {
     // 1. Calcular hash sincronamente
     let mut hasher = Sha256::new();
     hasher.update(url.as_bytes());
     let hash = hex::encode(hasher.finalize());
 
-    // 2. Resolver ruta de caché (duplicamos lógica para evitar async)
+    // 2. Resolver ruta de cache (duplicamos logica para evitar async)
     let base_dir = crate::config::get_app_dir();
     let file_path = base_dir
         .join("cache")
         .join("images")
         .join(format!("{}.jpg", hash));
 
-    // 3. Si existe, leer inmediatamente con std::fs (bloqueante pero rápido)
+    // 3. Si existe, leer inmediatamente con std::fs (bloqueante pero rapido)
     if file_path.exists() {
         if let Ok(data) = std::fs::read(&file_path) {
             return Some(image::Handle::from_bytes(data));
@@ -30,7 +30,7 @@ pub fn load_image_sync_if_exists(url: &str) -> Option<image::Handle> {
     None
 }
 
-/// Carga una imagen desde caché o descarga y guarda en caché usando el cliente compartido
+/// Carga una imagen desde cache o descarga y guarda en cache usando el cliente compartido
 pub async fn load_image(client: &Client, url: &str) -> Result<image::Handle> {
     let file_path = get_image_path(client, url, "images").await?;
 
@@ -44,12 +44,12 @@ pub async fn load_image(client: &Client, url: &str) -> Result<image::Handle> {
 
 /// Carga una imagen de noticia especificamente con formato correcto
 pub async fn load_news_image(client: &Client, s3_key: &str) -> Result<image::Handle> {
-    // URL especifica para imágenes de noticias de Hytale
+    // URL especifica para imagenes de noticias de Hytale
     let url = format!("https://cdn.hytale.com/variants/blog_thumb_{}", s3_key);
     load_image(client, &url).await
 }
 
-/// Obtiene la ruta de la imagen en caché (descarga si no existe)
+/// Obtiene la ruta de la imagen en cache (descarga si no existe)
 async fn get_image_path(client: &Client, url: &str, cache_subdir: &str) -> Result<PathBuf> {
     let cache_dir = crate::config::get_cache_dir(cache_subdir).await;
 

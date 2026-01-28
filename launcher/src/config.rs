@@ -98,7 +98,7 @@ impl ProfilesConfig {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash, Default)]
 pub enum OnlineFixMode {
     #[default]
-    Local, // Emulador Local (tu código server.rs)
+    Local, // Emulador Local (tu codigo server.rs)
     Sanasol, // Servidor externo
 }
 
@@ -323,23 +323,23 @@ pub fn save_bootstrap_path(new_data_dir: &PathBuf) -> anyhow::Result<()> {
 
 // --- LOAD/SAVE LOGIC (ACTUALIZADA) ---
 
-// CAMBIO 3: Lógica de actualización automática de esquema para Profiles
+// CAMBIO 3: Logica de actualizacion automatica de esquema para Profiles
 pub async fn load_profiles() -> ProfilesConfig {
     let path = get_path("profiles.toml");
     let config = match fs::read_to_string(&path).await {
         Ok(content) => {
             // Intentamos parsear. Gracias a #[serde(default)], los campos faltantes se rellenan.
-            // Si el parseo falla catastróficamente (sintaxis inválida), usamos default.
+            // Si el parseo falla catastroficamente (sintaxis invalida), usamos default.
             toml::from_str(&content).unwrap_or_default()
         }
         Err(_) => ProfilesConfig::default(),
     };
 
     // ALGORITMO DE LIMPIEZA: Guardamos inmediatamente.
-    // (Deshabilitado a petición del usuario para evitar reescrituras innecesarias al inicio)
+    // (Deshabilitado a peticion del usuario para evitar reescrituras innecesarias al inicio)
     // 1. Si habia claves obsoletas en el archivo, se pierden al leer en el struct y no se escriben de nuevo.
     // 2. Si faltaban claves nuevas, el struct las tiene por default y se escriben ahora.
-    // 3. Los valores existentes válidos se mantienen.
+    // 3. Los valores existentes validos se mantienen.
     // let _ = save_profiles(&config).await;
 
     config
@@ -349,7 +349,7 @@ pub async fn save_profiles(cfg: &ProfilesConfig) -> anyhow::Result<()> {
     save_file(cfg, "profiles.toml").await
 }
 
-// CAMBIO 4: Lógica de actualización automática de esquema para Settings
+// CAMBIO 4: Logica de actualizacion automatica de esquema para Settings
 pub async fn load_settings() -> GameSettings {
     load_settings_sync()
 }
@@ -361,7 +361,7 @@ pub fn load_settings_sync() -> GameSettings {
         Err(_) => GameSettings::default(),
     };
 
-    // Validación extra (opcional): Asegurar que los valores leidos tienen sentido
+    // Validacion extra (opcional): Asegurar que los valores leidos tienen sentido
     let mut safe_config = config;
     if safe_config.width < 100 {
         safe_config.width = 480;
@@ -370,7 +370,7 @@ pub fn load_settings_sync() -> GameSettings {
         safe_config.height = 390;
     }
 
-    // Guardamos la versión "saneada" y actualizada del esquema.
+    // Guardamos la version "saneada" y actualizada del esquema.
     // (Deshabilitado para evitar reescritura al inicio)
     // let _ = save_settings_sync(&safe_config);
 

@@ -2,7 +2,7 @@ use crate::news::BlogPost;
 use crate::util::image_cache::load_news_image;
 use crate::{Message, theme, util};
 use iced::widget::{
-    ProgressBar, Space, button, column, container, image, row, scrollable, svg, text,
+    ProgressBar, Space, button, column, container, image, row, scrollable, svg,
 };
 use iced::{
     Alignment, Background, Border, Color, ContentFit, Element, Length, Renderer, Task, Theme,
@@ -145,12 +145,7 @@ impl NewsSection {
         let palette = ctx.palette;
         container(
             column![
-                theme::text(
-                    text(loc.t("news.loading"))
-                        .size(14)
-                        .color(palette.text_secondary),
-                    ctx
-                ),
+                theme::text_body(loc.t("news.loading"), ctx),
                 Space::new().height(20.0),
                 container(
                     ProgressBar::new(0.0..=100.0, 50.0)
@@ -180,15 +175,10 @@ impl NewsSection {
         let palette = ctx.palette;
         container(
             column![
-                theme::text(
-                    text(loc.t("news.failed"))
-                        .size(16)
-                        .color(Color::from_rgb(1.0, 0.5, 0.5)),
-                    ctx
-                ),
-                theme::text(text(err).size(12).color(palette.text_secondary), ctx),
+                theme::text_body(loc.t("news.failed"), ctx),
+                theme::text_muted(err, ctx),
                 {
-                    let mut btn = button(theme::text(text(loc.t("news.retry")).size(14), ctx))
+                    let mut btn = button(theme::text_body(loc.t("news.retry").to_string(), ctx))
                         .style(move |t: &Theme, s| theme::primary_button_style(&palette, t, s))
                         .padding(8);
                     if !is_disabled {
@@ -214,12 +204,7 @@ impl NewsSection {
         ctx: theme::UIContext,
     ) -> Element<'a, NewsMessage, Theme, Renderer> {
         let palette = ctx.palette;
-        container(theme::text(
-            text(loc.t("news.empty"))
-                .size(14)
-                .color(palette.text_secondary),
-            ctx,
-        ))
+        container(theme::text_body(loc.t("news.empty"), ctx))
         .width(Length::Fill)
         .height(Length::Fill)
         .center_y(Length::Fill)
@@ -253,7 +238,7 @@ impl NewsSection {
             column![
                 posts_list,
                 container({
-                    let mut btn = button(theme::text(text(loc.t("news.retry")).size(12), ctx))
+                    let mut btn = button(theme::text_small(loc.t("news.retry"), ctx))
                         .style(move |t: &Theme, s| theme::secondary_button_style(&palette, t, s))
                         .padding(4);
                     if !is_disabled {
@@ -316,23 +301,14 @@ impl NewsSection {
                                 .style(move |t: &Theme, s| theme::svg_accent(&palette, t, s)),
                             ctx
                         ),
-                        theme::text(
-                            text(post.format_date())
-                                .size(9)
-                                .color(palette.text_secondary),
-                            ctx
-                        )
+                        theme::text_micro(post.format_date(), ctx)
                     ]
                     .spacing(4),
-                    theme::text(text(&post.title).size(14).color(palette.text_primary), ctx),
-                    theme::text(
-                        text(
-                            post.body_excerpt
-                                .as_deref()
-                                .unwrap_or_else(|| loc.t("news.no_desc"))
-                        )
-                        .size(11)
-                        .color(palette.text_secondary),
+                    theme::text_body(&post.title, ctx),
+                    theme::text_caption(
+                        post.body_excerpt
+                            .as_deref()
+                            .unwrap_or_else(|| loc.t("news.no_desc")),
                         ctx
                     )
                 ]
@@ -384,16 +360,11 @@ fn header_section<'a>(
                     },
                     ..Default::default()
                 }),
-            theme::text(
-                text(if loading {
-                    loc.t("news.feed_loading")
-                } else {
-                    loc.t("news.feed_latest")
-                })
-                .size(10)
-                .color(palette.text_secondary),
-                ctx
-            )
+            theme::text_micro(if loading {
+                loc.t("news.feed_loading")
+            } else {
+                loc.t("news.feed_latest")
+            }, ctx)
         ]
         .spacing(8)
         .padding(5)
@@ -402,12 +373,7 @@ fn header_section<'a>(
         {
             let mut btn = button(
                 row![
-                    theme::text(
-                        text(loc.t("news.browse_all"))
-                            .size(10)
-                            .color(palette.text_secondary),
-                        ctx
-                    ),
+                    theme::text_micro(loc.t("news.browse_all"), ctx),
                     theme::svg(
                         svg(util::icons::icon(util::icons::CHEVRON_RIGHT))
                             .width(10)

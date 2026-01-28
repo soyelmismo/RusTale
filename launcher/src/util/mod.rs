@@ -211,10 +211,22 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
     let mut cmd = Command::new(java_real);
     cmd.args(final_args);
 
+    // Detect if we should show the console (always for server, or if explicitly requested)
+    let is_server = std::env::var("RUSTALE_IS_SERVER").is_ok() 
+        || args.iter().any(|a| a.to_lowercase().contains("hytaleserver.jar"));
+
     #[cfg(target_os = "windows")]
     {
-        cmd.creation_flags(0x08000000);
+        if !is_server {
+            // Hide black console window for the client GUI
+            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
     }
+
+    // Explicitly inherit stdio to ensure logs pass through the proxy
+    cmd.stdout(std::process::Stdio::inherit());
+    cmd.stderr(std::process::Stdio::inherit());
+    cmd.stdin(std::process::Stdio::inherit());
 
     let status = cmd.status()?;
 

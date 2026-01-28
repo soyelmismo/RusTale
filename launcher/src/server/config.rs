@@ -9,6 +9,7 @@ pub struct ServerConfig {
     pub server_args: String,
     pub java_exec_args: String,
     pub tunnel_provider: Option<String>,
+    pub use_direct_assets: bool, // Use assets directly from client without copying
 }
 
 impl Default for ServerConfig {
@@ -20,6 +21,7 @@ impl Default for ServerConfig {
             java_exec_args: "-Xms1G -Xmx4G -XX:+UseG1GC".to_string(),
             server_args: "--auth-mode insecure --assets Assets.zip".to_string(),
             tunnel_provider: None,
+            use_direct_assets: true, // Enable direct asset access by default
         }
     }
 }
@@ -57,7 +59,7 @@ pub async fn load_or_create(args: &crate::Args) -> ServerConfig {
         config.tunnel_provider = Some(t.clone());
     }
 
-    // 3. Guardar cambios inmediatamente para "inicio rápido" futuro
+    // 3. Guardar cambios inmediatamente para "inicio rapido" futuro
     if let Ok(str) = toml::to_string_pretty(&config) {
         let _ = fs::write(&path, str).await;
     }

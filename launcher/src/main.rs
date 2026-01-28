@@ -19,6 +19,7 @@ mod app;
 mod config;
 mod game;
 mod java;
+mod java_detection;
 mod lang;
 mod news;
 mod server;
@@ -191,14 +192,14 @@ pub fn main() -> iced::Result {
     let is_quickplay = args.quickplay || config_initialization_mode.quickplay;
 
     if args.dedicated_server {
-        // Inicializar runtime básico para el server (sin UI)
+        // Inicializar runtime basico para el server (sin UI)
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .expect("Failed to create tokio runtime");
 
         rt.block_on(async {
-            // Cargar configuración (fusiona archivo + CLI)
+            // Cargar configuracion (fusiona archivo + CLI)
             let config = server::config::load_or_create(&args).await;
 
             if let Err(e) = server::runner::run_server_flow(config).await {
@@ -232,7 +233,7 @@ pub fn main() -> iced::Result {
         ..Default::default()
     })
     // [GPU OPTIMIZATION 2] ----------------------------
-    // Añadimos configuración de Antialiasing desactivado.
+    // Añadimos configuracion de Antialiasing desactivado.
     // MSAA consume mucha GPU en shaders de pantalla completa.
     // La fuente de Iced ya hace su propio AA.
     .settings(iced::Settings {
@@ -302,11 +303,14 @@ pub enum Message {
     ModsLoadedComplex(Result<(Vec<ModInfo>, Vec<PatchManifest>), String>), // Result of the load
     LauncherUpdate(updater::UpdaterMessage),
     RequestMoveData(std::path::PathBuf),
+    RequestUseDataLocation(std::path::PathBuf),
     DataMoveStarted,
     DataMoveFinished(Result<std::path::PathBuf, String>),
     MigrationProgress(f32),
     StartMigrationActual(std::path::PathBuf, std::path::PathBuf),
     CancelAction,
+    LoadJavaInfo,
+    JavaInfoLoaded,
 }
 
 struct RusTale {
@@ -325,7 +329,7 @@ struct RusTale {
     editing_uuid: Option<(String, String)>,
     profile_dropdown_open: bool,
     latest_version: Option<i32>,
-    available_versions: Vec<i32>, // CAMBIO: Caché persistente de versiones
+    available_versions: Vec<i32>, // CAMBIO: Cache persistente de versiones
     paths: GamePaths,             // Centralized path management
     api_client: reqwest::Client,  // For news, auth, version check
     download_client: reqwest::Client, // For JRE, PWR, Assets
@@ -341,9 +345,9 @@ struct RusTale {
     lsd_offset: (f32, f32),
     start_time: std::time::Instant,
     lsd_preview: bool,
-    cursor_position: iced::Point, // Rastrear ratón para efectos
+    cursor_position: iced::Point, // Rastrear raton para efectos
     last_mouse_move_time: std::time::Instant,
-    lsd_enabled_time: Option<std::time::Instant>, // Para activación progresiva
+    lsd_enabled_time: Option<std::time::Instant>, // Para activacion progresiva
 }
 
 impl RusTale {
@@ -356,14 +360,14 @@ impl RusTale {
 
         // 1. API CLIENT: Fast, fails quickly if no response
         let api_client = reqwest::Client::builder()
-            .user_agent("RusTale/0.0.1")
+            .user_agent(format!("RusTale/{}", env!("CARGO_PKG_VERSION")))
             .timeout(std::time::Duration::from_secs(15)) // 15s is enough for JSON
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
 
         // 2. DOWNLOAD CLIENT: Robust, "heavy lifting"
         let download_client = reqwest::Client::builder()
-            .user_agent("RusTale-Downloader/0.0.1")
+            .user_agent(format!("RusTale-Downloader/{}", env!("CARGO_PKG_VERSION")))
             // Connection timeout: fails if not connected in 30s
             .connect_timeout(std::time::Duration::from_secs(30))
             // Keepalive to maintain open TCP connection
@@ -431,7 +435,18 @@ impl RusTale {
                 local_server_stop_tx: None,
                 cancellation_token: Arc::new(AtomicBool::new(false)),
                 palette: theme::generate_palette(&initial_settings.theme),
-                lsd_offset: (0.0, 0.0),
+                lsd_offset: if initial_settings.theme.lsd_mode {
+                    // Valores iniciales aleatorios para que el efecto LSD se aplique inmediatamente
+                    let t = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs_f32();
+                    let ox = (t * 1.3).sin() * 1.0 + (t * 2.8).cos() * 0.5 + (t * 0.7).sin() * 0.3;
+                    let oy = (t * 0.9).cos() * 1.0 + (t * 3.5).sin() * 0.5 + (t * 1.1).cos() * 0.3;
+                    (ox, oy)
+                } else {
+                    (0.0, 0.0)
+                },
                 start_time: std::time::Instant::now(),
                 lsd_preview: false,
                 cursor_position: iced::Point::ORIGIN,
@@ -467,7 +482,7 @@ impl RusTale {
                         InstallPolicy::NetworkUpdate
                     }
                     _ => {
-                        // Si estaba en Ready o cualquier otro, verificamos rápido (Offline)
+                        // Si estaba en Ready o cualquier otro, verificamos rapido (Offline)
                         InstallPolicy::OfflineVerify
                     }
                 };
@@ -494,7 +509,7 @@ impl RusTale {
             _ => Message::None,
         });
 
-        // Mouse listener para efectos magnéticos
+        // Mouse listener para efectos magneticos
         let mouse_sub = if self.is_window_visible && self.settings.theme.lsd_mode {
             iced::event::listen_with(|event, _status, _window_id| {
                 if let iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) = event {
@@ -507,11 +522,11 @@ impl RusTale {
             Subscription::none()
         };
 
-        // SOLUCION: El tick solo debe existir si el modo LSD está ACTIVO y la ventana VISIBLE.
-        // Si el LSD está apagado, Iced funcionará por eventos (0% CPU idle).
+        // SOLUCION: El tick solo debe existir si el modo LSD esta ACTIVO y la ventana VISIBLE.
+        // Si el LSD esta apagado, Iced funcionara por eventos (0% CPU idle).
         let tick_sub = if self.is_window_visible && self.settings.theme.lsd_mode {
             // [OPTIMIZATION] Reducimos de 16ms (60fps) a 33ms (30fps).
-            // Esto reduce la carga del modo LSD a la mitad automáticamente.
+            // Esto reduce la carga del modo LSD a la mitad automaticamente.
             iced::time::every(std::time::Duration::from_millis(33)).map(Message::Tick)
         } else {
             Subscription::none()
@@ -582,7 +597,11 @@ impl RusTale {
                 }
 
                 let t = self.start_time.elapsed().as_secs_f32();
-                self.lsd_offset = (t, t);
+                // Mezclamos multiples frecuencias para crear un movimiento caotico y organico
+                // pero que se mantiene dentro de un rango razonable [-2, 2].
+                let ox = (t * 1.3).sin() * 1.0 + (t * 2.8).cos() * 0.5 + (t * 0.7).sin() * 0.3;
+                let oy = (t * 0.9).cos() * 1.0 + (t * 3.5).sin() * 0.5 + (t * 1.1).cos() * 0.3;
+                self.lsd_offset = (ox, oy);
                 return Task::none();
             }
 
@@ -608,13 +627,16 @@ impl RusTale {
                 | Message::CopyUUID(_)
                 | Message::GenerateRandomUUID
                 | Message::RequestMoveData(_)
+                | Message::RequestUseDataLocation(_)
                 | Message::StartMigrationActual(_, _)
                 | Message::MigrationProgress(_)
                 | Message::LauncherUpdate(_)
                 | Message::CheckStatus
                 | Message::BackgroundLoaded(_)
                 | Message::Tick(_)
-                | Message::News(_) => {}
+                | Message::News(_)
+                | Message::LoadJavaInfo
+                | Message::JavaInfoLoaded => {}
                 _ => return Task::none(),
             }
         }
@@ -666,6 +688,18 @@ impl RusTale {
                 self.palette = theme::generate_palette(&self.settings.theme);
 
                 self.settings_state.temp_settings = s;
+
+                if self.settings.theme.lsd_mode {
+                    self.lsd_enabled_time = Some(std::time::Instant::now());
+                    
+                    let t = self.start_time.elapsed().as_secs_f32();
+                    self.lsd_offset = (
+                        (t * 1.3).sin() * 1.0, 
+                        (t * 0.9).cos() * 1.0
+                    );
+                } else {
+                    self.lsd_enabled_time = None;
+                }
 
                 self.localization = loc;
 
@@ -726,6 +760,24 @@ impl RusTale {
 
                 Task::batch(tasks)
             }
+            Message::LoadJavaInfo => {
+                let base_dir = config::get_app_dir();
+                Task::perform(
+                    async move {
+                        match java_detection::ensure_java_available(&base_dir).await {
+                            Ok(java_info) => Message::Settings(SettingsMessage::JavaVersionUpdated(java_info.version)),
+                            Err(e) => {
+                                eprintln!("Java detection/download failed: {}", e);
+                                Message::Settings(SettingsMessage::JavaInfoLoaded)
+                            }
+                        }
+                    },
+                    |msg| msg,
+                )
+            }
+            Message::JavaInfoLoaded => {
+                Task::done(Message::Settings(SettingsMessage::JavaInfoLoaded))
+            }
             Message::LanguageChangedInSettings(lang_id) => {
                 // 1. Update the temporary settings state (for when saving)
                 self.settings_state.temp_settings.language = lang_id.clone();
@@ -772,7 +824,7 @@ impl RusTale {
                 self.settings = settings;
                 self.status = status;
 
-                // CAMBIO: Si recibimos un dato remoto nuevo, actualizamos caché y generamos lista
+                // CAMBIO: Si recibimos un dato remoto nuevo, actualizamos cache y generamos lista
                 if let Some(ver) = latest {
                     self.latest_version = Some(ver);
                     if ver > 0 {
@@ -925,8 +977,8 @@ impl RusTale {
                 // Rebuild tray menu to show "Start Game"
                 self.rebuild_tray_menu();
 
-                // Modificamos la lógica aqui para mayor seguridad:
-                // Solo salimos si es quickplay Y la ventana no está visible.
+                // Modificamos la logica aqui para mayor seguridad:
+                // Solo salimos si es quickplay Y la ventana no esta visible.
                 if self.is_quickplay_mode && !self.is_window_visible {
                     return self.save_and_exit();
                 }
@@ -941,7 +993,7 @@ impl RusTale {
                     });
                 }
 
-                // Si veniamos de quickplay pero el usuario abrió la ventana,
+                // Si veniamos de quickplay pero el usuario abrio la ventana,
                 // nos aseguramos de que la ventana se quede visible y activa.
                 if self.is_window_visible {
                     return window::oldest().and_then(|id| {
@@ -1018,7 +1070,7 @@ impl RusTale {
 
                     self.status_text = format!("Update found: v{}", info.tag_name);
 
-                    // Utilizar la función helper para obtener el asset correcto segun el SO
+                    // Utilizar la funcion helper para obtener el asset correcto segun el SO
                     if let Some(url) = updater::get_asset_url(&info) {
                         Task::done(Message::LauncherUpdate(
                             updater::UpdaterMessage::StartUpdate(url),
@@ -1116,8 +1168,8 @@ impl RusTale {
             Message::CloseSettings => {
                 self.settings_state.is_open = false;
 
-                // Si por alguna razón el estado quedó en "Checking" (aunque con la corrección
-                // anterior no deberia), esto fuerza una re-evaluación con los settings actuales (no guardados).
+                // Si por alguna razon el estado quedo en "Checking" (aunque con la correccion
+                // anterior no deberia), esto fuerza una re-evaluacion con los settings actuales (no guardados).
                 if self.status == LauncherStatus::Checking {
                     Task::done(Message::CheckStatus)
                 } else {
@@ -1169,6 +1221,25 @@ impl RusTale {
                     },
                 )
             }
+            Message::Settings(SettingsMessage::PickUseDataLocation) => {
+                let title = self.localization.t("settings.select_existing_data").to_string();
+                Task::perform(
+                    async move {
+                        rfd::AsyncFileDialog::new()
+                            .set_title(title)
+                            .pick_folder()
+                            .await
+                            .map(|f| f.path().to_path_buf())
+                    },
+                    |res| {
+                        if let Some(path) = res {
+                            Message::RequestUseDataLocation(path)
+                        } else {
+                            Message::None
+                        }
+                    },
+                )
+            }
             Message::Settings(SettingsMessage::OpenCurrentDataDir) => {
                 util::open_game_folder();
                 Task::none()
@@ -1202,7 +1273,7 @@ impl RusTale {
                         if self.lsd_preview != *val {
                             self.lsd_preview = *val;
                         }
-                        // No necesitamos procesar esto más allá, retornamos temprano
+                        // No necesitamos procesar esto mas alla, retornamos temprano
                         return Task::none();
                     }
                     _ => {}
@@ -1216,6 +1287,55 @@ impl RusTale {
                     self.palette =
                         crate::theme::generate_palette(&self.settings_state.temp_settings.theme);
                     Task::none()
+                }
+            }
+
+            // LOGICA PARA USAR DATOS DESDE UBICACION EXISTENTE (SIN MOVER)
+            Message::RequestUseDataLocation(new_path) => {
+                // 1. Validaciones previas
+                if self.status == LauncherStatus::Playing || self.running_game.is_some() {
+                    self.error = Some("Cannot change data location while game is running.".to_string());
+                    return Task::none();
+                }
+
+                let current_path = config::get_app_dir();
+                if new_path == current_path {
+                    return Task::none();
+                }
+
+                // 2. Validar que la nueva ubicacion tenga los archivos necesarios
+                if !new_path.exists() {
+                    self.error = Some("Selected location does not exist.".to_string());
+                    return Task::none();
+                }
+
+                // Verificar que tenga archivos basicos de RusTale
+                let has_settings = new_path.join("settings.toml").exists();
+                let has_profiles = new_path.join("profiles.toml").exists();
+                
+                if !has_settings && !has_profiles {
+                    self.error = Some("Selected location doesn't appear to contain RusTale data (no settings.toml or profiles.toml found).".to_string());
+                    return Task::none();
+                }
+
+                // 3. Cambiar solo la configuracion del launcher (SIN MOVER ARCHIVOS)
+                match config::save_bootstrap_path(&new_path) {
+                    Ok(_) => {
+                        println!("Successfully changed data location to: {:?}", new_path);
+                        
+                        self.paths = crate::game::GamePaths::new(new_path.clone());
+                        self.status_text = "Data location updated successfully!".to_string();
+                        
+                        // Recargar configuracion desde la nueva ubicacion
+                        self.settings = config::load_settings_sync();
+                        self.settings_state.temp_settings = self.settings.clone();
+                        
+                        Task::none()
+                    }
+                    Err(e) => {
+                        self.error = Some(format!("Failed to save new data location: {}", e));
+                        Task::none()
+                    }
                 }
             }
 
@@ -1237,7 +1357,7 @@ impl RusTale {
                 self.status_text = "Migrating files... (patience)".to_string();
                 self.download_progress = 0.0;
 
-                // Bloquear interacción cerrando modales si están abiertos
+                // Bloquear interaccion cerrando modales si estan abiertos
                 self.settings_state.is_open = false;
 
                 Task::perform(async move { (current_path, new_path) }, |(curr, dest)| {
@@ -1364,12 +1484,12 @@ impl RusTale {
 
                 // LOGICA IMPORTANTE:
                 // Si el canal que estamos viendo en el modal (temp_settings) es igual
-                // al canal guardado globalmente (settings), actualizamos la caché global.
+                // al canal guardado globalmente (settings), actualizamos la cache global.
                 // Esto arregla el bug de que al volver a abrir se vean versiones viejas.
                 if self.settings_state.temp_settings.channel == self.settings.channel {
                     self.available_versions = v;
 
-                    // Si tenemos una versión más reciente detectada, actualizamos latest_version
+                    // Si tenemos una version mas reciente detectada, actualizamos latest_version
                     if let Some(first) = self.available_versions.first() {
                         self.latest_version = Some(*first);
                     }
@@ -1377,7 +1497,7 @@ impl RusTale {
 
                 self.settings_state.is_loading_versions = false;
 
-                // Actualizar lista de instalados (lógica visual)
+                // Actualizar lista de instalados (logica visual)
                 let channel = self.settings_state.temp_settings.channel.clone();
                 Task::perform(
                     async move {
@@ -1623,8 +1743,8 @@ impl RusTale {
                 self.settings.width = size.width as u32;
                 self.settings.height = size.height as u32;
 
-                // Sincronizamos también el estado temporal para que, si el modal está abierto,
-                // no se sobrescriba con la resolución vieja al pulsar "Save".
+                // Sincronizamos tambien el estado temporal para que, si el modal esta abierto,
+                // no se sobrescriba con la resolucion vieja al pulsar "Save".
                 self.settings_state.temp_settings.width = size.width as u32;
                 self.settings_state.temp_settings.height = size.height as u32;
 
@@ -1706,6 +1826,26 @@ impl RusTale {
                 self.profile_dropdown_open = !self.profile_dropdown_open;
                 Task::none()
             }
+            Message::LoadJavaInfo => {
+                let base_dir = config::get_app_dir();
+                Task::perform(
+                    async move {
+                        // Usar logica existente del launcher para detectar Java
+                        match java_detection::ensure_java_available(&base_dir).await {
+                            Ok(java_info) => Message::Settings(SettingsMessage::JavaVersionUpdated(java_info.version)),
+                            Err(e) => {
+                                eprintln!("Java detection/download failed: {}", e);
+                                Message::Settings(SettingsMessage::JavaInfoLoaded)
+                            }
+                        }
+                    },
+                    |msg| msg,
+                )
+            }
+            Message::JavaInfoLoaded => {
+                // Notificar a settings que la carga completo
+                Task::done(Message::Settings(SettingsMessage::JavaInfoLoaded))
+            }
             Message::Tick(_) => Task::none(),
             _ => Task::none(),
         }
@@ -1714,7 +1854,7 @@ impl RusTale {
     fn view(&self) -> Element<'_, Message> {
         let palette = &self.palette;
         // === CALCULAR QUIETUD ===
-        // Calcula cuánto tiempo (en segundos) ha pasado desde el último movimiento
+        // Calcula cuanto tiempo (en segundos) ha pasado desde el ultimo movimiento
         let elapsed_idle = self.last_mouse_move_time.elapsed().as_secs_f32();
 
         // Normalizamos:
@@ -1722,10 +1862,15 @@ impl RusTale {
         // 3.0 seg -> 1.0 (quietud total)
         let stillness = (elapsed_idle / 3.0).clamp(0.0, 1.0);
         let lsd_intensity = if self.lsd_preview {
-            1.0 // Fuerza máxima instantánea al pasar el mouse por encima (Preview)
+            1.0 // Fuerza maxima instantanea al pasar el mouse por encima (Preview)
         } else if let Some(t) = self.lsd_enabled_time {
             let elapsed = t.elapsed().as_secs_f32();
-            (elapsed / theme::LSD_RAMP_UP_SECONDS).min(1.0)
+            // Si el LSD estaba activado al inicio, dar intensidad maxima inmediatamente
+            if self.settings.theme.lsd_mode && elapsed < 0.1 {
+                1.0
+            } else {
+                (elapsed / theme::LSD_RAMP_UP_SECONDS).min(1.0)
+            }
         } else {
             0.0
         };
@@ -1824,7 +1969,7 @@ impl RusTale {
                 container(left_column_content)
                     .width(Length::Fill)
                     .height(Length::Fill)
-                    .padding(padding) // Padding dinámico
+                    .padding(padding) // Padding dinamico
                     .style(move |t| theme::glass_container(&palette, t))
                     .into(),
                 ctx,
@@ -1886,14 +2031,23 @@ impl RusTale {
 
         let final_view = stack![bg, tint_overlay, main_content];
 
-        let overlay = if self.settings_state.is_open {
+        // Contenido principal del modal (El cuadro gris con botones)
+        let modal_layer = if self.settings_state.is_open {
             Some(
                 container(
                     self.settings_state
                         .view(&self.localization, self.window_size, ctx)
                         .map(Message::Settings),
                 )
-                .style(move |t| theme::container_style_transparent(&palette, t)),
+                .style(move |t| theme::container_style_transparent(&palette, t))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .style(|_| container::Style {
+                    background: Some(iced::Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.8))),
+                    ..Default::default()
+                })
             )
         } else if self.mods_state.is_open {
             Some(
@@ -1902,31 +2056,33 @@ impl RusTale {
                         .view(&self.localization, self.window_size, ctx)
                         .map(Message::Mods),
                 )
-                .style(move |t| theme::container_style_transparent(&palette, t)),
+                .style(move |t| theme::container_style_transparent(&palette, t))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .style(|_| container::Style {
+                    background: Some(iced::Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.8))),
+                    ..Default::default()
+                })
             )
         } else {
             None
         };
 
-        let with_settings = if let Some(content) = overlay {
-            stack![
-                final_view,
-                container(content)
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .center_x(Length::Fill)
-                    .center_y(Length::Fill)
-                    .style(|_| container::Style {
-                        background: Some(iced::Background::Color(Color::from_rgba(
-                            0.0, 0.0, 0.0, 0.8
-                        ))),
-                        ..Default::default()
-                    })
-            ]
-        } else {
-            final_view
-        };
-        with_settings.into()
+        // --- STACK FINAL ---
+        let final_stack = stack![
+            final_view, // Tu fondo y contenido principal (izquierda abajo)
+            
+            // 1. Capa de oscurecimiento + Modal Centrado
+            if let Some(modal) = modal_layer {
+                modal.into()
+            } else {
+                Element::from(container(Space::new()).width(Length::Fixed(0.0)))
+            }
+        ];
+
+        final_stack.into()
     }
 
     /// Creates a tray icon with the appropriate menu based on game state

@@ -39,7 +39,7 @@ jobs:
     - name: Inject version into Cargo.toml
       shell: bash
       run: |
-        # Reemplaza la versión 0.0.1 por la del tag actual
+        # Reemplaza la version 0.0.1 por la del tag actual
         NEW_VER="${{ steps.tagger_local.outputs.tag }}"
         sed -i "s/^version = \"0.0.1\"/version = \"$NEW_VER\"/" launcher/Cargo.toml
         sed -i "s/^version = \"0.0.1\"/version = \"$NEW_VER\"/" Cargo.toml
@@ -94,7 +94,7 @@ jobs:
     - name: Inject version into Cargo.toml
       shell: bash
       run: |
-        # Reemplaza la versión 0.0.1 por la del tag actual
+        # Reemplaza la version 0.0.1 por la del tag actual
         NEW_VER="${{ steps.tagger_local.outputs.tag }}"
         sed -i "s/^version = \"0.0.1\"/version = \"$NEW_VER\"/" launcher/Cargo.toml
         sed -i "s/^version = \"0.0.1\"/version = \"$NEW_VER\"/" Cargo.toml

@@ -55,7 +55,7 @@ pub async fn calculate_status(
     // LOGICA DE CACHE
     // Si ya tenemos el dato remoto (del inicio del launcher), lo usamos.
     if let Some(remote_ver) = cached_remote_latest {
-        // Leemos la versión local del json
+        // Leemos la version local del json
         let version_file = paths.version_json(channel);
         let local_ver = if let Ok(content) = tokio::fs::read_to_string(&version_file).await {
             serde_json::from_str::<serde_json::Value>(&content)
