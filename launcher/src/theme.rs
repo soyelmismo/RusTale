@@ -1,3 +1,9 @@
+use iced::advanced::layout::{self, Layout};
+use iced::advanced::mouse;
+use iced::advanced::renderer::{self, Renderer as _};
+use iced::advanced::widget::{self, Widget};
+use iced::advanced::{Clipboard, Shell, overlay};
+use iced::event::Event;
 use iced::overlay::menu;
 use iced::widget::{
     Space, button, checkbox, column, container, pick_list, progress_bar, row as iced_row,
@@ -7,12 +13,6 @@ use iced::{
     Background, Border, Color, Element, Length, Point, Rectangle, Renderer, Shadow, Size, Theme,
     Vector,
 };
-use iced::advanced::layout::{self, Layout};
-use iced::advanced::mouse;
-use iced::advanced::renderer::{self, Renderer as _};
-use iced::advanced::widget::{self, Widget};
-use iced::advanced::{overlay, Clipboard, Shell};
-use iced::event::Event;
 use std::cell::Cell;
 
 // --- CONSTANTS ---
@@ -111,8 +111,8 @@ impl SmoothTranslateState {
             let element_size = bounds.width.min(bounds.height);
             let attraction_factor = if element_size > 150.0 { 0.2 } else { 1.0 }; // Contenedores grandes: 20%, elementos pequeños: 100%
             let attract_v = Vector::new(
-                (mouse_pos.x - center.x) * attraction_factor, 
-                (mouse_pos.y - center.y) * attraction_factor
+                (mouse_pos.x - center.x) * attraction_factor,
+                (mouse_pos.y - center.y) * attraction_factor,
             );
 
             // Vector de repulsion interna (empujar hacia el borde)
@@ -343,15 +343,14 @@ pub fn magic_column<'a, M: 'a + Clone>(
             // Esto hace que la columna parezca gelatina en lugar de un bloque rigido
             let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, i + 10);
 
-            let wrapped_item =
-                Element::new(SmoothTranslate::new(
-                    item,
-                    (vx, vy),
-                    ctx.mouse_pos,
-                    false,
-                    ctx.lsd_intensity,
-                    ctx.lsd_enabled,
-                ));
+            let wrapped_item = Element::new(SmoothTranslate::new(
+                item,
+                (vx, vy),
+                ctx.mouse_pos,
+                false,
+                ctx.lsd_intensity,
+                ctx.lsd_enabled,
+            ));
 
             col = col.push(wrapped_item);
         }
@@ -377,15 +376,14 @@ pub fn magic_row<'a, M: 'a + Clone>(
             // Esto hace que la columna parezca gelatina en lugar de un bloque rigido
             let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, i + 12);
 
-            let wrapped_item =
-                Element::new(SmoothTranslate::new(
-                    item,
-                    (vx, vy),
-                    ctx.mouse_pos,
-                    false,
-                    ctx.lsd_intensity,
-                    ctx.lsd_enabled,
-                ));
+            let wrapped_item = Element::new(SmoothTranslate::new(
+                item,
+                (vx, vy),
+                ctx.mouse_pos,
+                false,
+                ctx.lsd_intensity,
+                ctx.lsd_enabled,
+            ));
 
             col = col.push(wrapped_item);
         }
@@ -450,29 +448,30 @@ where
     container(col).style(move |t| modal_container(&palette, t))
 }
 
-pub fn text_title<'a, M: 'a>(content: impl Into<String>, ctx: UIContext) -> Element<'a, M, Theme, Renderer> {
-    text_lsd_letters(
-        content,
-        18,
-        ctx.palette.accent,
-        ctx,
-    )
+pub fn text_title<'a, M: 'a>(
+    content: impl Into<String>,
+    ctx: UIContext,
+) -> Element<'a, M, Theme, Renderer> {
+    text_lsd_letters(content, 18, ctx.palette.accent, ctx)
 }
 
-pub fn lsd_magic_text<'a, M: 'a>(label: &'a str, ctx: UIContext) -> Element<'a, M, Theme, Renderer> {
+pub fn lsd_magic_text<'a, M: 'a>(
+    label: &'a str,
+    ctx: UIContext,
+) -> Element<'a, M, Theme, Renderer> {
     let mut row = iced::widget::row![].spacing(0);
-    
+
     for (i, c) in label.chars().enumerate() {
-        // Creamos una variación única por cada letra
-        let t = ctx.time * 2.0 + (i as f32 * 0.5);
-        let off_x = (t * 1.5).sin() * 2.5; // Movimiento sutil de 2.5px
-        let off_y = (t * 1.1).cos() * 2.5;
+        // Onda mucho más sincronizada (0.08 en lugar de 0.5) para que las letras se muevan juntas
+        let t = ctx.time * 1.8 + (i as f32 * 0.08);
+        let off_x = (t * 1.2).sin() * 2.0;
+        let off_y = (t * 0.8).cos() * 2.0;
 
         let char_el = iced::widget::text(c.to_string())
             .size(14)
             .font(iced::font::Font::MONOSPACE)
             // Color neón que resalta sobre el fondo
-            .color(Color::from_rgb(1.0, 0.4, 0.2)); 
+            .color(Color::from_rgb(1.0, 0.4, 0.2));
 
         row = row.push(Element::new(SmoothTranslate::new(
             char_el.into(),
@@ -487,53 +486,42 @@ pub fn lsd_magic_text<'a, M: 'a>(label: &'a str, ctx: UIContext) -> Element<'a, 
     row.into()
 }
 
-
-pub fn text_body<'a, M: 'a>(content: impl Into<String>, ctx: UIContext) -> Element<'a, M, Theme, Renderer> {
-    text_lsd_letters(
-        content,
-        14,
-        ctx.palette.text_primary,
-        ctx,
-    )
+pub fn text_body<'a, M: 'a>(
+    content: impl Into<String>,
+    ctx: UIContext,
+) -> Element<'a, M, Theme, Renderer> {
+    text_lsd_letters(content, 14, ctx.palette.text_primary, ctx)
 }
 
-pub fn text_caption<'a, M: 'a>(content: impl Into<String>, ctx: UIContext) -> Element<'a, M, Theme, Renderer> {
-    text_lsd_letters(
-        content,
-        11,
-        ctx.palette.text_secondary,
-        ctx,
-    )
+pub fn text_caption<'a, M: 'a>(
+    content: impl Into<String>,
+    ctx: UIContext,
+) -> Element<'a, M, Theme, Renderer> {
+    text_lsd_letters(content, 11, ctx.palette.text_secondary, ctx)
 }
 
 // Texto pequeño de tamaño 12 con color primario
-pub fn text_small<'a, M: 'a>(content: impl Into<String>, ctx: UIContext) -> Element<'a, M, Theme, Renderer> {
-    text_lsd_letters(
-        content,
-        12,
-        ctx.palette.text_primary,
-        ctx,
-    )
+pub fn text_small<'a, M: 'a>(
+    content: impl Into<String>,
+    ctx: UIContext,
+) -> Element<'a, M, Theme, Renderer> {
+    text_lsd_letters(content, 12, ctx.palette.text_primary, ctx)
 }
 
 // Texto pequeño de tamaño 12 con color secundario/muted
-pub fn text_muted<'a, M: 'a>(content: impl Into<String>, ctx: UIContext) -> Element<'a, M, Theme, Renderer> {
-    text_lsd_letters(
-        content,
-        12,
-        ctx.palette.text_secondary,
-        ctx,
-    )
+pub fn text_muted<'a, M: 'a>(
+    content: impl Into<String>,
+    ctx: UIContext,
+) -> Element<'a, M, Theme, Renderer> {
+    text_lsd_letters(content, 12, ctx.palette.text_secondary, ctx)
 }
 
 // Texto de tamaño 10 para descripciones muy pequeñas
-pub fn text_micro<'a, M: 'a>(content: impl Into<String>, ctx: UIContext) -> Element<'a, M, Theme, Renderer> {
-    text_lsd_letters(
-        content,
-        10,
-        ctx.palette.text_secondary,
-        ctx,
-    )
+pub fn text_micro<'a, M: 'a>(
+    content: impl Into<String>,
+    ctx: UIContext,
+) -> Element<'a, M, Theme, Renderer> {
+    text_lsd_letters(content, 10, ctx.palette.text_secondary, ctx)
 }
 
 /// Una fila estandarizada para listas (usada en Mods, Settings > Storage, etc.)
@@ -573,12 +561,9 @@ pub fn labeled_input<'a, M: 'a + Clone>(
     let wrapped_input = magic_text_input(raw_input.into(), ctx);
 
     // 3. Devolver la columna
-    column![
-        text_caption(label, ctx),
-        wrapped_input
-    ]
-    .spacing(5)
-    .into()
+    column![text_caption(label, ctx), wrapped_input]
+        .spacing(5)
+        .into()
 }
 
 pub fn glass_container(palette: &Palette, _t: &Theme) -> container::Style {
@@ -1163,7 +1148,7 @@ where
     M: 'a + Clone,
 {
     let palette = ctx.palette;
-    
+
     // Crear el pick_list con el estilo de dropdown
     let styled_pick_list = pick_list(options, selected, on_changed)
         .padding(10)
@@ -1266,11 +1251,14 @@ where
 pub fn custom_dropdown<'a, M>(
     current_label: String,
     is_open: bool,
-    on_toggle: M, // El mensaje al hacer click en el activador
+    on_toggle: M,              // El mensaje al hacer click en el activador
     options: Vec<(String, M)>, // Lista de tuplas: (Texto a mostrar, Mensaje al clickear)
     is_compact: bool,
     ctx: UIContext,
-) -> (Element<'a, M, Theme, Renderer>, Option<Element<'a, M, Theme, Renderer>>)
+) -> (
+    Element<'a, M, Theme, Renderer>,
+    Option<Element<'a, M, Theme, Renderer>>,
+)
 where
     M: 'a + Clone,
 {
@@ -1280,26 +1268,36 @@ where
     let trigger_content = iced::widget::row![
         // Usamos text_body (que ya tiene text_lsd_letters)
         container(text_body(current_label, ctx)).width(Length::Fill),
-        iced_svg(
-            iced::widget::svg::Handle::from_memory(
-                if is_open { crate::util::icons::X } else { crate::util::icons::CHEVRON_RIGHT }
-                    .as_bytes()
-            )
-        )
-        .width(12).height(12)
-        .style(move |_, _| iced::widget::svg::Style { color: Some(palette.text_secondary) })
+        iced_svg(iced::widget::svg::Handle::from_memory(
+            if is_open {
+                crate::util::icons::X
+            } else {
+                crate::util::icons::CHEVRON_RIGHT
+            }
+            .as_bytes()
+        ))
+        .width(12)
+        .height(12)
+        .style(move |_, _| iced::widget::svg::Style {
+            color: Some(palette.text_secondary)
+        })
     ]
     .align_y(iced::Alignment::Center);
 
     let trigger = magic_button(
         button(trigger_content)
             .on_press(on_toggle)
-            .width(if is_compact { Length::Fill } else { Length::Fixed(180.0) })
+            .width(if is_compact {
+                Length::Fill
+            } else {
+                Length::Fixed(180.0)
+            })
             .padding(10)
             .style(move |t, s| dropdown_trigger_style(&palette, t, s))
             .into(),
         ctx,
-    ).into();
+    )
+    .into();
 
     // 2. Si esta cerrado, devolver None en la segunda parte
     if !is_open {
@@ -1314,7 +1312,7 @@ where
         let btn = button(
             container(text_body(label, ctx))
                 .width(Length::Fill)
-                .padding(5)
+                .padding(5),
         )
         .on_press(msg)
         .width(Length::Fill)
@@ -1327,16 +1325,15 @@ where
     let count = options_col.children().len();
     let calculated_height = (count as f32 * 35.0 + 10.0).clamp(40.0, 300.0);
 
-    let menu_container = container(
-        magic_container(
-            magic_scrollable(
-                scrollable(options_col).into(), 
-                ctx
-            ).into(),
-            ctx
-        )
-    )
-    .width(if is_compact { Length::Fill } else { Length::Fixed(180.0) })
+    let menu_container = container(magic_container(
+        magic_scrollable(scrollable(options_col).into(), ctx).into(),
+        ctx,
+    ))
+    .width(if is_compact {
+        Length::Fill
+    } else {
+        Length::Fixed(180.0)
+    })
     .height(Length::Fixed(calculated_height))
     .padding(5)
     // CAMBIO AQUi: Usamos un nuevo estilo con acento
@@ -1628,19 +1625,22 @@ impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Messa
 
 fn get_seeded_disparity(offset: (f32, f32), seed: usize) -> (f32, f32) {
     let s = seed as f32;
-    
-    // 1. Ruido pseudo-aleatorio estatico para dispersion (fijo por seed)
-    // Reducido significativamente para que las palabras sigan siendo legibles
-    // Reducido de 2.4 a 1.2 para menor dispersion de letras
-    let scatter_x = (s * 12.9898).sin().fract() * 1.2 - 0.6;
-    let scatter_y = (s * 78.233).sin().fract() * 1.2 - 0.6;
+
+    // 1. Ruido pseudo-aleatorio estático para dispersión (fijo por seed)
+    // Reducción drástica (0.4) para que las letras no se desordenen
+    let scatter_x = (s * 12.9898).sin().fract() * 0.4 - 0.2;
+    let scatter_y = (s * 78.233).sin().fract() * 0.4 - 0.2;
 
     // 2. Modulacion caotica del offset dinamico
-    // Reducimos la intensidad de la rotacion para que no se separen tanto del grupo
-    let phase = (s * 0.618033).fract() * 6.28;
-    let chaotic_offset_x = (offset.0 * (phase + offset.1 * 0.1).cos() - offset.1 * (phase + offset.0 * 0.1).sin()) * 0.75;
-    let chaotic_offset_y = (offset.0 * (phase + offset.1 * 0.1).sin() + offset.1 * (phase + offset.0 * 0.1).cos()) * 0.75;
-    
+    // Reducimos la influencia caótica (cos/sin del offset) para un movimiento más de "bloque"
+    let phase = (s * 0.15).fract() * 6.28; // Fase con menos variación entre letras
+    let chaotic_offset_x = (offset.0 * (phase + offset.1 * 0.02).cos()
+        - offset.1 * (phase + offset.0 * 0.02).sin())
+        * 0.85;
+    let chaotic_offset_y = (offset.0 * (phase + offset.1 * 0.02).sin()
+        + offset.1 * (phase + offset.0 * 0.02).cos())
+        * 0.85;
+
     (scatter_x + chaotic_offset_x, scatter_y + chaotic_offset_y)
 }
 
@@ -1677,12 +1677,9 @@ pub fn text_lsd_letters<'a, M: 'a>(
 ) -> Element<'a, M, Theme, Renderer> {
     let text_owned = text_str.into();
     let size_px = size.into();
-    
+
     if !ctx.lsd_enabled {
-        return iced_text(text_owned)
-            .size(size_px)
-            .color(color)
-            .into();
+        return iced_text(text_owned).size(size_px).color(color).into();
     }
 
     let lsd_intensity = ctx.lsd_intensity;
@@ -1691,21 +1688,19 @@ pub fn text_lsd_letters<'a, M: 'a>(
 
     // EFECTO LETRA POR LETRA
     let mut letter_row = iced::widget::row!().spacing(0);
-    
+
     // Iterar sobre cada caracter y aplicar el efecto LSD individualmente
     for (i, ch) in text_owned.chars().enumerate() {
         // Crear un texto individual para este caracter
-        let char_text = iced_text(ch.to_string())
-            .size(size_px)
-            .color(color);
-        
+        let char_text = iced_text(ch.to_string()).size(size_px).color(color);
+
         let char_element: Element<'a, M, Theme, Renderer> = char_text.into();
-        
+
         // Calcular offset unico para cada letra usando el indice como seed
         let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 100 + i);
         let vx = vx * ctx.lsd_intensity;
         let vy = vy * ctx.lsd_intensity;
-        
+
         // Envolver cada letra en su propio SmoothTranslate
         let magic_char = Element::new(SmoothTranslate::new(
             char_element,
@@ -1715,10 +1710,10 @@ pub fn text_lsd_letters<'a, M: 'a>(
             lsd_intensity,
             lsd_enabled,
         ));
-        
+
         letter_row = letter_row.push(magic_char);
     }
-    
+
     letter_row.into()
 }
 
@@ -1809,7 +1804,12 @@ pub fn text_editor_style(
             color: if matches!(status, iced::widget::text_editor::Status::Focused { .. }) {
                 palette.accent
             } else {
-                Color::from_rgba(palette.text_primary.r, palette.text_primary.g, palette.text_primary.b, 0.1)
+                Color::from_rgba(
+                    palette.text_primary.r,
+                    palette.text_primary.g,
+                    palette.text_primary.b,
+                    0.1,
+                )
             },
             width: 1.0,
             radius: 6.0.into(),
@@ -1821,8 +1821,6 @@ pub fn text_editor_style(
     }
 }
 
-
-
 // 2. Actualizar la función para que se comporte como un área real
 pub fn magic_text_area<'a, M>(
     element: Element<'a, M, Theme, Renderer>,
@@ -1832,10 +1830,10 @@ where
     M: 'a + Clone,
 {
     if ctx.lsd_enabled {
-        // Usamos una semilla diferente (11) para que el área de texto se mueva 
+        // Usamos una semilla diferente (11) para que el área de texto se mueva
         // de forma distinta a los inputs pequeños
         let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 11);
-        
+
         Element::new(SmoothTranslate::new(
             container(element)
                 .width(Length::Fill)
@@ -2018,8 +2016,11 @@ where
 pub fn dropdown_menu_style(palette: &Palette, _t: &Theme) -> container::Style {
     container::Style {
         // Fondo muy oscuro (casi negro) para que resalte sobre el modal gris
-        background: Some(Background::Color(Color { 
-            r: 0.05, g: 0.05, b: 0.07, a: 1.0 
+        background: Some(Background::Color(Color {
+            r: 0.05,
+            g: 0.05,
+            b: 0.07,
+            a: 1.0,
         })),
         // BORDE DEL COLOR DE ACENTO (verde/naranja/etc)
         border: Border {

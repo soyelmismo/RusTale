@@ -524,13 +524,20 @@ pub fn setup_java_proxy(java_real: &PathBuf) -> anyhow::Result<PathBuf> {
     let java_proxy = bin_dir.join(exe_name);
     let java_original = bin_dir.join(original_name);
 
-    if java_original.exists() {
-        return Ok(java_proxy);
+    if !java_original.exists() {
+        std::fs::rename(java_real, &java_original)?;
     }
-
-    std::fs::rename(java_real, &java_original)?;
+    
+    // Always overwrite the proxy binary to ensure it matches the current launcher version
     let current_exe = std::env::current_exe()?;
-    std::fs::copy(&current_exe, &java_proxy)?;
+    if let Err(e) = std::fs::copy(&current_exe, &java_proxy) {
+        // If we can't copy (e.g. file busy), and it exists, we might warn but proceed.
+        // However, for development/updates, this is critical.
+        eprintln!("[Patcher] Warning: Failed to update java proxy binary: {}", e);
+        if !java_proxy.exists() {
+             return Err(e.into());
+        }
+    }
 
     Ok(java_proxy)
 }

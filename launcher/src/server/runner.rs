@@ -475,14 +475,17 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     let java_exec = crate::java::get_java_exec(&root_dir)?;
     let java_path = PathBuf::from(&java_exec);
 
-    // Si existe java_original, es que el proxy está instalado. 
-    // Para el servidor dedicado, queremos el REAL para evitar ruidos de logs.
-    let java_original = java_path.parent().unwrap().join(if cfg!(windows) { "java_original.exe" } else { "java_original" });
-    let final_java = if java_original.exists() {
-        println!("Using real Java (java_original) to avoid proxy loop");
-        java_original.to_string_lossy().to_string()
-    } else {
-        java_exec
+    // --- PROXY SETUP (SERVER) ---
+    // Ensure the proxy is active and updated
+    let final_java = match crate::game::patcher::setup_java_proxy(&java_path) {
+        Ok(p) => {
+            println!("[Runner] (Server) Java Proxy updated and active.");
+            p.to_string_lossy().to_string()
+        },
+        Err(e) => {
+            eprintln!("[Runner] (Server) Failed to setup Java Proxy: {}", e);
+            java_exec.clone()
+        }
     };
 
     crate::util::make_executable(&PathBuf::from(&final_java)).await?;
@@ -557,9 +560,18 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     println!("  - Final server args: {}", config.server_args);
 
     let mut cmd = Command::new(final_java);
+    
+    // Inject AURORA_MODE so the Proxy knows what to do
+    cmd.env("AURORA_MODE", &config.online_mode);
 
-    cmd.current_dir(&install_dir)
-        .args(config.java_exec_args.split_whitespace())
+    cmd.current_dir(&install_dir);
+
+    // Filter out AOT args explicitly to avoid errors
+    let java_args: Vec<&str> = config.java_exec_args.split_whitespace()
+        .filter(|a| !a.starts_with("-XX:AOTCache"))
+        .collect();
+    
+    cmd.args(java_args)
         .arg("-jar")
         .arg(&patched_jar_path);
     cmd.args(config.server_args.split_whitespace());
@@ -569,6 +581,13 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         .stdin(std::process::Stdio::inherit());
 
     cmd.env("RUSTALE_IS_SERVER", "1");
+    
+    // Ensure no console window appears even for server (as we capture logs)
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
 
     cmd.kill_on_drop(true);
 

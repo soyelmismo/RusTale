@@ -150,7 +150,7 @@ impl std::hash::Hash for ThemeConfig {
 
 // File: settings.toml
 // Added 'Hash' and 'Eq' to allow usage in Iced Subscriptions
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Hash)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(default)]
 pub struct GameSettings {
     #[serde(rename = "minMemory")]
@@ -159,6 +159,8 @@ pub struct GameSettings {
     pub max_memory: u32,
     pub width: u32,
     pub height: u32,
+    #[serde(default = "default_scale")]
+    pub scale_factor: f32,
     #[serde(default)]
     pub fullscreen: bool,
     #[serde(rename = "javaArgs", default)]
@@ -189,8 +191,36 @@ pub struct GameSettings {
     pub theme: ThemeConfig,
 }
 
+impl std::hash::Hash for GameSettings {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.min_memory.hash(state);
+        self.max_memory.hash(state);
+        self.width.hash(state);
+        self.height.hash(state);
+        ((self.scale_factor * 1000.0) as i32).hash(state);
+        self.fullscreen.hash(state);
+        self.java_args.hash(state);
+        self.game_dir.hash(state);
+        self.channel.hash(state);
+        self.game_version.hash(state);
+        self.language.hash(state);
+        self.enable_news.hash(state);
+        self.enable_online_fix.hash(state);
+        self.online_fix_mode.hash(state);
+        self.minimize_to_tray.hash(state);
+        self.minimize_on_play.hash(state);
+        self.quickplay.hash(state);
+        self.enable_auto_update.hash(state);
+        self.theme.hash(state);
+    }
+}
+
 fn default_lang() -> String {
     "en-US".to_string()
+}
+
+fn default_scale() -> f32 {
+    1.5
 }
 
 fn default_true() -> bool {
@@ -204,6 +234,7 @@ impl Default for GameSettings {
             max_memory: 4,
             width: 1024,
             height: 640,
+            scale_factor: 1.5,
             fullscreen: false,
             java_args: "-XX:+UseG1GC -Dsun.rmi.dgc.server.gcInterval=2147483646 -XX:+UnlockExperimentalVMOptions -XX:G1NewSizePercent=20 -XX:G1ReservePercent=20 -XX:MaxGCPauseMillis=50 -XX:G1HeapRegionSize=32M".to_string(),
             game_dir: "".to_string(),

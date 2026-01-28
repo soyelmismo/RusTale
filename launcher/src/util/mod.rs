@@ -137,8 +137,12 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
         OnlineFixMode::Local => "local",
     };
 
-    // 2. Scan for server.jar
-    proxy_log("Scanning arguments for HytaleServer.jar...");
+    // 2. Scan for server.jar and filter AOT args
+    proxy_log("Scanning arguments...");
+    
+    // Filter out AOT cache arguments to prevent errors/warnings
+    final_args.retain(|arg| !arg.starts_with("-XX:AOTCache"));
+
     for (i, arg) in args.iter().enumerate() {
         if arg.to_lowercase().ends_with("hytaleserver.jar") {
             proxy_log(&format!("Found candidate arg: {}", arg));
@@ -182,7 +186,10 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
 
                 if patched_jar_path.exists() {
                     proxy_log("Persistent patched JAR found. Using it.");
-                    final_args[i] = patched_jar_path.to_string_lossy().to_string();
+                    // Find the index in final_args that matches this arg and replace it
+                    if let Some(idx) = final_args.iter().position(|x| x == arg) {
+                         final_args[idx] = patched_jar_path.to_string_lossy().to_string();
+                    }
                 } else {
                     proxy_log("Patched JAR not found. Patching on-the-fly...");
                     if let Ok(_) = crate::game::patcher::patch_server_jar(
@@ -191,7 +198,9 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
                         online_mode,
                         port,
                     ) {
-                        final_args[i] = patched_jar_path.to_string_lossy().to_string();
+                        if let Some(idx) = final_args.iter().position(|x| x == arg) {
+                             final_args[idx] = patched_jar_path.to_string_lossy().to_string();
+                        }
                     }
                 }
                 break;
@@ -211,14 +220,18 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
     let mut cmd = Command::new(java_real);
     cmd.args(final_args);
 
-    // Detect if we should show the console (always for server, or if explicitly requested)
-    let is_server = std::env::var("RUSTALE_IS_SERVER").is_ok() 
-        || args.iter().any(|a| a.to_lowercase().contains("hytaleserver.jar"));
+    // Detect if we should show the console
+    // Show console ONLY if it is a server AND NOT singleplayer
+    let is_server_jar = args.iter().any(|a| a.to_lowercase().contains("hytaleserver.jar"));
+    let is_singleplayer = args.iter().any(|a| a == "--singleplayer");
+    let is_dedicated_server_flag = std::env::var("RUSTALE_IS_SERVER").is_ok();
+
+    let show_console = (is_server_jar || is_dedicated_server_flag) && !is_singleplayer;
 
     #[cfg(target_os = "windows")]
     {
-        if !is_server {
-            // Hide black console window for the client GUI
+        if !show_console {
+            // Hide black console window for client or singleplayer
             cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
         }
     }

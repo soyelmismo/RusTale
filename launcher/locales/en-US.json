@@ -104,7 +104,8 @@
         "saturation": "Saturation",
         "contrast": "Contrast",
         "save": "Save",
-        "cancel": "Cancel"
+        "cancel": "Cancel",
+        "scale_factor": "Scale Factor"
     },
     "dialog": {
         "select_folder": "Select Installation Folder"

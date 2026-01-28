@@ -104,7 +104,8 @@
         "saturation": "Saturación",
         "contrast": "Contraste",
         "save": "Guardar",
-        "cancel": "Cancelar"
+        "cancel": "Cancelar",
+        "scale_factor": "Escala de la Interfaz"
     },
     "dialog": {
         "select_folder": "Seleccionar carpeta de instalación"

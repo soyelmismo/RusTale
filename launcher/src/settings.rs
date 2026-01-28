@@ -2,8 +2,8 @@ use crate::Message;
 use crate::config::GameSettings;
 use crate::{theme, util};
 use iced::widget::{
-    Space, button, checkbox, column, container, pick_list, row, scrollable, slider, svg,
-    text_input, Id,
+    Id, Space, button, checkbox, column, container, pick_list, row, scrollable, slider, svg,
+    text_input,
 };
 use iced::{Alignment, Element, Length, Size};
 
@@ -81,7 +81,7 @@ pub enum DropdownState {
     Theme,
     Channel,
     Version,
-    OnlineMode
+    OnlineMode,
 }
 
 #[derive(Debug, Clone)]
@@ -94,6 +94,7 @@ pub enum SettingsMessage {
     // Video
     WidthChanged(String),
     HeightChanged(String),
+    ScaleFactorChanged(f32),
     FullscreenToggled(bool),
     // Java
     MinMemoryChanged(f32),
@@ -134,7 +135,7 @@ pub enum SettingsMessage {
     LsdToggled(bool),
     LsdHovered(bool),
     BaseThemeChanged(crate::config::BaseThemeMode),
-    
+
     None,
 }
 
@@ -194,7 +195,7 @@ pub struct SettingsState {
 impl SettingsState {
     pub fn new(current_settings: GameSettings) -> Self {
         let initial_java_args = current_settings.java_args.clone();
-        
+
         Self {
             current_tab: Tab::Game,
             temp_settings: current_settings,
@@ -220,7 +221,6 @@ impl SettingsState {
         self.update_btn_status = UpdateStatus::Idle;
         // installed_versions should be updated via message shortly after opening
     }
-
 
     fn view_launcher_tab<'a>(
         &'a self,
@@ -278,11 +278,14 @@ impl SettingsState {
         .align_y(Alignment::Center);
 
         let theme_presets = ThemePreset::all();
-        let selected_preset = theme_presets.iter().find(|p| {
-            self.temp_settings.theme.accent_hex == p.color() || 
-            (p.color().is_empty() && self.temp_settings.theme.accent_hex.is_empty())
-        }).cloned();
-        
+        let selected_preset = theme_presets
+            .iter()
+            .find(|p| {
+                self.temp_settings.theme.accent_hex == p.color()
+                    || (p.color().is_empty() && self.temp_settings.theme.accent_hex.is_empty())
+            })
+            .cloned();
+
         let theme_preset_pick = theme::magic_pick_list_with_menu(
             pick_list(
                 theme_presets.clone(),
@@ -511,10 +514,8 @@ impl SettingsState {
             section_title(localization.t("settings.install_path"), ctx),
             row![
                 button(
-                    row![
-                        theme::text_body(current_path_display.clone(), ctx)
-                    ]
-                    .align_y(Alignment::Center)
+                    row![theme::text_body(current_path_display.clone(), ctx)]
+                        .align_y(Alignment::Center)
                 )
                 .on_press(SettingsMessage::OpenCurrentDataDir)
                 .style(move |t, s| theme::secondary_button_style(&palette, t, s))
@@ -595,7 +596,11 @@ impl SettingsState {
         // Prepare version options: 0 (Latest) + available versions
         let version_options = {
             let mut opts = vec![VersionOption::Latest];
-            opts.extend(self.available_versions.iter().map(|&v| VersionOption::Specific(v as u32)));
+            opts.extend(
+                self.available_versions
+                    .iter()
+                    .map(|&v| VersionOption::Specific(v as u32)),
+            );
             opts
         };
 
@@ -612,10 +617,7 @@ impl SettingsState {
 
         // Create "Version Section" as a typed Element
         let version_section: Element<'a, SettingsMessage> = column![
-            theme::text_small(
-                localization.t("settings.target_version"),
-                ctx
-            ),
+            theme::text_small(localization.t("settings.target_version"), ctx),
             theme::magic_pick_list_with_menu(
                 pick_list(version_options, selected_localized, |v| {
                     SettingsMessage::VersionSelected(u32::from(v))
@@ -646,7 +648,9 @@ impl SettingsState {
         })
         .into();
 
-        let current_mode_ref = ONLINE_FIX_MODES.iter().find(|&mode| *mode == self.temp_settings.online_fix_mode);
+        let current_mode_ref = ONLINE_FIX_MODES
+            .iter()
+            .find(|&mode| *mode == self.temp_settings.online_fix_mode);
         let fix_mode_picker = row![
             theme::text_small(localization.t("settings.patch_mode"), ctx),
             theme::styled_dropdown(
@@ -703,7 +707,10 @@ impl SettingsState {
         // --- 3. Storage Management (Installed Versions) ---
         let installed_content: Element<'_, SettingsMessage> = if self.installed_versions.is_empty()
         {
-            container(theme::text_small(localization.t("settings.storage.no_versions"), ctx))
+            container(theme::text_small(
+                localization.t("settings.storage.no_versions"),
+                ctx,
+            ))
             .width(Length::Fill)
             .padding(10)
             .style(move |t| theme::container_style_transparent(&palette, t))
@@ -797,14 +804,14 @@ impl SettingsState {
 
         // --- CORRECCIoN 2b: Envolver retorno en tupla ---
         theme::page_container(theme::magic_column(
-                vec![
-                    path_selector.into(),
-                    game_config.into(),
-                    installed_manager.into(),
-                ],
-                ctx,
-            ))
-            .into()
+            vec![
+                path_selector.into(),
+                game_config.into(),
+                installed_manager.into(),
+            ],
+            ctx,
+        ))
+        .into()
     }
 
     pub fn update(&mut self, message: SettingsMessage) -> Option<Message> {
@@ -854,6 +861,10 @@ impl SettingsState {
                 if let Ok(num) = val.parse() {
                     self.temp_settings.height = num;
                 }
+                None
+            }
+            SettingsMessage::ScaleFactorChanged(val) => {
+                self.temp_settings.scale_factor = val;
                 None
             }
             SettingsMessage::FullscreenToggled(val) => {
@@ -1007,7 +1018,7 @@ impl SettingsState {
                 self.temp_settings.online_fix_mode = mode;
                 None
             }
-            
+
             SettingsMessage::None => None,
         }
     }
@@ -1082,6 +1093,25 @@ impl SettingsState {
                     ]
                     .spacing(20)
                     .into(),
+                    column![
+                        theme::text_small(
+                            format!(
+                                "{}: {:.2}x",
+                                localization.t("settings.scale_factor"),
+                                self.temp_settings.scale_factor
+                            ),
+                            ctx
+                        ),
+                        slider(
+                            1.0..=2.0,
+                            self.temp_settings.scale_factor,
+                            SettingsMessage::ScaleFactorChanged,
+                        )
+                        .step(0.05)
+                        .style(move |t, s| theme::slider_style(&palette, t, s))
+                    ]
+                    .spacing(5)
+                    .into(),
                     row![
                         theme::magic_checkbox(
                             checkbox(self.temp_settings.fullscreen)
@@ -1102,9 +1132,10 @@ impl SettingsState {
             Tab::Java => {
                 let content = if self.java_loading {
                     theme::magic_column(
-                        vec![
-                            theme::text_title(localization.t("launcher.status.loading"), ctx),
-                        ],
+                        vec![theme::text_title(
+                            localization.t("launcher.status.loading"),
+                            ctx,
+                        )],
                         ctx,
                     )
                 } else {
@@ -1113,14 +1144,15 @@ impl SettingsState {
                             // Mostrar version de Java si esta disponible
                             if let Some(ref version) = self.java_version {
                                 theme::text_title(
-                                    &format!("{}: {}", localization.t("settings.java_version"), version),
+                                    &format!(
+                                        "{}: {}",
+                                        localization.t("settings.java_version"),
+                                        version
+                                    ),
                                     ctx,
                                 )
                             } else {
-                                theme::text_body(
-                                    localization.t("settings.java_not_detected"),
-                                    ctx,
-                                )
+                                theme::text_body(localization.t("settings.java_not_detected"), ctx)
                             },
                             section_title(localization.t("settings.java_memory"), ctx),
                             theme::text_body(
@@ -1159,16 +1191,17 @@ impl SettingsState {
                             theme::magic_text_area(
                                 iced::widget::text_editor(&self.jvm_args_content)
                                     .on_action(|action| SettingsMessage::JavaArgsAction(action)) // Necesitas un mensaje nuevo
-                                    .style(move |t, status| theme::text_editor_style(&palette, t, status))
+                                    .style(move |t, status| {
+                                        theme::text_editor_style(&palette, t, status)
+                                    })
                                     .into(),
                                 ctx,
                             ),
-
                         ],
                         ctx,
                     )
                 };
-                
+
                 theme::page_container(content).into()
             }
         };
@@ -1176,19 +1209,19 @@ impl SettingsState {
         let footer = row![
             theme::magic_button(
                 button(theme::text_small(localization.t("settings.cancel"), ctx))
-                .on_press(SettingsMessage::CloseModal)
-                .style(move |t, s| theme::secondary_button_style(&palette, t, s))
-                .padding(10) // Reduced visible scaling by keeping padding reasonable but text small
-                .into(),
+                    .on_press(SettingsMessage::CloseModal)
+                    .style(move |t, s| theme::secondary_button_style(&palette, t, s))
+                    .padding(10) // Reduced visible scaling by keeping padding reasonable but text small
+                    .into(),
                 ctx,
             ),
             Space::new().width(10),
             theme::magic_button(
                 button(theme::text_body(localization.t("settings.save"), ctx))
-                .on_press(SettingsMessage::SaveSettings)
-                .style(move |t, status| theme::primary_button_style(&palette, t, status))
-                .padding(10)
-                .into(),
+                    .on_press(SettingsMessage::SaveSettings)
+                    .style(move |t, status| theme::primary_button_style(&palette, t, status))
+                    .padding(10)
+                    .into(),
                 ctx,
             )
         ]
@@ -1314,9 +1347,9 @@ fn theme_mode_button<'a>(
     theme::magic_button(
         button(
             container(theme::text_small(label, ctx))
-            .center_x(Length::Fill)
-            .padding(8)
-            .style(move |t| theme::container_style_transparent(&palette, t)),
+                .center_x(Length::Fill)
+                .padding(8)
+                .style(move |t| theme::container_style_transparent(&palette, t)),
         )
         .on_press(SettingsMessage::BaseThemeChanged(mode))
         .width(Length::Fill)

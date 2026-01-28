@@ -1,4 +1,4 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![windows_subsystem = "windows"]
 use clap::Parser;
 use futures::SinkExt;
 use iced::widget::{Space, column, container, image, mouse_area, row, shader, stack};
@@ -82,6 +82,10 @@ pub struct Args {
 fn is_running_as_java_proxy() -> bool {
     // 0. Safe fallback: Environment variable (Set by Runner)
     if std::env::var("RUSTALE_IS_PROXY").is_ok() {
+        return true;
+    }
+    // Checking for AURORA_MODE is a strong signal we are the proxy
+    if std::env::var("AURORA_MODE").is_ok() {
         return true;
     }
 
@@ -186,6 +190,7 @@ pub fn main() -> iced::Result {
 
     let config_initialization_mode = config::load_initialization_config_sync();
     let (width, height) = config::load_width_height();
+    let initial_scale_factor = config::load_settings_sync().scale_factor;
     let is_quickplay = args.quickplay || config_initialization_mode.quickplay;
 
     if args.dedicated_server {
@@ -234,6 +239,7 @@ pub fn main() -> iced::Result {
         antialiasing: false,
         ..Default::default()
     })
+    .scale_factor(|app: &RusTale| app.settings.scale_factor)
     .run()
 }
 
