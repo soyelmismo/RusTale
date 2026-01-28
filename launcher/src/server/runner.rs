@@ -464,6 +464,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
             &patched_jar_path,
             mode_enum,
             auth_port,
+            None,
         )?;
     } else {
         println!("Using existing patched JAR: {}", patched_jar_name);
@@ -585,7 +586,6 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     // Ensure no console window appears even for server (as we capture logs)
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x08000000);
     }
 

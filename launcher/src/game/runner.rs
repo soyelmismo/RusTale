@@ -318,6 +318,7 @@ impl Recipe for Runner {
                         }
 
                         // LOGICA DE SWAP PERSISTENTE
+                        let output_clone = output.clone();
                         task::spawn_blocking(move || {
                             let original_jar_path =
                                 server_jar_path_clone.with_file_name("HytaleServer.original");
@@ -341,11 +342,18 @@ impl Recipe for Runner {
                                 println!(
                                     "[Runner] Generating HytaleServer.jar from HytaleServer.original (Persistent Mode)..."
                                 );
+
+                                let progress_cb = move |p: f32| {
+                                    let mut tx = output_clone.clone();
+                                    let _ = tx.try_send(Message::ServerPatchProgress(p));
+                                };
+
                                 match crate::game::patcher::patch_server_jar(
                                     &original_jar_path,
                                     &server_jar_path_clone,
                                     mode_fix,
                                     port_clone,
+                                    Some(Box::new(progress_cb)),
                                 ) {
                                     Ok(_) => println!(
                                         "[Runner] Patch applied successfully to HytaleServer.jar"

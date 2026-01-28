@@ -13,6 +13,8 @@ pub fn view<'a>(
     status_text: &'a str,
     localization: &'a crate::lang::Localization,
     is_disabled: bool,
+    server_patch_progress: f32,
+    show_server_patch_progress: bool,
     ctx: theme::UIContext,
 ) -> Element<'a, Message> {
     let palette = ctx.palette;
@@ -214,6 +216,22 @@ pub fn view<'a>(
                 }
             ]
             .spacing(10)
+        } else if show_server_patch_progress {
+            column![
+                row![
+                    theme::text_micro("Patching Server...", ctx),
+                    Space::new().width(Length::Fill),
+                    theme::text_micro(format!("{:.0}%", server_patch_progress), ctx)
+                ],
+                container(
+                    ProgressBar::new(0.0..=100.0, server_patch_progress)
+                        .style(move |t| theme::accent_bar_style(&palette, t))
+                )
+                .height(4)
+                .width(Length::Fill)
+                .style(move |t| theme::container_style_transparent(&palette, t))
+            ]
+            .spacing(5)
         } else {
             column![]
         },

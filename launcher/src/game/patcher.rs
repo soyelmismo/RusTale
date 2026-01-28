@@ -413,6 +413,7 @@ pub fn patch_server_jar(
     dst: &PathBuf,
     online_mode: OnlineFixMode,
     port: u16,
+    progress: Option<Box<dyn Fn(f32) + Send>>,
 ) -> anyhow::Result<()> {
     if !src.exists() {
         anyhow::bail!("Source server JAR not found at {:?}", src);
@@ -467,8 +468,12 @@ pub fn patch_server_jar(
     }
 
     let mut buffer = Vec::new();
+    let total_files = archive.len();
 
-    for i in 0..archive.len() {
+    for i in 0..total_files {
+        if let Some(ref cb) = progress {
+            cb((i as f32 / total_files as f32) * 100.0);
+        }
         let mut file = archive.by_index(i)?;
         let name = file.name().to_string();
 
@@ -491,6 +496,11 @@ pub fn patch_server_jar(
     }
 
     zip_writer.finish()?;
+
+    if let Some(ref cb) = progress {
+        cb(100.0);
+    }
+
     Ok(())
 }
 
@@ -573,60 +583,119 @@ pub fn generate_server_aot(
     java_exec: &PathBuf,
     jar_path: &PathBuf,
     jvm_args: &str,
+    app_args: &[String],
 ) -> anyhow::Result<()> {
     if !jar_path.exists() {
         return Err(anyhow::anyhow!("JAR file not found"));
     }
-    
-    let aot_file = jar_path.with_extension("aot");
-    println!("[AOT] Generating cache for {:?} -> {:?}", jar_path, aot_file);
-    
-    // Command: java -XX:AOTMode=record -XX:AOTCache=output.aot [ARGS] -jar input.jar
-    // Note: Use minimal args to speed up valid launch.
-    
-    let mut cmd = std::process::Command::new(java_exec);
-    
+
+    let aot_config = jar_path.with_extension("aot_config");
+    let aot_cache = jar_path.with_extension("aot");
+
+    // --- PHASE 1: RECORD ---
+    println!("[AOT] Phase 1: Recording configuration...");
+    let mut cmd_record = std::process::Command::new(java_exec);
+
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); 
+        cmd_record.creation_flags(0x08000000);
     }
-    
-    // Basic args from known good config + AOT flags
-    cmd.arg("-XX:AOTMode=record")
-       .arg(format!("-XX:AOTCache={}", aot_file.to_string_lossy()));
-       
-    // Add user provided args (memory, GC) but filter conflicting AOT ones
+
+    cmd_record
+        .arg("-XX:AOTMode=record")
+        .arg(format!("-XX:AOTConfiguration={}", aot_config.to_string_lossy()))
+        .arg("-Xlog:aot");
+
     for arg in jvm_args.split_whitespace() {
         if !arg.starts_with("-XX:AOT") {
-            cmd.arg(arg);
+            cmd_record.arg(arg);
         }
     }
-    
-    cmd.arg("-jar")
-       .arg(jar_path)
-       // Add server args that make it start faster or just boot (headless)
-       .arg("--nogui")
-       .arg("--init-only"); // Hypothetical flag, or we just kill it after X seconds
 
-    println!("[AOT] Launching generation process...");
-    
-    // We spawn and wait a bit. If HytaleServer has a dry-run flag, great.
-    // If not, we might need to kill it after we see "Server started" or similar.
-    // For now, let's assume valid start and we kill it after 20 seconds if it doesn't exit.
-    
-    let mut child = cmd.spawn()?;
-    
-    std::thread::sleep(std::time::Duration::from_secs(20));
-    
+    cmd_record.arg("-jar").arg(jar_path);
+    for arg in app_args {
+        cmd_record.arg(arg);
+    }
+
+    cmd_record.stdout(std::process::Stdio::piped());
+    cmd_record.stderr(std::process::Stdio::inherit());
+
+    let mut child = cmd_record.spawn()?;
+    let stdout = child.stdout.take().unwrap();
+    let reader = std::io::BufReader::new(stdout);
+
+    use std::io::BufRead;
+    for line in reader.lines() {
+        if let Ok(l) = line {
+            println!("[AOT-Record] {}", l);
+            if l.contains("AOTConfiguration recorded") {
+                println!("[AOT] Configuration ready. Stopping record process.");
+                break;
+            }
+        }
+    }
+
     let _ = child.kill();
     let _ = child.wait();
-    
-    if aot_file.exists() {
-        println!("[AOT] Generation successful: {:?}", aot_file);
+
+    if !aot_config.exists() {
+        return Err(anyhow::anyhow!("Failed to generate AOT configuration"));
+    }
+
+    // --- PHASE 2: CREATE ---
+    println!("[AOT] Phase 2: Creating cache archive...");
+    let mut cmd_create = std::process::Command::new(java_exec);
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd_create.creation_flags(0x08000000);
+    }
+
+    cmd_create
+        .arg("-XX:AOTMode=create")
+        .arg(format!("-XX:AOTConfiguration={}", aot_config.to_string_lossy()))
+        .arg(format!("-XX:AOTCache={}", aot_cache.to_string_lossy()))
+        .arg("-Xlog:aot");
+
+    for arg in jvm_args.split_whitespace() {
+        if !arg.starts_with("-XX:AOT") {
+            cmd_create.arg(arg);
+        }
+    }
+
+    cmd_create.arg("-jar").arg(jar_path);
+    for arg in app_args {
+        cmd_create.arg(arg);
+    }
+
+    cmd_create.stdout(std::process::Stdio::piped());
+    cmd_create.stderr(std::process::Stdio::inherit());
+
+    let mut child = cmd_create.spawn()?;
+    let stdout = child.stdout.take().unwrap();
+    let reader = std::io::BufReader::new(stdout);
+
+    for line in reader.lines() {
+        if let Ok(l) = line {
+            println!("[AOT-Create] {}", l);
+            if l.contains("AOTCache creation is complete") {
+                println!("[AOT] Cache ready. Stopping creation process.");
+                break;
+            }
+        }
+    }
+
+    let _ = child.kill();
+    let _ = child.wait();
+
+    if aot_cache.exists() {
+        let _ = std::fs::remove_file(aot_config);
+        println!("[AOT] Generation successful.");
         Ok(())
     } else {
-        Err(anyhow::anyhow!("Failed to generate AOT file"))
+        Err(anyhow::anyhow!("Failed to generate AOT cache"))
     }
 }
 

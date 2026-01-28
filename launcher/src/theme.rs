@@ -780,6 +780,17 @@ pub fn orange_bar_style(palette: &Palette, _t: &Theme) -> progress_bar::Style {
     }
 }
 
+pub fn accent_bar_style(palette: &Palette, _t: &Theme) -> progress_bar::Style {
+    progress_bar::Style {
+        background: Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.1)),
+        bar: Background::Color(palette.accent),
+        border: Border {
+            radius: 4.0.into(),
+            ..Default::default()
+        },
+    }
+}
+
 pub fn primary_button_style(
     palette: &Palette,
     _t: &Theme,

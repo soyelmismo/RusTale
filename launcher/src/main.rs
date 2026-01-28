@@ -1,4 +1,4 @@
-#![windows_subsystem = "windows"]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use clap::Parser;
 use futures::SinkExt;
 use iced::widget::{Space, column, container, image, mouse_area, row, shader, stack};
@@ -190,7 +190,6 @@ pub fn main() -> iced::Result {
 
     let config_initialization_mode = config::load_initialization_config_sync();
     let (width, height) = config::load_width_height();
-    let initial_scale_factor = config::load_settings_sync().scale_factor;
     let is_quickplay = args.quickplay || config_initialization_mode.quickplay;
 
     if args.dedicated_server {
@@ -313,6 +312,7 @@ pub enum Message {
     WindowDrag,
     MinimizeWindow,
     MaximizeWindow,
+    ServerPatchProgress(f32),
 }
 
 struct RusTale {
@@ -338,6 +338,8 @@ struct RusTale {
     localization: Localization,
     is_quickplay_mode: bool,
     is_window_visible: bool,
+    server_patch_progress: f32,
+    show_server_patch_progress: bool,
     window_size: Size,
     tray_icon: Option<tray_icon::TrayIcon>, // Store tray icon to rebuild menu dynamically
     mods_state: ModsState,                  // Modal state
@@ -438,6 +440,8 @@ impl RusTale {
                 mods_state: ModsState::new(),
                 local_server_stop_tx: None,
                 cancellation_token: Arc::new(AtomicBool::new(false)),
+                server_patch_progress: 0.0,
+                show_server_patch_progress: false,
                 palette: theme::generate_palette(&initial_settings.theme),
                 lsd_offset: if initial_settings.theme.lsd_mode {
                     // Valores iniciales aleatorios para que el efecto LSD se aplique inmediatamente
@@ -1122,6 +1126,11 @@ impl RusTale {
                 }
                 _ => Task::none(),
             },
+            Message::ServerPatchProgress(progress) => {
+                self.server_patch_progress = progress;
+                self.show_server_patch_progress = progress > 0.0 && progress < 100.0;
+                Task::none()
+            }
             Message::EditProfileUUID(id) => {
                 self.editing_profile = None;
                 if let Some(p) = self.profiles.profiles.iter().find(|p| p.id == id) {
@@ -1957,6 +1966,8 @@ impl RusTale {
                 &self.status_text,
                 &self.localization,
                 is_interaction_disabled,
+                self.server_patch_progress,
+                self.show_server_patch_progress,
                 ctx,
             ),
         ]
