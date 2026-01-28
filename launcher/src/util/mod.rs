@@ -137,11 +137,11 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
         OnlineFixMode::Local => "local",
     };
 
-    // 2. Scan for server.jar and filter AOT args
+    // 2. Scan for server.jar
     proxy_log("Scanning arguments...");
     
-    // Filter out AOT cache arguments to prevent errors/warnings
-    final_args.retain(|arg| !arg.starts_with("-XX:AOTCache"));
+    // We do NOT filter AOT args here anymore, because we want to patch them if present.
+    // final_args.retain(|arg| !arg.starts_with("-XX:AOTCache"));
 
     for (i, arg) in args.iter().enumerate() {
         if arg.to_lowercase().ends_with("hytaleserver.jar") {
@@ -174,36 +174,72 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
                     .unwrap_or(std::path::Path::new("."));
 
                 let possible_original = server_dir.join("HytaleServer.original");
-                if possible_original.exists() {
-                    proxy_log(
-                        "Detected persistent swap (HytaleServer.original exists). Assuming input arg is patched.",
-                    );
-                    break;
-                }
-
-                let patched_jar_name = format!("HytaleServer.{}.{}.jar", mode_str, port);
-                let patched_jar_path = server_dir.join(patched_jar_name);
-
-                if patched_jar_path.exists() {
-                    proxy_log("Persistent patched JAR found. Using it.");
-                    // Find the index in final_args that matches this arg and replace it
-                    if let Some(idx) = final_args.iter().position(|x| x == arg) {
-                         final_args[idx] = patched_jar_path.to_string_lossy().to_string();
-                    }
+                
+                // Determine which jar we are actually going to use
+                let target_jar_path = if possible_original.exists() {
+                    proxy_log("Detected persistent swap (HytaleServer.original exists). Using HytaleServer.jar as patched.");
+                    original_jar_path.clone()
                 } else {
-                    proxy_log("Patched JAR not found. Patching on-the-fly...");
-                    if let Ok(_) = crate::game::patcher::patch_server_jar(
-                        &original_jar_path,
-                        &patched_jar_path,
-                        online_mode,
-                        port,
-                    ) {
-                        if let Some(idx) = final_args.iter().position(|x| x == arg) {
-                             final_args[idx] = patched_jar_path.to_string_lossy().to_string();
-                        }
+                    let patched_jar_name = format!("HytaleServer.{}.{}.jar", mode_str, port);
+                    let side_by_side_path = server_dir.join(patched_jar_name);
+                    
+                    if side_by_side_path.exists() {
+                        proxy_log("Persistent patched JAR found (side-by-side). Using it.");
+                    } else {
+                        proxy_log("Patched JAR not found. Patching on-the-fly...");
+                        crate::game::patcher::patch_server_jar(
+                            &original_jar_path,
+                            &side_by_side_path,
+                            online_mode,
+                            port,
+                        )?;
+                    }
+                    side_by_side_path
+                };
+
+                // Ensure AOT backup for safety
+                let _ = crate::game::patcher::handle_aot_backups(server_dir);
+
+                // Check/Generate AOT for the TARGET JAR
+                let target_aot_path = target_jar_path.with_extension("aot");
+                
+                if !target_aot_path.exists() {
+                     proxy_log(&format!("AOT Cache for {:?} missing. Generating...", target_jar_path));
+                     
+                     // Collect JVM args for AOT generation
+                     let jvm_args: String = args.iter()
+                        .filter(|a| a.starts_with("-D") || a.starts_with("-X"))
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(" ");
+
+                     if let Err(e) = crate::game::patcher::generate_server_aot(
+                         &java_real,
+                         &target_jar_path,
+                         &jvm_args
+                     ) {
+                         proxy_log(&format!("AOT Generation Warning: {}", e));
+                     } else {
+                         proxy_log("AOT Generation Completed.");
+                     }
+                }
+
+                // Apply replacements in final_args
+                // 1. Replace JAR path with the target one
+                if let Some(idx) = final_args.iter().position(|x| x == arg) {
+                     final_args[idx] = target_jar_path.to_string_lossy().to_string();
+                }
+                
+                // 2. Scan for AOT arg to update it to the target AOT
+                for arg_ref in final_args.iter_mut() {
+                    if arg_ref.starts_with("-XX:AOTCache") {
+                         *arg_ref = format!("-XX:AOTCache={}", target_aot_path.to_string_lossy());
+                         proxy_log(&format!("Updated AOT Arg to: {}", arg_ref));
                     }
                 }
+                // Break after handling the server jar arg
                 break;
+
             } else {
                 proxy_log(&format!("File not found: {:?}", original_jar_path));
             }

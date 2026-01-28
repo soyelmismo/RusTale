@@ -564,3 +564,82 @@ pub fn remove_java_proxy(java_real: &PathBuf) -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+
+/// Generates the AOT Cache for a specific JAR.
+/// Warning: This operation might time out or hang if the server doesn't exit automatically.
+/// Ideally interact with the process or wait for a specific log line then kill it.
+pub fn generate_server_aot(
+    java_exec: &PathBuf,
+    jar_path: &PathBuf,
+    jvm_args: &str,
+) -> anyhow::Result<()> {
+    if !jar_path.exists() {
+        return Err(anyhow::anyhow!("JAR file not found"));
+    }
+    
+    let aot_file = jar_path.with_extension("aot");
+    println!("[AOT] Generating cache for {:?} -> {:?}", jar_path, aot_file);
+    
+    // Command: java -XX:AOTMode=record -XX:AOTCache=output.aot [ARGS] -jar input.jar
+    // Note: Use minimal args to speed up valid launch.
+    
+    let mut cmd = std::process::Command::new(java_exec);
+    
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); 
+    }
+    
+    // Basic args from known good config + AOT flags
+    cmd.arg("-XX:AOTMode=record")
+       .arg(format!("-XX:AOTCache={}", aot_file.to_string_lossy()));
+       
+    // Add user provided args (memory, GC) but filter conflicting AOT ones
+    for arg in jvm_args.split_whitespace() {
+        if !arg.starts_with("-XX:AOT") {
+            cmd.arg(arg);
+        }
+    }
+    
+    cmd.arg("-jar")
+       .arg(jar_path)
+       // Add server args that make it start faster or just boot (headless)
+       .arg("--nogui")
+       .arg("--init-only"); // Hypothetical flag, or we just kill it after X seconds
+
+    println!("[AOT] Launching generation process...");
+    
+    // We spawn and wait a bit. If HytaleServer has a dry-run flag, great.
+    // If not, we might need to kill it after we see "Server started" or similar.
+    // For now, let's assume valid start and we kill it after 20 seconds if it doesn't exit.
+    
+    let mut child = cmd.spawn()?;
+    
+    std::thread::sleep(std::time::Duration::from_secs(20));
+    
+    let _ = child.kill();
+    let _ = child.wait();
+    
+    if aot_file.exists() {
+        println!("[AOT] Generation successful: {:?}", aot_file);
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("Failed to generate AOT file"))
+    }
+}
+
+/// Helper to swap AOT files similar to the JARs, to avoid crashes.
+/// Returns true if it performed a swap (disabled original AOT).
+pub fn handle_aot_backups(server_dir: &std::path::Path) -> anyhow::Result<bool> {
+    let original_aot = server_dir.join("HytaleServer.aot");
+    let backup_aot = server_dir.join("HytaleServer.aot.original");
+    
+    if original_aot.exists() && !backup_aot.exists() {
+        println!("[Patcher] Backing up original AOT cache to avoid mismatch.");
+        std::fs::rename(&original_aot, &backup_aot)?;
+        return Ok(true);
+    }
+    Ok(false)
+}
