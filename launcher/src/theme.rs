@@ -107,15 +107,20 @@ impl SmoothTranslateState {
             // 0.0 en el centro exacto, 1.0 en el borde del radio de captura
             let capture_factor = (center_dist / capture_radius.max(5.0)).clamp(0.0, 1.0);
 
-            // Vector de atraccion (seguir al mouse)
-            let attract_v = Vector::new(mouse_pos.x - center.x, mouse_pos.y - center.y);
+            // Vector de atraccion (seguir al mouse) - reducido para contenedores grandes
+            let element_size = bounds.width.min(bounds.height);
+            let attraction_factor = if element_size > 150.0 { 0.2 } else { 1.0 }; // Contenedores grandes: 20%, elementos pequeños: 100%
+            let attract_v = Vector::new(
+                (mouse_pos.x - center.x) * attraction_factor, 
+                (mouse_pos.y - center.y) * attraction_factor
+            );
 
             // Vector de repulsion interna (empujar hacia el borde)
             let mut repel_v = Vector::new(closest_point.x - center.x, closest_point.y - center.y);
             let mag = (repel_v.x * repel_v.x + repel_v.y * repel_v.y).sqrt();
             if mag > 0.1 {
-                // Reducido a 8.0 para que sea un empujoncito leve
-                repel_v = Vector::new((repel_v.x / mag) * 8.0, (repel_v.y / mag) * 8.0);
+                // Reducido a 3.0 para que sea mucho más sutil
+                repel_v = Vector::new((repel_v.x / mag) * 3.0, (repel_v.y / mag) * 3.0);
             }
 
             // Interpolamos: Centro (attract) -> Bordes (repel)
@@ -133,9 +138,9 @@ impl SmoothTranslateState {
             if mag > 0.1 {
                 // Usamos un exponente mas alto (3.0) para que la fuerza caiga mucho mas rapido con la distancia
                 let force = (1.0 - dist_to_boundary / radius).powf(3.0);
-                // Reducido de 12.0 a 8.0 para mas sutileza
+                // Reducido a 3.0 para mucho más sutileza
                 target_displacement =
-                    Vector::new((dx / mag) * force * 8.0, (dy / mag) * force * 8.0);
+                    Vector::new((dx / mag) * force * 3.0, (dy / mag) * force * 3.0);
             }
         }
 
@@ -1712,7 +1717,7 @@ pub fn text_lsd_letters<'a, M: 'a>(
 pub fn svg<'a, M: 'a>(content: impl Into<Element<'a, M>>, ctx: UIContext) -> Element<'a, M> {
     let element = content.into();
     if ctx.lsd_enabled {
-        let (vx, vy) = get_seeded_disparity((ctx.lsd_offset.0 + 0.5, ctx.lsd_offset.1 + 0.5), 1);
+        let (vx, vy) = get_seeded_disparity((ctx.lsd_offset.0 + 0.5, ctx.lsd_offset.1 + 0.5), 15);
         let vx = vx * ctx.lsd_intensity;
         let vy = vy * ctx.lsd_intensity;
 

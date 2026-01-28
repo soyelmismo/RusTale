@@ -268,6 +268,28 @@ impl SettingsState {
         .spacing(10)
         .align_y(Alignment::Center);
 
+        let theme_presets = ThemePreset::all();
+        let selected_preset = theme_presets.iter().find(|p| {
+            self.temp_settings.theme.accent_hex == p.color() || 
+            (p.color().is_empty() && self.temp_settings.theme.accent_hex.is_empty())
+        }).cloned();
+        
+        let theme_preset_pick = theme::magic_pick_list_with_menu(
+            pick_list(
+                theme_presets.clone(),
+                selected_preset,
+                SettingsMessage::ThemePresetSelected,
+            )
+            .text_size(14)
+            .placeholder(localization.t("settings.theme_preset"))
+            .padding(10)
+            .width(150)
+            .style(move |t, status| theme::pick_list_style(&palette, t, status))
+            .menu_style(move |t| theme::menu_style(&palette, t))
+            .into(),
+            ctx,
+        );
+
         let theme_section = column![
             theme::text_title(localization.t("settings.theme"), ctx),
             row![
@@ -292,6 +314,13 @@ impl SettingsState {
             ]
             .spacing(2)
             .width(Length::Fill),
+            // Theme Preset Selector
+            row![
+                theme::text_small(localization.t("settings.theme_preset"), ctx),
+                theme_preset_pick
+            ]
+            .spacing(10)
+            .align_y(Alignment::Center),
             row![
                 theme::text_small("Hex", ctx),
                 theme::magic_text_input(
@@ -383,7 +412,7 @@ impl SettingsState {
 
                     // 3. La fila organiza los elementos de forma independiente
                     row![
-                        // El checkbox está completamente aislado
+                        // El checkbox esta completamente aislado
                         checkbox(self.temp_settings.theme.lsd_mode)
                             .on_toggle(SettingsMessage::LsdToggled)
                             .style(move |t, s| theme::checkbox_style(&palette, t, s)),

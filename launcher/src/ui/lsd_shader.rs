@@ -556,7 +556,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let d = distance(uv, mouse_uv);
 
-    let m_glow = exp(-d * 3.0) * u.intensity;
+    let m_glow = exp(-d * 1.0) * u.intensity;
 
     final_color += accent_color * m_glow;
 

@@ -1,9 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use clap::Parser;
 use futures::SinkExt;
-use iced::widget::{Space, column, container, image, row, shader, stack};
+use iced::widget::{Space, column, container, image, mouse_area, row, shader, stack};
 use iced::{
-    Color, ContentFit, Element, Length, Size, Subscription, Task, Theme, clipboard, window,
+    Alignment, Color, ContentFit, Element, Length, Size, Subscription, Task, Theme, clipboard, window,
+    mouse::Interaction,
 };
 use single_instance::SingleInstance;
 use std::sync::{
@@ -229,6 +230,7 @@ pub fn main() -> iced::Result {
 
         position: iced::window::Position::Centered,
         exit_on_close_request: false,
+        decorations: true,
 
         ..Default::default()
     })
@@ -311,6 +313,9 @@ pub enum Message {
     CancelAction,
     LoadJavaInfo,
     JavaInfoLoaded,
+    WindowDrag,
+    MinimizeWindow,
+    MaximizeWindow,
 }
 
 struct RusTale {
@@ -348,6 +353,8 @@ struct RusTale {
     cursor_position: iced::Point, // Rastrear raton para efectos
     last_mouse_move_time: std::time::Instant,
     lsd_enabled_time: Option<std::time::Instant>, // Para activacion progresiva
+    is_maximized: bool,
+    last_title_click: std::time::Instant, // Añadir esto
 }
 
 impl RusTale {
@@ -456,6 +463,8 @@ impl RusTale {
                 } else {
                     None
                 },
+                is_maximized: false,
+                last_title_click: std::time::Instant::now(),
             },
             Task::batch(vec![
                 Task::done(Message::Initialize),
@@ -636,7 +645,10 @@ impl RusTale {
                 | Message::Tick(_)
                 | Message::News(_)
                 | Message::LoadJavaInfo
-                | Message::JavaInfoLoaded => {}
+                | Message::JavaInfoLoaded
+                | Message::WindowDrag
+                | Message::MinimizeWindow
+                | Message::MaximizeWindow => {}
                 _ => return Task::none(),
             }
         }
@@ -1751,6 +1763,32 @@ impl RusTale {
                 Task::none()
             }
             Message::AppExit => self.save_and_exit(),
+            Message::WindowDrag => {
+                let now = std::time::Instant::now();
+                let duration = now.duration_since(self.last_title_click);
+                self.last_title_click = now;
+
+                if duration < std::time::Duration::from_millis(300) {
+                    // Es un doble clic -> Maximizar/Restaurar
+                    self.is_maximized = !self.is_maximized;
+                    return window::oldest().and_then(|id| window::toggle_maximize(id));
+                } else {
+                    // Es un clic simple -> Iniciar arrastre nativo
+                    return window::oldest().and_then(|id| window::drag(id));
+                }
+            }
+            Message::MinimizeWindow => {
+                window::oldest().and_then(|id| {
+                    // El segundo argumento es 'minimized' (true para minimizar)
+                    window::minimize(id, true)
+                })
+            }
+            Message::MaximizeWindow => {
+                self.is_maximized = !self.is_maximized;
+                window::oldest().and_then(|id| {
+                    window::toggle_maximize(id)
+                })
+            }
             Message::CancelAction => {
                 self.cancellation_token.store(true, Ordering::Relaxed);
                 self.status = LauncherStatus::Ready;
@@ -2082,7 +2120,88 @@ impl RusTale {
             }
         ];
 
-        final_stack.into()
+        // --- STACK FINAL CON CURSORES DE REDIMENSIONAMIENTO (VISUAL SOLO) ---
+        let content_with_resizers = stack![
+            final_stack,
+            
+            // BORDE SUPERIOR (Cursor Vertical)
+            container(
+                mouse_area(
+                    Space::new().width(Length::Fill).height(Length::Fixed(5.0))
+                )
+                .interaction(Interaction::ResizingVertically)
+            )
+            .align_y(Alignment::Start),
+            
+            // BORDE INFERIOR (Cursor Vertical)
+            container(
+                mouse_area(
+                    Space::new().width(Length::Fill).height(Length::Fixed(5.0))
+                )
+                .interaction(Interaction::ResizingVertically)
+            )
+            .align_y(Alignment::End),
+            
+            // BORDE IZQUIERDO (Cursor Horizontal)
+            container(
+                mouse_area(
+                    Space::new().width(Length::Fixed(5.0)).height(Length::Fill)
+                )
+                .interaction(Interaction::ResizingHorizontally)
+            )
+            .align_x(Alignment::Start),
+            
+            // BORDE DERECHO (Cursor Horizontal)
+            container(
+                mouse_area(
+                    Space::new().width(Length::Fixed(5.0)).height(Length::Fill)
+                )
+                .interaction(Interaction::ResizingHorizontally)
+            )
+            .align_x(Alignment::End),
+            
+            // ESQUINA SUPERIOR IZQUIERDA (Cursor Diagonal)
+            container(
+                mouse_area(
+                    Space::new().width(Length::Fixed(15.0)).height(Length::Fixed(15.0))
+                )
+                .interaction(Interaction::ResizingDiagonallyUp)
+            )
+            .align_x(Alignment::Start)
+            .align_y(Alignment::Start),
+            
+            // ESQUINA SUPERIOR DERECHA (Cursor Diagonal)
+            container(
+                mouse_area(
+                    Space::new().width(Length::Fixed(15.0)).height(Length::Fixed(15.0))
+                )
+                .interaction(Interaction::ResizingDiagonallyUp)
+            )
+            .align_x(Alignment::End)
+            .align_y(Alignment::Start),
+            
+            // ESQUINA INFERIOR IZQUIERDA (Cursor Diagonal)
+            container(
+                mouse_area(
+                    Space::new().width(Length::Fixed(15.0)).height(Length::Fixed(15.0))
+                )
+                .interaction(Interaction::ResizingDiagonallyDown)
+            )
+            .align_x(Alignment::Start)
+            .align_y(Alignment::End),
+            
+            // ESQUINA INFERIOR DERECHA (Cursor Diagonal)
+            container(
+                mouse_area(
+                    Space::new().width(Length::Fixed(15.0)).height(Length::Fixed(15.0))
+                )
+                .interaction(Interaction::ResizingDiagonallyDown)
+            )
+            .align_x(Alignment::End)
+            .align_y(Alignment::End)
+        ];
+
+        content_with_resizers.into()
     }
 
     /// Creates a tray icon with the appropriate menu based on game state

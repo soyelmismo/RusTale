@@ -9,7 +9,7 @@ pub async fn ensure_java_available(base_dir: &std::path::Path) -> anyhow::Result
         // Java ya esta disponible
         let java_exec = crate::java::get_java_exec(&base_dir.to_path_buf())?;
         
-        // Movemos la operación bloqueante a un hilo separado para no congelar la UI/LSD
+        // Movemos la operacion bloqueante a un hilo separado para no congelar la UI/LSD
         let version = tokio::task::spawn_blocking(move || {
             get_java_version_sync(&latest_dir)
         }).await??; 
@@ -58,7 +58,7 @@ fn get_java_version_sync(jre_dir: &std::path::Path) -> anyhow::Result<String> {
         jre_dir.join("bin").join("java")
     };
     
-    // Configuración para que no abra ventana de consola en Windows
+    // Configuracion para que no abra ventana de consola en Windows
     let mut cmd = std::process::Command::new(&java_bin);
     cmd.arg("-version");
     
