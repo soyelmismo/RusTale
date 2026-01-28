@@ -1,9 +1,15 @@
 use anyhow::Result;
 use serde::Deserialize;
+use std::env;
 
-const API_KEY: &str = "$2a$10$bqk254NMZOWVTzLVJCcxEOmhcyUujKxA5xk.kQCN9q0KNYFJd5b32";
 const API_BASE: &str = "https://api.curseforge.com/v1";
-const GAME_ID: i32 = 70216; // Hytale ID en CurseForge
+const GAME_ID: i32 = 70216;
+
+fn get_api_key() -> Result<String> {
+    env::var("CURSEFORGE_API_KEY")
+        .or_else(|_| env::var("CURSEFORGE_API_KEY"))
+        .map_err(|_| anyhow::anyhow!("CURSEFORGE_API_KEY environment variable not set"))
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CfMod {
@@ -69,6 +75,8 @@ pub async fn search_mods(
     index: u32,
     page_size: u32,
 ) -> Result<SearchResult> {
+    let api_key = get_api_key()?;
+    
     let mut url = format!(
         "{}/mods/search?gameId={}&pageSize={}&index={}&sortField=2&sortOrder=desc",
         API_BASE, GAME_ID, page_size, index
@@ -80,7 +88,7 @@ pub async fn search_mods(
 
     let resp = client
         .get(&url)
-        .header("x-api-key", API_KEY)
+        .header("x-api-key", api_key)
         .header("Accept", "application/json")
         .send()
         .await?;

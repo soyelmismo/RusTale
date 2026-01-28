@@ -99,6 +99,7 @@ pub enum SettingsMessage {
     MinMemoryChanged(f32),
     MaxMemoryChanged(f32),
     JavaArgsChanged(String),
+    JavaArgsAction(iced::widget::text_editor::Action),
     JavaInfoLoaded,
     JavaVersionUpdated(String),
     JavaLoadingStarted,
@@ -187,10 +188,13 @@ pub struct SettingsState {
     pub java_loading: bool,
     pub java_info_loaded: bool,
     pub java_version: Option<String>,
+    pub jvm_args_content: iced::widget::text_editor::Content,
 }
 
 impl SettingsState {
     pub fn new(current_settings: GameSettings) -> Self {
+        let initial_java_args = current_settings.java_args.clone();
+        
         Self {
             current_tab: Tab::Game,
             temp_settings: current_settings,
@@ -203,6 +207,8 @@ impl SettingsState {
             java_loading: false,
             java_info_loaded: false,
             java_version: None,
+            // Usamos la variable clonada
+            jvm_args_content: iced::widget::text_editor::Content::with_text(&initial_java_args),
         }
     }
 
@@ -872,6 +878,12 @@ impl SettingsState {
                 self.temp_settings.java_args = val;
                 None
             }
+            SettingsMessage::JavaArgsAction(action) => {
+                self.jvm_args_content.perform(action);
+                // Sincronizar el contenido del editor con los settings para que se guarden
+                self.temp_settings.java_args = self.jvm_args_content.text();
+                None
+            }
             SettingsMessage::JavaLoadingStarted => {
                 // Este mensaje es manejado por el app.rs para iniciar la carga asincrona
                 Some(Message::LoadJavaInfo)
@@ -1119,17 +1131,13 @@ impl SettingsState {
                                 ),
                                 ctx,
                             ),
-                            theme::magic_slider(
-                                slider(
-                                    1.0..=16.0,
-                                    self.temp_settings.min_memory as f32,
-                                    SettingsMessage::MinMemoryChanged,
-                                )
-                                .step(1.0)
-                                .style(move |t, s| theme::slider_style(&palette, t, s))
-                                .into(),
-                                ctx,
+                            slider(
+                                1.0..=16.0,
+                                self.temp_settings.min_memory as f32,
+                                SettingsMessage::MinMemoryChanged,
                             )
+                            .step(1.0)
+                            .style(move |t, s| theme::slider_style(&palette, t, s))
                             .into(),
                             theme::text_body(
                                 &format!(
@@ -1139,31 +1147,23 @@ impl SettingsState {
                                 ),
                                 ctx,
                             ),
-                            theme::magic_slider(
-                                slider(
-                                    1.0..=32.0,
-                                    self.temp_settings.max_memory as f32,
-                                    SettingsMessage::MaxMemoryChanged,
-                                )
-                                .step(1.0)
-                                .style(move |t, s| theme::slider_style(&palette, t, s))
-                                .into(),
-                                ctx,
+                            slider(
+                                1.0..=32.0,
+                                self.temp_settings.max_memory as f32,
+                                SettingsMessage::MaxMemoryChanged,
                             )
+                            .step(1.0)
+                            .style(move |t, s| theme::slider_style(&palette, t, s))
                             .into(),
                             section_title(localization.t("settings.jvm_args"), ctx),
-                            theme::magic_text_input(
-                                text_input(
-                                    localization.t("settings.jvm_args_placeholder"),
-                                    &self.temp_settings.java_args,
-                                )
-                                .on_input(SettingsMessage::JavaArgsChanged)
-                                .padding(10)
-                                .style(move |t, status| theme::text_input_style(&palette, t, status))
-                                .into(),
+                            theme::magic_text_area(
+                                iced::widget::text_editor(&self.jvm_args_content)
+                                    .on_action(|action| SettingsMessage::JavaArgsAction(action)) // Necesitas un mensaje nuevo
+                                    .style(move |t, status| theme::text_editor_style(&palette, t, status))
+                                    .into(),
                                 ctx,
-                            )
-                            .into(),
+                            ),
+
                         ],
                         ctx,
                     )

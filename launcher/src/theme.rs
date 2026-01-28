@@ -1767,7 +1767,6 @@ where
         element
     }
 }
-
 pub fn magic_text_input<'a, M>(
     element: Element<'a, M, Theme, Renderer>,
     ctx: UIContext,
@@ -1793,6 +1792,68 @@ where
     }
 }
 
+pub fn text_editor_style(
+    palette: &Palette,
+    _t: &Theme,
+    status: iced::widget::text_editor::Status,
+) -> iced::widget::text_editor::Style {
+    let is_light = palette.background.r > 0.5;
+    iced::widget::text_editor::Style {
+        background: Background::Color(if is_light {
+            Color::from_rgb(0.92, 0.93, 0.95)
+        } else {
+            Color::from_rgba(0.0, 0.0, 0.0, 0.4)
+        }),
+        border: Border {
+            // CORRECCIÓN E0533: Focused tiene campos internos
+            color: if matches!(status, iced::widget::text_editor::Status::Focused { .. }) {
+                palette.accent
+            } else {
+                Color::from_rgba(palette.text_primary.r, palette.text_primary.g, palette.text_primary.b, 0.1)
+            },
+            width: 1.0,
+            radius: 6.0.into(),
+        },
+        // CORRECCIÓN E0560: Eliminados campos 'icon' y 'cursor' que no existen en el struct Style
+        value: palette.text_primary,
+        placeholder: palette.text_secondary,
+        selection: Color::from_rgba(palette.accent.r, palette.accent.g, palette.accent.b, 0.2),
+    }
+}
+
+
+
+// 2. Actualizar la función para que se comporte como un área real
+pub fn magic_text_area<'a, M>(
+    element: Element<'a, M, Theme, Renderer>,
+    ctx: UIContext,
+) -> Element<'a, M, Theme, Renderer>
+where
+    M: 'a + Clone,
+{
+    if ctx.lsd_enabled {
+        // Usamos una semilla diferente (11) para que el área de texto se mueva 
+        // de forma distinta a los inputs pequeños
+        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 11);
+        
+        Element::new(SmoothTranslate::new(
+            container(element)
+                .width(Length::Fill)
+                .height(Length::Fixed(150.0)) // Altura de área de texto real
+                .padding(2)
+                .into(),
+            (vx * ctx.lsd_intensity, vy * ctx.lsd_intensity),
+            ctx.mouse_pos,
+            false,
+            ctx.lsd_intensity,
+            ctx.lsd_enabled,
+        ))
+    } else {
+        container(element)
+            .height(Length::Fixed(150.0)) // Mantener altura incluso sin LSD
+            .into()
+    }
+}
 pub fn magic_button<'a, M>(
     element: Element<'a, M, Theme, Renderer>,
     ctx: UIContext,

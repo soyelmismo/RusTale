@@ -233,9 +233,24 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
                 // Validate client version has required files
                 if let Err(e) = validate_client_version(&main_app_dir, &config.branch, &best_version) {
                     eprintln!("Client validation failed: {}", e);
+                    eprintln!("Falling back to copying Assets.zip...");
+                    // Fallback to copying if validation fails
+                    let dst_assets = install_dir.join("Assets.zip");
+                    if src_assets.exists() && !dst_assets.exists() {
+                        println!("Copying Assets.zip (~3GB) as fallback...");
+                        if let Err(e) = tokio::fs::copy(&src_assets, &dst_assets).await {
+                            eprintln!("Failed to copy Assets.zip: {}", e);
+                        }
+                    }
+                    // Add --assets argument for local copy
+                    config.server_args = generate_server_args_with_direct_assets(
+                        &config.server_args,
+                        &dst_assets
+                    );
                 } else {
                     println!("Using assets directly from client installation (no copying)");
-                    // Update server args to use direct asset path
+                    println!("Assets path: {:?}", src_assets);
+                    // Add --assets argument with absolute path to client assets
                     config.server_args = generate_server_args_with_direct_assets(
                         &config.server_args,
                         &src_assets
@@ -249,7 +264,15 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
                     if let Err(e) = tokio::fs::copy(&src_assets, &dst_assets).await {
                         eprintln!("Failed to copy Assets.zip: {}", e);
                     }
+                } else if !src_assets.exists() {
+                    eprintln!("WARNING: Source Assets.zip not found at {:?}", src_assets);
+                    eprintln!("This may cause Exit Code 7 - server will fail without assets!");
                 }
+                // Add --assets argument for local copy
+                config.server_args = generate_server_args_with_direct_assets(
+                    &config.server_args,
+                    &dst_assets
+                );
             }
 
             // Copy Server folder (always needed)
@@ -285,6 +308,106 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         }
     }
     // --------------------------------------------------------
+
+    // Handle assets regardless of whether JAR exists or not
+    println!("Setting up assets configuration...");
+    let main_app_dir = crate::config::get_app_dir();
+    
+    // Find the best matching client version for assets
+    let best_version = match find_best_client_version(&main_app_dir, &config.branch, &config.game_version.to_string()) {
+        Ok(version) => {
+            println!("Found matching client version for assets: {}", version);
+            version
+        }
+        Err(e) => {
+            println!("Warning: {}", e);
+            config.game_version.clone()
+        }
+    };
+
+    // Try to find client installation
+    let mut source_candidate = None;
+    
+    // Candidate 1: Specific version folder
+    let specific = main_app_dir
+        .join(&config.branch)
+        .join(&best_version);
+    if specific.exists() && specific.join("Assets.zip").exists() {
+        source_candidate = Some(specific);
+    }
+
+    // Candidate 2: Latest folder
+    if source_candidate.is_none() && best_version == "latest" {
+        let latest = main_app_dir.join(&config.branch).join("latest");
+        if latest.exists() && latest.join("Assets.zip").exists() {
+            source_candidate = Some(latest);
+        }
+    }
+
+    // Handle assets based on source and configuration
+    if let Some(src) = source_candidate {
+        let src_assets = src.join("Assets.zip");
+        println!("Found client assets at: {:?}", src_assets);
+        
+        if config.use_direct_assets {
+            // Validate client version has required files
+            if let Err(e) = validate_client_version(&main_app_dir, &config.branch, &best_version) {
+                eprintln!("Client validation failed: {}", e);
+                eprintln!("Falling back to copying Assets.zip...");
+                // Fallback to copying if validation fails
+                let dst_assets = install_dir.join("Assets.zip");
+                if src_assets.exists() && !dst_assets.exists() {
+                    println!("Copying Assets.zip (~3GB) as fallback...");
+                    if let Err(e) = tokio::fs::copy(&src_assets, &dst_assets).await {
+                        eprintln!("Failed to copy Assets.zip: {}", e);
+                    }
+                }
+                // Add --assets argument for local copy
+                config.server_args = generate_server_args_with_direct_assets(
+                    &config.server_args,
+                    &dst_assets
+                );
+            } else {
+                println!("Using assets directly from client installation (no copying)");
+                println!("Assets path: {:?}", src_assets);
+                // Add --assets argument with absolute path to client assets
+                config.server_args = generate_server_args_with_direct_assets(
+                    &config.server_args,
+                    &src_assets
+                );
+            }
+        } else {
+            // Original behavior: copy Assets.zip
+            let dst_assets = install_dir.join("Assets.zip");
+            if src_assets.exists() && !dst_assets.exists() {
+                println!("Copying Assets.zip (~3GB)...");
+                if let Err(e) = tokio::fs::copy(&src_assets, &dst_assets).await {
+                    eprintln!("Failed to copy Assets.zip: {}", e);
+                }
+            } else if !src_assets.exists() {
+                eprintln!("WARNING: Source Assets.zip not found at {:?}", src_assets);
+                eprintln!("This may cause Exit Code 7 - server will fail without assets!");
+            }
+            // Add --assets argument for local copy
+            config.server_args = generate_server_args_with_direct_assets(
+                &config.server_args,
+                &dst_assets
+            );
+        }
+    } else {
+        eprintln!("WARNING: No client assets found! Server may fail to start.");
+        eprintln!("Looking for assets in: {:?}", main_app_dir.join(&config.branch).join(&best_version).join("Assets.zip"));
+        
+        // Try to use local assets if they exist
+        let local_assets = install_dir.join("Assets.zip");
+        if local_assets.exists() {
+            println!("Using local Assets.zip");
+            config.server_args = generate_server_args_with_direct_assets(
+                &config.server_args,
+                &local_assets
+            );
+        }
+    }
 
     if !server_jar_raw.exists() {
         println!("Downloading server version {}...", target_ver_num);
@@ -350,8 +473,19 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     println!("[4/5] Preparing Runtime...");
 
     let java_exec = crate::java::get_java_exec(&root_dir)?;
+    let java_path = PathBuf::from(&java_exec);
 
-    crate::util::make_executable(&PathBuf::from(&java_exec)).await?;
+    // Si existe java_original, es que el proxy está instalado. 
+    // Para el servidor dedicado, queremos el REAL para evitar ruidos de logs.
+    let java_original = java_path.parent().unwrap().join(if cfg!(windows) { "java_original.exe" } else { "java_original" });
+    let final_java = if java_original.exists() {
+        println!("Using real Java (java_original) to avoid proxy loop");
+        java_original.to_string_lossy().to_string()
+    } else {
+        java_exec
+    };
+
+    crate::util::make_executable(&PathBuf::from(&final_java)).await?;
 
     if let Some(provider) = &config.tunnel_provider {
         if provider == "playit" {
@@ -397,7 +531,32 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     println!("---------------------------------------------------");
     println!("Press Ctrl+C to stop the server safely.");
 
-    let mut cmd = Command::new(java_exec);
+    // Final validation before launch
+    println!("Final pre-launch validation:");
+    println!("  - Working directory: {:?}", install_dir);
+    println!("  - Patched JAR: {:?}", patched_jar_path);
+    
+    if !patched_jar_path.exists() {
+        eprintln!("FATAL: Patched JAR not found at {:?}", patched_jar_path);
+        return Err(anyhow::anyhow!("Patched JAR missing - this will cause Exit Code 7"));
+    }
+    
+    let assets_in_install_dir = install_dir.join("Assets.zip");
+    if assets_in_install_dir.exists() {
+        println!("  - Assets.zip: {:?} (local copy)", assets_in_install_dir);
+    } else {
+        println!("  - Assets.zip: Using direct assets path");
+    }
+    
+    let server_dir = install_dir.join("Server");
+    if !server_dir.exists() {
+        eprintln!("WARNING: Server directory not found at {:?}", server_dir);
+    }
+
+    // DEBUG: Show final server arguments
+    println!("  - Final server args: {}", config.server_args);
+
+    let mut cmd = Command::new(final_java);
 
     cmd.current_dir(&install_dir)
         .args(config.java_exec_args.split_whitespace())
@@ -405,8 +564,8 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         .arg(&patched_jar_path);
     cmd.args(config.server_args.split_whitespace());
 
-    cmd.stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::inherit())
+    cmd.stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
         .stdin(std::process::Stdio::inherit());
 
     cmd.env("RUSTALE_IS_SERVER", "1");
@@ -414,6 +573,27 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     cmd.kill_on_drop(true);
 
     let mut child = cmd.spawn().context("Failed to spawn java process")?;
+
+    // --- NUEVO: Captura manual de logs ---
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+
+    use tokio::io::{AsyncBufReadExt, BufReader};
+
+    tokio::spawn(async move {
+        let mut reader = BufReader::new(stdout).lines();
+        while let Ok(Some(line)) = reader.next_line().await {
+            println!("[Java-Out] {}", line);
+        }
+    });
+
+    tokio::spawn(async move {
+        let mut reader = BufReader::new(stderr).lines();
+        while let Ok(Some(line)) = reader.next_line().await {
+            eprintln!("[Java-Err] {}", line);
+        }
+    });
+    // ---------------------------------------
 
     #[cfg(windows)]
     let _job_guard = {

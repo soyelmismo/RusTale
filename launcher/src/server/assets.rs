@@ -129,11 +129,25 @@ pub fn generate_server_args_with_direct_assets(
         args.replace_range(start..end, "");
     }
     
-    // Add the direct assets path
+    // Remove any standalone Assets.zip argument
+    let words: Vec<&str> = args.split_whitespace().collect();
+    let filtered_words: Vec<&str> = words.iter()
+        .filter(|&word| !word.eq_ignore_ascii_case("Assets.zip"))
+        .cloned()
+        .collect();
+    args = filtered_words.join(" ");
+    
+    // Convert to absolute path and add the direct assets argument
+    let absolute_assets_path = assets_path.canonicalize().unwrap_or_else(|_| assets_path.clone());
+    
+    // Remove the \\?\ prefix that Windows adds for very long paths
+    let path_str = absolute_assets_path.to_string_lossy();
+    let clean_path = path_str.strip_prefix("\\\\?\\").unwrap_or(&path_str);
+    
     if !args.is_empty() && !args.ends_with(' ') {
         args.push(' ');
     }
-    args.push_str(&format!("--assets {}", assets_path.display()));
+    args.push_str(&format!("--assets {}", clean_path));
     
     args.trim().to_string()
 }

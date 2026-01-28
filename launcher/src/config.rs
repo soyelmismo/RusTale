@@ -132,7 +132,7 @@ impl Default for ThemeConfig {
     fn default() -> Self {
         Self {
             accent_hex: "#FFA845".to_string(), // RusTale Orange
-            base_mode: BaseThemeMode::Black,
+            base_mode: BaseThemeMode::Grey,
             saturation: 1.0,
             contrast: 1.0,
             lsd_mode: false,

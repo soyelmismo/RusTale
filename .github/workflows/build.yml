@@ -46,6 +46,8 @@ jobs:
 
     - name: Build Release
       run: cargo build --release --verbose
+      env:
+        CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
 
     - name: Prepare Distribution Folder
       run: |
@@ -101,6 +103,8 @@ jobs:
 
     - name: Build Release
       run: cargo build --release --verbose
+      env:
+        CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
 
     - name: Prepare Distribution Folder
       run: |
