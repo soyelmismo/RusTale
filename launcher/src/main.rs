@@ -3,8 +3,8 @@ use clap::Parser;
 use futures::SinkExt;
 use iced::widget::{Space, column, container, image, mouse_area, row, shader, stack};
 use iced::{
-    Alignment, Color, ContentFit, Element, Length, Size, Subscription, Task, Theme, clipboard, window,
-    mouse::Interaction,
+    Alignment, Color, ContentFit, Element, Length, Size, Subscription, Task, Theme, clipboard,
+    mouse::Interaction, window,
 };
 use single_instance::SingleInstance;
 use std::sync::{
@@ -85,17 +85,20 @@ fn is_running_as_java_proxy() -> bool {
         return true;
     }
 
+    for arg in std::env::args().skip(1) {
+        if arg.starts_with("-X") || arg.starts_with("-D") || arg == "-jar" || arg == "-cp" {
+            return true;
+        }
+    }
+
     if let Ok(exe) = std::env::current_exe() {
         if let Some(name) = exe.file_stem() {
             let name_str = name.to_string_lossy().to_lowercase();
 
-            // 1. Explicit name
             if name_str.contains("rustale_proxy") {
                 return true;
             }
 
-            // 2. Impostor detection (Java Hijack)
-            // If we are called "java" and "java_original" exists next to us, we are the proxy.
             if name_str == "java" {
                 if let Some(dir) = exe.parent() {
                     let original_name = if cfg!(windows) {
@@ -114,17 +117,6 @@ fn is_running_as_java_proxy() -> bool {
 }
 
 pub fn main() -> iced::Result {
-    // [GPU OPTIMIZATION 1] ----------------------------
-    // Forzamos a WGPU a usar el modo de alto rendimiento antes de inicializar nada.
-    // Esto evita que use la integrada o renderizado por software (WARP/LLVMpipe).
-    unsafe { std::env::set_var("WGPU_POWER_PREF", "high") };
-
-    // Opcional: Forzar Vulkan o DX12 si Auto falla
-    #[cfg(target_os = "windows")]
-    // std::env::set_var("WGPU_BACKEND", "dx12");
-    #[cfg(target_os = "linux")]
-    // std::env::set_var("WGPU_BACKEND", "vulkan");
-    // ------------------------------------------------
     if is_running_as_java_proxy() {
         let mode_env = std::env::var("AURORA_MODE").unwrap_or_default();
         let mode = match mode_env.as_str() {
@@ -143,6 +135,10 @@ pub fn main() -> iced::Result {
         }
         std::process::exit(0);
     }
+    // [GPU OPTIMIZATION 1] ----------------------------
+    // Forzamos a WGPU a usar el modo de alto rendimiento antes de inicializar nada.
+    // Esto evita que use la integrada o renderizado por software (WARP/LLVMpipe).
+    unsafe { std::env::set_var("WGPU_POWER_PREF", "high") };
 
     #[cfg(windows)]
     {
@@ -234,15 +230,10 @@ pub fn main() -> iced::Result {
 
         ..Default::default()
     })
-    // [GPU OPTIMIZATION 2] ----------------------------
-    // Añadimos configuracion de Antialiasing desactivado.
-    // MSAA consume mucha GPU en shaders de pantalla completa.
-    // La fuente de Iced ya hace su propio AA.
     .settings(iced::Settings {
         antialiasing: false,
         ..Default::default()
     })
-    // ------------------------------------------------
     .run()
 }
 
@@ -532,17 +523,16 @@ impl RusTale {
         };
 
         let tick_sub = if self.is_window_visible {
-    if self.settings.theme.lsd_mode {
-        iced::time::every(std::time::Duration::from_millis(33)).map(Message::Tick)
-    } else if self.settings_state.is_open {
-        iced::time::every(std::time::Duration::from_millis(66)).map(Message::Tick)
-    } else {
-        Subscription::none()
-    }
-} else {
-    Subscription::none()
-};
-
+            if self.settings.theme.lsd_mode {
+                iced::time::every(std::time::Duration::from_millis(33)).map(Message::Tick)
+            } else if self.settings_state.is_open {
+                iced::time::every(std::time::Duration::from_millis(66)).map(Message::Tick)
+            } else {
+                Subscription::none()
+            }
+        } else {
+            Subscription::none()
+        };
 
         Subscription::batch(vec![
             game_runner,
@@ -706,12 +696,9 @@ impl RusTale {
 
                 if self.settings.theme.lsd_mode {
                     self.lsd_enabled_time = Some(std::time::Instant::now());
-                    
+
                     let t = self.start_time.elapsed().as_secs_f32();
-                    self.lsd_offset = (
-                        (t * 1.3).sin() * 1.0, 
-                        (t * 0.9).cos() * 1.0
-                    );
+                    self.lsd_offset = ((t * 1.3).sin() * 1.0, (t * 0.9).cos() * 1.0);
                 } else {
                     self.lsd_enabled_time = None;
                 }
@@ -780,7 +767,9 @@ impl RusTale {
                 Task::perform(
                     async move {
                         match java_detection::ensure_java_available(&base_dir).await {
-                            Ok(java_info) => Message::Settings(SettingsMessage::JavaVersionUpdated(java_info.version)),
+                            Ok(java_info) => Message::Settings(
+                                SettingsMessage::JavaVersionUpdated(java_info.version),
+                            ),
                             Err(e) => {
                                 eprintln!("Java detection/download failed: {}", e);
                                 Message::Settings(SettingsMessage::JavaInfoLoaded)
@@ -1237,7 +1226,10 @@ impl RusTale {
                 )
             }
             Message::Settings(SettingsMessage::PickUseDataLocation) => {
-                let title = self.localization.t("settings.select_existing_data").to_string();
+                let title = self
+                    .localization
+                    .t("settings.select_existing_data")
+                    .to_string();
                 Task::perform(
                     async move {
                         rfd::AsyncFileDialog::new()
@@ -1309,7 +1301,8 @@ impl RusTale {
             Message::RequestUseDataLocation(new_path) => {
                 // 1. Validaciones previas
                 if self.status == LauncherStatus::Playing || self.running_game.is_some() {
-                    self.error = Some("Cannot change data location while game is running.".to_string());
+                    self.error =
+                        Some("Cannot change data location while game is running.".to_string());
                     return Task::none();
                 }
 
@@ -1327,7 +1320,7 @@ impl RusTale {
                 // Verificar que tenga archivos basicos de RusTale
                 let has_settings = new_path.join("settings.toml").exists();
                 let has_profiles = new_path.join("profiles.toml").exists();
-                
+
                 if !has_settings && !has_profiles {
                     self.error = Some("Selected location doesn't appear to contain RusTale data (no settings.toml or profiles.toml found).".to_string());
                     return Task::none();
@@ -1337,14 +1330,14 @@ impl RusTale {
                 match config::save_bootstrap_path(&new_path) {
                     Ok(_) => {
                         println!("Successfully changed data location to: {:?}", new_path);
-                        
+
                         self.paths = crate::game::GamePaths::new(new_path.clone());
                         self.status_text = "Data location updated successfully!".to_string();
-                        
+
                         // Recargar configuracion desde la nueva ubicacion
                         self.settings = config::load_settings_sync();
                         self.settings_state.temp_settings = self.settings.clone();
-                        
+
                         Task::none()
                     }
                     Err(e) => {
@@ -1788,9 +1781,7 @@ impl RusTale {
             }
             Message::MaximizeWindow => {
                 self.is_maximized = !self.is_maximized;
-                window::oldest().and_then(|id| {
-                    window::toggle_maximize(id)
-                })
+                window::oldest().and_then(|id| window::toggle_maximize(id))
             }
             Message::CancelAction => {
                 self.cancellation_token.store(true, Ordering::Relaxed);
@@ -1873,7 +1864,9 @@ impl RusTale {
                     async move {
                         // Usar logica existente del launcher para detectar Java
                         match java_detection::ensure_java_available(&base_dir).await {
-                            Ok(java_info) => Message::Settings(SettingsMessage::JavaVersionUpdated(java_info.version)),
+                            Ok(java_info) => Message::Settings(
+                                SettingsMessage::JavaVersionUpdated(java_info.version),
+                            ),
                             Err(e) => {
                                 eprintln!("Java detection/download failed: {}", e);
                                 Message::Settings(SettingsMessage::JavaInfoLoaded)
@@ -2086,9 +2079,11 @@ impl RusTale {
                 .center_x(Length::Fill)
                 .center_y(Length::Fill)
                 .style(|_| container::Style {
-                    background: Some(iced::Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.8))),
+                    background: Some(iced::Background::Color(Color::from_rgba(
+                        0.0, 0.0, 0.0, 0.8,
+                    ))),
                     ..Default::default()
-                })
+                }),
             )
         } else if self.mods_state.is_open {
             Some(
@@ -2103,9 +2098,11 @@ impl RusTale {
                 .center_x(Length::Fill)
                 .center_y(Length::Fill)
                 .style(|_| container::Style {
-                    background: Some(iced::Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.8))),
+                    background: Some(iced::Background::Color(Color::from_rgba(
+                        0.0, 0.0, 0.0, 0.8,
+                    ))),
                     ..Default::default()
-                })
+                }),
             )
         } else {
             None
@@ -2114,7 +2111,6 @@ impl RusTale {
         // --- STACK FINAL ---
         let final_stack = stack![
             final_view, // Tu fondo y contenido principal (izquierda abajo)
-            
             // 1. Capa de oscurecimiento + Modal Centrado
             if let Some(modal) = modal_layer {
                 modal.into()
@@ -2126,77 +2122,69 @@ impl RusTale {
         // --- STACK FINAL CON CURSORES DE REDIMENSIONAMIENTO (VISUAL SOLO) ---
         let content_with_resizers = stack![
             final_stack,
-            
             // BORDE SUPERIOR (Cursor Vertical)
             container(
-                mouse_area(
-                    Space::new().width(Length::Fill).height(Length::Fixed(5.0))
-                )
-                .interaction(Interaction::ResizingVertically)
+                mouse_area(Space::new().width(Length::Fill).height(Length::Fixed(5.0)))
+                    .interaction(Interaction::ResizingVertically)
             )
             .align_y(Alignment::Start),
-            
             // BORDE INFERIOR (Cursor Vertical)
             container(
-                mouse_area(
-                    Space::new().width(Length::Fill).height(Length::Fixed(5.0))
-                )
-                .interaction(Interaction::ResizingVertically)
+                mouse_area(Space::new().width(Length::Fill).height(Length::Fixed(5.0)))
+                    .interaction(Interaction::ResizingVertically)
             )
             .align_y(Alignment::End),
-            
             // BORDE IZQUIERDO (Cursor Horizontal)
             container(
-                mouse_area(
-                    Space::new().width(Length::Fixed(5.0)).height(Length::Fill)
-                )
-                .interaction(Interaction::ResizingHorizontally)
+                mouse_area(Space::new().width(Length::Fixed(5.0)).height(Length::Fill))
+                    .interaction(Interaction::ResizingHorizontally)
             )
             .align_x(Alignment::Start),
-            
             // BORDE DERECHO (Cursor Horizontal)
             container(
-                mouse_area(
-                    Space::new().width(Length::Fixed(5.0)).height(Length::Fill)
-                )
-                .interaction(Interaction::ResizingHorizontally)
+                mouse_area(Space::new().width(Length::Fixed(5.0)).height(Length::Fill))
+                    .interaction(Interaction::ResizingHorizontally)
             )
             .align_x(Alignment::End),
-            
             // ESQUINA SUPERIOR IZQUIERDA (Cursor Diagonal)
             container(
                 mouse_area(
-                    Space::new().width(Length::Fixed(15.0)).height(Length::Fixed(15.0))
+                    Space::new()
+                        .width(Length::Fixed(15.0))
+                        .height(Length::Fixed(15.0))
                 )
                 .interaction(Interaction::ResizingDiagonallyUp)
             )
             .align_x(Alignment::Start)
             .align_y(Alignment::Start),
-            
             // ESQUINA SUPERIOR DERECHA (Cursor Diagonal)
             container(
                 mouse_area(
-                    Space::new().width(Length::Fixed(15.0)).height(Length::Fixed(15.0))
+                    Space::new()
+                        .width(Length::Fixed(15.0))
+                        .height(Length::Fixed(15.0))
                 )
                 .interaction(Interaction::ResizingDiagonallyUp)
             )
             .align_x(Alignment::End)
             .align_y(Alignment::Start),
-            
             // ESQUINA INFERIOR IZQUIERDA (Cursor Diagonal)
             container(
                 mouse_area(
-                    Space::new().width(Length::Fixed(15.0)).height(Length::Fixed(15.0))
+                    Space::new()
+                        .width(Length::Fixed(15.0))
+                        .height(Length::Fixed(15.0))
                 )
                 .interaction(Interaction::ResizingDiagonallyDown)
             )
             .align_x(Alignment::Start)
             .align_y(Alignment::End),
-            
             // ESQUINA INFERIOR DERECHA (Cursor Diagonal)
             container(
                 mouse_area(
-                    Space::new().width(Length::Fixed(15.0)).height(Length::Fixed(15.0))
+                    Space::new()
+                        .width(Length::Fixed(15.0))
+                        .height(Length::Fixed(15.0))
                 )
                 .interaction(Interaction::ResizingDiagonallyDown)
             )
