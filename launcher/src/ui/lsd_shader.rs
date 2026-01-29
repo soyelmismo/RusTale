@@ -34,6 +34,7 @@ struct Uniforms {
 // ==========================================================
 // WIDGET PROGRAM
 // ==========================================================
+#[derive(Debug, Clone)]
 pub struct LsdShader {
     start_time: Instant,
     mouse_pos: Point,

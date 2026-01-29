@@ -50,8 +50,7 @@ pub struct Palette {
 
 #[derive(Debug, Default)]
 struct SmoothTranslateState {
-    // [FIX] Usar '_' para suprimir advertencias de campos calculados pero no leidos logicamente aun
-    _smoothed_stillness: Cell<f32>,
+    smoothed_stillness: Cell<f32>,
     _last_mouse_pos: Cell<iced::Point>,
     _last_time: Cell<f32>,
     current_repulsion: Cell<Vector>,
@@ -62,7 +61,7 @@ struct SmoothTranslateState {
 impl SmoothTranslateState {
     pub fn new() -> Self {
         Self {
-            _smoothed_stillness: Cell::new(0.0),
+            smoothed_stillness: Cell::new(0.0),
             _last_mouse_pos: Cell::new(iced::Point::ORIGIN),
             _last_time: Cell::new(0.0),
             current_repulsion: Cell::new(Vector::new(0.0, 0.0)),
@@ -80,6 +79,7 @@ impl SmoothTranslateState {
         lsd_enabled: bool,
         offset: Vector,
         is_resizing: bool, // <--- NUEVO PARÁMETRO
+        mouse_stillness: f32, // <--- NUEVO PARÁMETRO
     ) -> Vector {
         // Si está desactivado O se está redimensionando la ventana
         if !lsd_enabled || is_resizing {
@@ -98,6 +98,12 @@ impl SmoothTranslateState {
 
         // Actualizamos intensidad en el estado
         self.intensity.set(intensity);
+        
+        // Actualizar smoothed_stillness con suavizado exponencial
+        let current_stillness = self.smoothed_stillness.get();
+        let smoothing_factor = 0.1; // Suavizado gradual
+        let new_stillness = current_stillness + (mouse_stillness - current_stillness) * smoothing_factor;
+        self.smoothed_stillness.set(new_stillness);
 
         // --- 1. LoGICA DE REPULSIoN (Bordes) + ATRACCIoN (Centro) ---
         let center = bounds.center();
@@ -158,25 +164,33 @@ impl SmoothTranslateState {
         }
 
         // APLICAR INTENSIDAD PROGRESIVA A LA FUERZA
+        // Factor de intensificación: cuando el mouse está quieto, multiplica la fuerza magnética
+        let intensify_factor = 1.0 + (new_stillness * 1.5); // Multiplica hasta 2.5x cuando está completamente quieto
+        let adjusted_intensity = intensity * intensify_factor;
+        
         let target_repulsion = Vector::new(
-            target_displacement.x * intensity,
-            target_displacement.y * intensity,
+            target_displacement.x * adjusted_intensity,
+            target_displacement.y * adjusted_intensity,
         );
 
         // --- 2. FiSICA "LENTA Y TONTA" (Aceleracion minima + Mucha viscosidad) ---
         let current_pos = self.current_repulsion.get();
         let mut current_vel = self.current_velocity.get();
 
-        // Aceleracion bajisima (0.005): Tarda una eternidad en empezar a moverse
-        let accel_x = (target_repulsion.x - current_pos.x) * 0.005;
-        let accel_y = (target_repulsion.y - current_pos.y) * 0.005;
+        // Aceleración que se intensifica con la quietud del mouse
+        let base_accel = 0.005;
+        let intensify_accel = base_accel * (1.0 + (new_stillness * 3.0)); // Hasta 4x más aceleración cuando está quieto
+        
+        let accel_x = (target_repulsion.x - current_pos.x) * intensify_accel;
+        let accel_y = (target_repulsion.y - current_pos.y) * intensify_accel;
 
         current_vel.x += accel_x;
         current_vel.y += accel_y;
 
-        // Friccion muy alta (0.94): Se siente como si estuviera en almibar, flota mucho
-        current_vel.x *= 0.94;
-        current_vel.y *= 0.94;
+        // Reducir ligeramente la fricción cuando está quieto para más caos
+        let friction = if new_stillness > 0.7 { 0.96 } else { 0.94 };
+        current_vel.x *= friction;
+        current_vel.y *= friction;
 
         let next_repulsion =
             Vector::new(current_pos.x + current_vel.x, current_pos.y + current_vel.y);
@@ -184,16 +198,19 @@ impl SmoothTranslateState {
         self.current_velocity.set(current_vel);
         self.current_repulsion.set(next_repulsion);
 
-        // --- 3. JITTER "CANSADO" (Frecuencia bajisima) ---
+        // --- 3. JITTER "HIPNÓTICO" (Frecuencia que se intensifica con la quietud) ---
         let center_dist = mouse_pos.distance(bounds.center());
         let jitter_multiplier = (1.0 + (center_dist / 200.0)).min(2.5);
+        
+        // Intensificar jitter basado en la quietud del mouse
+        let jitter_intensify_factor = 1.0 + (new_stillness * 2.0); // Multiplica hasta 3x el jitter cuando está quieto
 
         // CAMBIO: Multiplicamos el resultado del seno/coseno por `intensity` 
         // Esto asegura que si intensity es 0.0 (inicio de la transición),
         // el jitter sea matemáticamente 0.0 (quietud total).
         let jitter = Vector::new(
-            (time * 3.5 + offset.x * 0.1).sin() * 0.15 * jitter_multiplier * intensity,
-            (time * 4.2 + offset.y * 0.13).cos() * 0.15 * jitter_multiplier * intensity,
+            (time * 3.5 + offset.x * 0.1).sin() * 0.15 * jitter_multiplier * intensity * jitter_intensify_factor,
+            (time * 4.2 + offset.y * 0.13).cos() * 0.15 * jitter_multiplier * intensity * jitter_intensify_factor,
         );
 
         Vector::new(
@@ -213,6 +230,7 @@ pub struct SmoothTranslate<'a, Message> {
     lsd_intensity: f32,
     lsd_enabled: bool,
     is_resizing: bool, // <--- NUEVO CAMPO
+    mouse_stillness: f32, // <--- NUEVO CAMPO
 }
 
 pub fn background_tint_color(palette: &Palette) -> Color {
@@ -367,7 +385,7 @@ pub fn magic_column<'a, M: 'a + Clone>(
                 false,
                 ctx.lsd_intensity,
                 ctx.lsd_enabled,
-            ).resizing(ctx.is_resizing));
+            ).resizing(ctx.is_resizing).with_stillness(ctx.mouse_stillness));
 
             col = col.push(wrapped_item);
         }
@@ -400,7 +418,7 @@ pub fn magic_row<'a, M: 'a + Clone>(
                 false,
                 ctx.lsd_intensity,
                 ctx.lsd_enabled,
-            ).resizing(ctx.is_resizing));
+            ).resizing(ctx.is_resizing).with_stillness(ctx.mouse_stillness));
 
             col = col.push(wrapped_item);
         }
@@ -497,7 +515,7 @@ pub fn lsd_magic_text<'a, M: 'a>(
             false, // Que se mueva siempre
             1.0,   // Fuerza máxima
             true,  // Ignorar modo global OFF
-        ).resizing(ctx.is_resizing)));
+        ).resizing(ctx.is_resizing).with_stillness(ctx.mouse_stillness)));
     }
 
     row.into()
@@ -1460,12 +1478,19 @@ impl<'a, Message> SmoothTranslate<'a, Message> {
             lsd_intensity,
             lsd_enabled,
             is_resizing: false, // Valor por defecto, se sobreescribe en magic_*
+            mouse_stillness: 0.0, // Valor por defecto, se sobreescribe en magic_*
         }
     }
     
     // Método helper para encadenar
     pub fn resizing(mut self, is_resizing: bool) -> Self {
         self.is_resizing = is_resizing;
+        self
+    }
+    
+    // Nuevo método helper para mouse_stillness
+    pub fn with_stillness(mut self, mouse_stillness: f32) -> Self {
+        self.mouse_stillness = mouse_stillness;
         self
     }
 
@@ -1568,6 +1593,7 @@ impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Messa
             self.lsd_enabled,
             self.offset,
             self.is_resizing, // <--- PASAR AQUÍ
+            self.mouse_stillness, // <--- PASAR AQUÍ
         );
 
         renderer.with_translation(displacement, |r| {
@@ -1606,6 +1632,7 @@ impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Messa
             self.lsd_enabled && !self.proximity_only,
             self.offset,
             self.is_resizing, // <--- PASAR AQUÍ
+            self.mouse_stillness, // <--- PASAR AQUÍ
         );
 
         // Traducir el cursor para que coincida con lo que el usuario ve
@@ -1662,6 +1689,7 @@ impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Messa
             self.lsd_enabled && !self.proximity_only,
             self.offset,
             self.is_resizing, // <--- PASAR AQUÍ
+            self.mouse_stillness, // <--- PASAR AQUÍ
         );
 
         // Ajustamos la translacion para que el overlay aparezca en la posicion visual correcta
@@ -1721,7 +1749,7 @@ pub fn text<'a, M: 'a>(
             false,
             ctx.lsd_intensity,
             ctx.lsd_enabled,
-        ).resizing(ctx.is_resizing))
+        ).resizing(ctx.is_resizing).with_stillness(ctx.mouse_stillness))
     } else {
         element
     }
@@ -1769,7 +1797,7 @@ pub fn text_lsd_letters<'a, M: 'a>(
             false,
             lsd_intensity,
             lsd_enabled,
-        ).resizing(ctx.is_resizing));
+        ).resizing(ctx.is_resizing).with_stillness(ctx.mouse_stillness));
 
         letter_row = letter_row.push(magic_char);
     }
@@ -1906,7 +1934,7 @@ where
             .into()
     }
 }
-pub fn magic_button<'a, M>(
+pub fn magic_button<'a, M: 'a + Clone>(
     element: Element<'a, M, Theme, Renderer>,
     ctx: UIContext,
 ) -> Element<'a, M, Theme, Renderer>
@@ -1914,7 +1942,7 @@ where
     M: 'a + Clone,
 {
     if ctx.lsd_enabled {
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 4, ctx.lsd_intensity);
+        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 9, ctx.lsd_intensity);
         Element::new(SmoothTranslate::new(
             element,
             (vx, vy), // Pasar vectores directos
@@ -1922,7 +1950,7 @@ where
             false,
             ctx.lsd_intensity,
             ctx.lsd_enabled,
-        ).resizing(ctx.is_resizing))
+        ).resizing(ctx.is_resizing).with_stillness(ctx.mouse_stillness))
     } else {
         element
     }

@@ -1,8 +1,8 @@
+use crate::game::mods_api::ModProvider;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tokio::fs;
-use crate::game::mods_api::ModProvider;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModInfo {
@@ -14,13 +14,21 @@ pub struct ModInfo {
     pub metadata: Option<InstalledModMetadata>,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct InstalledModMetadata {
-    pub file_name: String,      // Clave primaria para relacionar con el disco
-    pub mod_name: String,       // Para UI rápida
+    pub file_name: String, // Clave primaria para relacionar con el disco
+    pub mod_name: String,  // Para UI rápida
     pub provider: ModProvider,
-    pub mod_id: String,         // ID Remoto (ej: "345123")
-    pub file_id: String,        // ID de la versión instalada (ej: "888111")
+    pub mod_id: String,  // ID Remoto (ej: "345123")
+    pub file_id: String, // ID de la versión instalada (ej: "888111")
+    #[serde(default = "default_true")]
+    pub enabled: bool, // Estado del mod
+    pub summary: Option<String>,
+    pub logo_url: Option<String>,
     pub install_date: chrono::DateTime<chrono::Utc>,
     pub update_available: Option<String>, // None o ID de la nueva versión
 }
@@ -43,7 +51,7 @@ pub async fn ensure_mod_dirs(base_dir: &Path, channel: &str, version: &str) -> (
 pub async fn list_mods(base_dir: &Path, channel: &str, version: &str) -> Result<Vec<ModInfo>> {
     let (mods_dir, disabled_dir) = ensure_mod_dirs(base_dir, channel, version).await;
     let mut mods = Vec::new();
-    
+
     // Cargar el manifiesto de metadatos
     let manifest = load_manifest(base_dir, channel, version).await;
     let manifest_map: std::collections::HashMap<String, InstalledModMetadata> = manifest
@@ -51,7 +59,12 @@ pub async fn list_mods(base_dir: &Path, channel: &str, version: &str) -> Result<
         .map(|m| (m.file_name.clone(), m))
         .collect();
 
-    async fn scan(dir: &Path, enabled: bool, list: &mut Vec<ModInfo>, manifest_map: &std::collections::HashMap<String, InstalledModMetadata>) -> Result<()> {
+    async fn scan(
+        dir: &Path,
+        enabled: bool,
+        list: &mut Vec<ModInfo>,
+        manifest_map: &std::collections::HashMap<String, InstalledModMetadata>,
+    ) -> Result<()> {
         if !dir.exists() {
             return Ok(());
         }
@@ -113,7 +126,12 @@ pub async fn delete_mod(mod_info: &ModInfo) -> Result<()> {
 }
 
 // Función para guardar el manifiesto
-pub async fn save_manifest(base_dir: &std::path::Path, channel: &str, version: &str, metadata: &Vec<InstalledModMetadata>) -> anyhow::Result<()> {
+pub async fn save_manifest(
+    base_dir: &std::path::Path,
+    channel: &str,
+    version: &str,
+    metadata: &Vec<InstalledModMetadata>,
+) -> anyhow::Result<()> {
     let paths = crate::game::GamePaths::new(base_dir.to_path_buf());
     let mods_dir = paths.mods_dir(channel, version);
     if !mods_dir.exists() {
@@ -126,7 +144,11 @@ pub async fn save_manifest(base_dir: &std::path::Path, channel: &str, version: &
 }
 
 // Función para leer manifiesto
-pub async fn load_manifest(base_dir: &std::path::Path, channel: &str, version: &str) -> Vec<InstalledModMetadata> {
+pub async fn load_manifest(
+    base_dir: &std::path::Path,
+    channel: &str,
+    version: &str,
+) -> Vec<InstalledModMetadata> {
     let paths = crate::game::GamePaths::new(base_dir.to_path_buf());
     let manifest_path = paths.mods_dir(channel, version).join("mods_manifest.json");
     if let Ok(content) = tokio::fs::read_to_string(manifest_path).await {
@@ -135,4 +157,3 @@ pub async fn load_manifest(base_dir: &std::path::Path, channel: &str, version: &
         Vec::new()
     }
 }
-

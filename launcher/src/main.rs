@@ -4,8 +4,12 @@ use clap::Parser;
 use futures::SinkExt;
 use iced::widget::{Space, column, container, image, mouse_area, row, stack};
 use iced::{
-    Alignment, Color, ContentFit, Element, Length, Padding, Size, Subscription, Task, Theme, clipboard,
-    mouse::Interaction, window, Point, event::{self, Event}, mouse
+    Alignment, Color, ContentFit, Element, Length, Padding, Point, Size, Subscription, Task, Theme,
+    clipboard,
+    event::{self, Event},
+    mouse,
+    mouse::Interaction,
+    window,
 };
 use single_instance::SingleInstance;
 use std::sync::{
@@ -231,7 +235,6 @@ pub fn main() -> iced::Result {
         decorations: false, // Desactivar barra nativa
         transparent: true,  // Permitir transparencia real (bordes redondeados/semitransparencia)
         // ------------------------------------
-
         position: iced::window::Position::Centered,
         exit_on_close_request: false,
 
@@ -248,8 +251,14 @@ pub fn main() -> iced::Result {
 // --- AÑADIR ESTE ENUM ---
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ResizeDirection {
-    North, South, East, West,
-    NorthEast, NorthWest, SouthEast, SouthWest
+    North,
+    South,
+    East,
+    West,
+    NorthEast,
+    NorthWest,
+    SouthEast,
+    SouthWest,
 }
 
 #[derive(Debug, Clone)]
@@ -323,16 +332,16 @@ pub enum Message {
     WindowDrag,
     MinimizeWindow,
     MaximizeWindow,
-    
+
     // --- NUEVOS MENSAJES PARA REDIMENSIÓN MANUAL ---
     ResizePressed(ResizeDirection),
     ResizeReleased,
     WindowEvent(window::Event),
     // ---------------------------------------------
-    
+
     // --- NUEVO: Mensaje para cambiar shader ---
     NextShader,
-    
+
     ServerPatchProgress(f32),
 }
 
@@ -375,30 +384,31 @@ struct RusTale {
     lsd_enabled_time: Option<std::time::Instant>, // Para activacion progresiva
     is_maximized: bool,
     last_title_click: std::time::Instant,
-    
+
     // --- NUEVOS CAMPOS PARA REDIMENSIÓN ---
     resizing_direction: Option<ResizeDirection>,
     current_window_size: Size,
     current_window_pos: Point,
-    
+
     // Guardamos el estado AL MOMENTO DE HACER CLICK
     drag_start_window_pos: Point,
     drag_start_window_size: Size,
     drag_start_mouse_screen_pos: Point, // Mouse absoluto (WindowPos + MousePos)
     // -------------------------------------
-    
+
     // --- CAMPOS PARA EFECTOS TÁCTILES DEL SHADER ---
-    shader_click_intensity: f32,      // Intensidad del pulso actual
+    shader_click_intensity: f32,           // Intensidad del pulso actual
     shader_click_time: std::time::Instant, // Tiempo del último clic
+    lsd_shader_instance: std::cell::RefCell<Option<lsd_shader::LsdShader>>, // Instancia mutable para llamadas dinámicas
     // ---------------------------------------------
-    
+
     // NUEVOS CAMPOS PARA TRANSICIÓN DE SHADERS
     active_shader_idx: u32,
     next_shader_idx: u32,
     shader_transition: f32, // 0.0 a 1.0
     total_shaders_available: u32,
     shader_change_timer: f32, // Acumulador para cambio automático
-    // ------------------------------------- // Añadir esto
+                              // ------------------------------------- // Añadir esto
 }
 
 impl RusTale {
@@ -433,17 +443,18 @@ impl RusTale {
         // 1. CARGA INICIAL DE SHADERS CON SEGURIDAD
         // Crea carpeta si no existe (la app.rs initialize es async, esto es pre-load rápido o hazlo en initialize)
         // Recomendado: Llamar build_uber_shader() AQUI
-        
+
         let total_shaders = std::panic::catch_unwind(|| {
             let shader_code = crate::ui::shader_manager::build_uber_shader();
             lsd_shader::set_global_wgsl(shader_code);
             crate::ui::shader_manager::get_shader_count()
-        }).unwrap_or_else(|_| {
+        })
+        .unwrap_or_else(|_| {
             eprintln!("[SHADER] Panic during shader initialization! Using safe mode fallback.");
             lsd_shader::set_safe_mode_shader();
             1 // Fallback: 1 shader (safe mode)
         });
-        
+
         // Si safe_mode está activado en la configuración, forzamos shader simple
         if initial_settings.safe_mode || crate::ui::lsd_shader::should_use_safe_mode() {
             println!("[SHADER] Safe mode enabled, using simple shader");
@@ -531,23 +542,24 @@ impl RusTale {
                 },
                 is_maximized: false,
                 last_title_click: std::time::Instant::now(),
-                
+
                 // --- NUEVOS CAMPOS PARA REDIMENSIÓN ---
                 resizing_direction: None,
                 current_window_size: Size::new(width, height),
                 current_window_pos: Point::ORIGIN,
-                
+
                 // Guardamos el estado AL MOMENTO DE HACER CLICK
                 drag_start_window_pos: Point::ORIGIN,
                 drag_start_window_size: Size::new(width, height),
                 drag_start_mouse_screen_pos: Point::ORIGIN,
                 // -------------------------------------
-                
+
                 // --- CAMPOS PARA EFECTOS TÁCTILES DEL SHADER ---
                 shader_click_intensity: 0.0,
                 shader_click_time: std::time::Instant::now(),
+                lsd_shader_instance: std::cell::RefCell::new(None), // Se inicializará dinámicamente
                 // ---------------------------------------------
-                
+
                 // NUEVOS CAMPOS PARA TRANSICIÓN DE SHADERS
                 active_shader_idx: 0,
                 next_shader_idx: 0,
@@ -606,13 +618,11 @@ impl RusTale {
 
         // SUSCRIPCIÓN GLOBAL DE MOUSE
         // Siempre activa para que los cursores funcionen correctamente en todos los lados
-        let global_mouse = event::listen_with(|event, _status, _id| {
-            match event {
-                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                    Some(Message::ResizeReleased)
-                }
-                _ => None, 
+        let global_mouse = event::listen_with(|event, _status, _id| match event {
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                Some(Message::ResizeReleased)
             }
+            _ => None,
         });
 
         // CAMBIO AQUÍ: Eliminamos "&& self.settings.theme.lsd_mode"
@@ -620,11 +630,14 @@ impl RusTale {
         // 1. Efectos LSD (si están activos)
         // 2. Redimensionamiento de ventana (siempre activo)
         // 3. Mantener self.cursor_position actualizado para el cálculo del arrastre inicial
-        let mouse_sub = if self.is_window_visible { 
+        let mouse_sub = if self.is_window_visible {
             iced::event::listen_with(|event, _status, _window_id| {
                 if let iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) = event {
                     Some(Message::CursorMoved(position))
-                } else if let iced::Event::Mouse(iced::mouse::Event::ButtonPressed(mouse::Button::Left)) = event {
+                } else if let iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+                    mouse::Button::Left,
+                )) = event
+                {
                     Some(Message::ShaderClicked) // Detectar clic izquierdo
                 } else {
                     None
@@ -652,9 +665,13 @@ impl RusTale {
                 if let Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event {
                     match key {
                         // Flecha derecha para siguiente shader
-                        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowRight) => Some(Message::NextShader),
+                        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowRight) => {
+                            Some(Message::NextShader)
+                        }
                         // Alternativa: Tecla 'S'
-                        iced::keyboard::Key::Character(c) if c.as_str() == "s" => Some(Message::NextShader),
+                        iced::keyboard::Key::Character(c) if c.as_str() == "s" => {
+                            Some(Message::NextShader)
+                        }
                         _ => None,
                     }
                 } else {
@@ -784,19 +801,34 @@ impl RusTale {
                         ResizeDirection::NorthWest => {
                             // North logic
                             let proposed_height = start_h - delta_y;
-                            if proposed_height >= min_h { new_h = proposed_height; new_y = start_y + delta_y; }
-                            else { new_h = min_h; new_y = start_y + (start_h - min_h); }
-                            
+                            if proposed_height >= min_h {
+                                new_h = proposed_height;
+                                new_y = start_y + delta_y;
+                            } else {
+                                new_h = min_h;
+                                new_y = start_y + (start_h - min_h);
+                            }
+
                             // West logic
                             let proposed_width = start_w - delta_x;
-                            if proposed_width >= min_w { new_w = proposed_width; new_x = start_x + delta_x; }
-                            else { new_w = min_w; new_x = start_x + (start_w - min_w); }
+                            if proposed_width >= min_w {
+                                new_w = proposed_width;
+                                new_x = start_x + delta_x;
+                            } else {
+                                new_w = min_w;
+                                new_x = start_x + (start_w - min_w);
+                            }
                         }
                         ResizeDirection::NorthEast => {
                             // North logic
                             let proposed_height = start_h - delta_y;
-                            if proposed_height >= min_h { new_h = proposed_height; new_y = start_y + delta_y; }
-                            else { new_h = min_h; new_y = start_y + (start_h - min_h); }
+                            if proposed_height >= min_h {
+                                new_h = proposed_height;
+                                new_y = start_y + delta_y;
+                            } else {
+                                new_h = min_h;
+                                new_y = start_y + (start_h - min_h);
+                            }
                             // East logic
                             new_w = (start_w + delta_x).max(min_w);
                         }
@@ -805,8 +837,13 @@ impl RusTale {
                             new_h = (start_h + delta_y).max(min_h);
                             // West logic
                             let proposed_width = start_w - delta_x;
-                            if proposed_width >= min_w { new_w = proposed_width; new_x = start_x + delta_x; }
-                            else { new_w = min_w; new_x = start_x + (start_w - min_w); }
+                            if proposed_width >= min_w {
+                                new_w = proposed_width;
+                                new_x = start_x + delta_x;
+                            } else {
+                                new_w = min_w;
+                                new_x = start_x + (start_w - min_w);
+                            }
                         }
                     }
 
@@ -817,19 +854,29 @@ impl RusTale {
                     // Deja que el sistema operativo responda con un evento WindowEvent::Moved/Resized.
                     // Esto elimina el "jitter" o locura al redimensionar hacia la izquierda/arriba.
 
-                    if (new_x - self.current_window_pos.x).abs() > 0.5 || (new_y - self.current_window_pos.y).abs() > 0.5 {
-                        commands.push(window::oldest().and_then(move |id| window::move_to(id, Point::new(new_x, new_y))));
+                    if (new_x - self.current_window_pos.x).abs() > 0.5
+                        || (new_y - self.current_window_pos.y).abs() > 0.5
+                    {
+                        commands.push(
+                            window::oldest()
+                                .and_then(move |id| window::move_to(id, Point::new(new_x, new_y))),
+                        );
                     }
 
-                    if (new_w - self.current_window_size.width).abs() > 0.5 || (new_h - self.current_window_size.height).abs() > 0.5 {
-                        commands.push(window::oldest().and_then(move |id| window::resize(id, Size::new(new_w, new_h))));
+                    if (new_w - self.current_window_size.width).abs() > 0.5
+                        || (new_h - self.current_window_size.height).abs() > 0.5
+                    {
+                        commands.push(
+                            window::oldest()
+                                .and_then(move |id| window::resize(id, Size::new(new_w, new_h))),
+                        );
                     }
 
                     if !commands.is_empty() {
                         return Task::batch(commands);
                     }
                 }
-                
+
                 return Task::none();
             }
             Message::Tick(_now) => {
@@ -848,8 +895,8 @@ impl RusTale {
                 // CAMBIO AUTOMÁTICO DE SHADER CADA 30 SEGUNDOS
                 if self.shader_transition > 0.0 {
                     // Avanzar transición (ajustar velocidad 0.01 -> más lento, 0.05 -> rápido)
-                    self.shader_transition += 0.02; 
-                    
+                    self.shader_transition += 0.02;
+
                     if self.shader_transition >= 1.0 {
                         // Transición completada
                         self.active_shader_idx = self.next_shader_idx;
@@ -858,10 +905,12 @@ impl RusTale {
                 } else {
                     // Esperar tiempo para cambiar
                     self.shader_change_timer += 0.033; // ~30ms por tick
-                    if self.shader_change_timer > 30.0 { // Cambiar cada 30 segundos
+                    if self.shader_change_timer > 30.0 {
+                        // Cambiar cada 30 segundos
                         self.shader_change_timer = 0.0;
                         // Siguiente shader ciclico
-                        self.next_shader_idx = (self.active_shader_idx + 1) % self.total_shaders_available;
+                        self.next_shader_idx =
+                            (self.active_shader_idx + 1) % self.total_shaders_available;
                         self.shader_transition = 0.01; // Iniciar transición
                     }
                 }
@@ -927,7 +976,7 @@ impl RusTale {
                 self.cursor_position = pos;
                 Task::none()
             }
-            
+
             Message::ShaderClicked => {
                 // Disparar pulso de onda de choque en el shader
                 self.shader_click_intensity = 2.0; // Pico fuerte para la onda
@@ -2014,7 +2063,6 @@ impl RusTale {
                 if self.settings.minimize_to_tray {
                     // Si el icono existe...
                     if self.tray_icon.is_some() {
-                        
                         // [LINUX FIX] En Linux/Wayland, 'Hidden' congela la ventana.
                         // Usamos 'Minimize' que es seguro. La ventana se queda en barra de tareas
                         // pero no se congela y el icono del tray sigue funcionando.
@@ -2028,9 +2076,9 @@ impl RusTale {
                         #[cfg(not(target_os = "linux"))]
                         {
                             self.is_window_visible = false;
-                            window::oldest().and_then(|id| window::set_mode(id, window::Mode::Hidden))
+                            window::oldest()
+                                .and_then(|id| window::set_mode(id, window::Mode::Hidden))
                         }
-
                     } else {
                         // Si no hay icono, salimos para no atrapar al usuario
                         self.save_and_exit()
@@ -2079,7 +2127,7 @@ impl RusTale {
                 self.is_maximized = !self.is_maximized;
                 window::oldest().and_then(|id| window::toggle_maximize(id))
             }
-            
+
             // --- NUEVA LÓGICA DE REDIMENSIONAMIENTO MANUAL ---
             Message::WindowEvent(event) => {
                 match event {
@@ -2089,7 +2137,7 @@ impl RusTale {
                         self.settings.width = size.width as u32;
                         self.settings.height = size.height as u32;
                         // Importante: propagar el mensaje original si lo usabas
-                        return Task::done(Message::WindowResized(size)); 
+                        return Task::done(Message::WindowResized(size));
                     }
                     window::Event::Moved(point) => {
                         self.current_window_pos = point;
@@ -2104,47 +2152,49 @@ impl RusTale {
 
             Message::ResizePressed(dir) => {
                 self.resizing_direction = Some(dir);
-                
+
                 // Guardamos el estado inicial exacto
                 self.drag_start_window_pos = self.current_window_pos;
                 self.drag_start_window_size = self.current_window_size;
-                
+
                 // Calculamos Mouse Absoluto: Posición Ventana + Posición Mouse Relativa
                 // (Usamos self.cursor_position que ya se actualiza en CursorMoved)
                 self.drag_start_mouse_screen_pos = Point::new(
                     self.current_window_pos.x + self.cursor_position.x,
-                    self.current_window_pos.y + self.cursor_position.y
+                    self.current_window_pos.y + self.cursor_position.y,
                 );
-                
+
                 Task::none()
             }
-            
+
             Message::ResizeReleased => {
                 self.resizing_direction = None;
                 Task::none()
             }
-            
+
             Message::NextShader => {
                 // Solo cambiar si el modo LSD está activo Y NO estamos ya en transición
                 if self.settings.theme.lsd_mode && self.shader_transition <= 0.0 {
-                    
                     // 1. Calcular índice siguiente (Ciclo circular)
-                    self.next_shader_idx = (self.active_shader_idx + 1) % self.total_shaders_available;
-                    
+                    self.next_shader_idx =
+                        (self.active_shader_idx + 1) % self.total_shaders_available;
+
                     // 2. Iniciar la transición visual
                     // Establecer en un valor pequeño pero > 0.0 arranca el fade-in en view()
-                    self.shader_transition = 0.01; 
-                    
+                    self.shader_transition = 0.01;
+
                     // 3. Resetear el temporizador automático
                     // Para que no vuelva a cambiar automáticamente a los 2 segundos de que tú lo cambiaste
                     self.shader_change_timer = 0.0;
-                    
-                    println!("Manual Switch: {} -> {}", self.active_shader_idx, self.next_shader_idx);
+
+                    println!(
+                        "Manual Switch: {} -> {}",
+                        self.active_shader_idx, self.next_shader_idx
+                    );
                 }
                 Task::none()
             }
             // ---------------------------------------------
-            
             Message::CancelAction => {
                 self.cancellation_token.store(true, Ordering::Relaxed);
                 self.status = LauncherStatus::Ready;
@@ -2257,7 +2307,7 @@ impl RusTale {
         // 0.0 seg -> 0.0 (movimiento)
         // 3.0 seg -> 1.0 (quietud total)
         let stillness = (elapsed_idle / 3.0).clamp(0.0, 1.0);
-        
+
         // 1. CALCULAR PROGRESO DE TRANSICIÓN (Time Ramp)
         // ramp_alpha va de 0.0 (Invisible) a 1.0 (Totalmente Visible/Opaco)
         // Se basa únicamente en el tiempo transcurrido desde que se activó el LSD.
@@ -2275,7 +2325,7 @@ impl RusTale {
         // Si no: Respiración (1.0 -> 0.3 al estar quieto)
         let click_decay = (self.shader_click_time.elapsed().as_secs_f32() * 8.0).exp();
         let click_pulse = self.shader_click_intensity / click_decay;
-        
+
         let effect_intensity = if self.lsd_preview {
             1.0 + click_pulse
         } else {
@@ -2285,7 +2335,8 @@ impl RusTale {
             // NOTA: Multiplicamos por ramp_alpha aquí para que la *distorsión*
             // empiece suave, pero esto NO afecta a la transparencia de la capa.
             (ramp_alpha * (1.0 - (stillness * 0.7))) + click_pulse
-        }.min(10.0); // Tope de seguridad
+        }
+        .min(10.0); // Tope de seguridad
 
         let ctx = theme::UIContext {
             palette: *palette,
@@ -2433,22 +2484,38 @@ impl RusTale {
 
         // 2. Capa Shader: Se superpone con Alpha variable
         let bg: Element<'_, Message> = if self.settings.theme.lsd_mode {
-            // [FIX] Usamos ramp_alpha directamente. 
-            // Esto asegura que la capa del shader vaya de 0% opacidad a 100% opacidad 
+            // [FIX] Usamos ramp_alpha directamente.
+            // Esto asegura que la capa del shader vaya de 0% opacidad a 100% opacidad
             // de forma lineal, independiente de si el shader "respira" o se distorsiona.
-            let shader_opacity = ramp_alpha; 
+            let shader_opacity = ramp_alpha;
 
-            // Pasamos shader_opacity al argumento 'alpha' y effect_intensity al 'intensity'
-            let shader_layer = iced::widget::shader(lsd_shader::LsdShader::new(
-                self.start_time,
-                self.cursor_position,
-                palette.accent,
-                self.active_shader_idx,
-                shader_opacity,   // <--- CORREGIDO: Controla opacidad pura (fade in)
-                effect_intensity, // <--- CORREGIDO: Controla violencia matemática del fractal
-            ))
-            .width(Length::Fill)
-            .height(Length::Fill);
+            // Crear o actualizar instancia del shader dinámicamente
+            let mut shader_opt = self.lsd_shader_instance.borrow_mut();
+            let shader_instance = if let Some(ref mut shader) = *shader_opt {
+                // Actualizar posición del mouse
+                shader.update_mouse_position(self.cursor_position);
+                shader
+            } else {
+                // Crear nueva instancia
+                *shader_opt = Some(lsd_shader::LsdShader::new(
+                    self.start_time,
+                    self.cursor_position,
+                    palette.accent,
+                    self.active_shader_idx,
+                    shader_opacity, // <--- CORREGIDO: Controla opacidad pura (fade in)
+                    effect_intensity, // <--- CORREGIDO: Controla violencia matemática del fractal
+                ));
+                shader_opt.as_mut().unwrap()
+            };
+
+            // Disparar trigger_click si hay un pulso activo
+            if click_pulse > 0.01 {
+                shader_instance.trigger_click();
+            }
+
+            let shader_layer = iced::widget::shader(shader_instance.clone())
+                .width(Length::Fill)
+                .height(Length::Fill);
 
             // Apilamos: Imagen estática abajo, Shader arriba (transicionando transparencia)
             iced::widget::stack![base_layer, shader_layer].into()
@@ -2467,40 +2534,40 @@ impl RusTale {
                         .content_fit(ContentFit::Contain)
                 )
                 .padding(Padding::new(0.0).left(10.0).right(10.0)), // Padding lateral
-                
                 // Título (Arrastrable)
                 mouse_area(
-                    container(
-                        theme::text_small(self.title(), ctx)
-                    )
-                    .width(Length::Fill)
-                    .align_y(Alignment::Center)
+                    container(theme::text_small(self.title(), ctx))
+                        .width(Length::Fill)
+                        .align_y(Alignment::Center)
                 )
                 .on_press(Message::WindowDrag)
                 .interaction(Interaction::Grab), // Cursor de mano al arrastrar
-
                 // Botones de control
                 row![
                     // Minimizar
                     theme::window_control_button(
-                        crate::util::icons::MINUS, 
-                        Message::MinimizeWindow, 
-                        false, 
+                        crate::util::icons::MINUS,
+                        Message::MinimizeWindow,
+                        false,
                         &palette,
                         ctx
                     ),
                     // Maximizar / Restaurar
                     theme::window_control_button(
-                        if self.is_maximized { crate::util::icons::RESTORE } else { crate::util::icons::SQUARE }, 
-                        Message::MaximizeWindow, 
-                        false, 
+                        if self.is_maximized {
+                            crate::util::icons::RESTORE
+                        } else {
+                            crate::util::icons::SQUARE
+                        },
+                        Message::MaximizeWindow,
+                        false,
                         &palette,
                         ctx
                     ),
                     // Cerrar (Rojo)
                     theme::window_control_button(
-                        crate::util::icons::X, 
-                        Message::CloseRequested, 
+                        crate::util::icons::X,
+                        Message::CloseRequested,
                         true, // is_close
                         &palette,
                         ctx
@@ -2508,7 +2575,7 @@ impl RusTale {
                 ]
             ]
             .align_y(Alignment::Center)
-            .height(32) // Altura de la barra de título
+            .height(32), // Altura de la barra de título
         )
         .style(move |t| theme::title_bar_style(&palette, t))
         .width(Length::Fill);
@@ -2516,7 +2583,9 @@ impl RusTale {
         // Estructura principal visual (Fondo + Barra + Contenido)
         let visual_content = column![
             title_bar,
-            container(main_content).width(Length::Fill).height(Length::Fill)
+            container(main_content)
+                .width(Length::Fill)
+                .height(Length::Fill)
         ];
 
         let final_view = stack![bg, tint_overlay, visual_content];
@@ -2585,22 +2654,27 @@ impl RusTale {
         if self.is_maximized {
             window_frame.into()
         } else {
-            let b = 10.0;  // Grosor del borde para arrastrar
-            let c = 20.0;  // Tamaño de la zona de las esquinas
+            let b = 10.0; // Grosor del borde para arrastrar
+            let c = 20.0; // Tamaño de la zona de las esquinas
 
             // Helper para crear una capa de redimensión alineada
             // Envuelve la zona sensible en un contenedor de pantalla completa para posicionarla
-            let handle = |dir: ResizeDirection, interaction: Interaction, w: Length, h: Length, align_x: Alignment, align_y: Alignment| {
+            let handle = |dir: ResizeDirection,
+                          interaction: Interaction,
+                          w: Length,
+                          h: Length,
+                          align_x: Alignment,
+                          align_y: Alignment| {
                 container(
                     mouse_area(
                         container(Space::new())
                             .width(w)
                             .height(h)
-                            .style(|_| container::Style::default()) // Transparente
+                            .style(|_| container::Style::default()), // Transparente
                     )
                     .on_press(Message::ResizePressed(dir))
                     .on_release(Message::ResizeReleased)
-                    .interaction(interaction)
+                    .interaction(interaction),
                 )
                 .width(Length::Fill)
                 .height(Length::Fill)
@@ -2610,27 +2684,83 @@ impl RusTale {
 
             let resize_handles = stack![
                 // 1. Bordes (Lados) - Ocupan todo el largo/ancho correspondiente
-                handle(ResizeDirection::North, Interaction::ResizingVertically,   Length::Fill, Length::Fixed(b), Alignment::Center, Alignment::Start),
-                handle(ResizeDirection::South, Interaction::ResizingVertically,   Length::Fill, Length::Fixed(b), Alignment::Center, Alignment::End),
-                handle(ResizeDirection::West,  Interaction::ResizingHorizontally, Length::Fixed(b), Length::Fill, Alignment::Start,  Alignment::Center),
-                handle(ResizeDirection::East,  Interaction::ResizingHorizontally, Length::Fixed(b), Length::Fill, Alignment::End,    Alignment::Center),
-
+                handle(
+                    ResizeDirection::North,
+                    Interaction::ResizingVertically,
+                    Length::Fill,
+                    Length::Fixed(b),
+                    Alignment::Center,
+                    Alignment::Start
+                ),
+                handle(
+                    ResizeDirection::South,
+                    Interaction::ResizingVertically,
+                    Length::Fill,
+                    Length::Fixed(b),
+                    Alignment::Center,
+                    Alignment::End
+                ),
+                handle(
+                    ResizeDirection::West,
+                    Interaction::ResizingHorizontally,
+                    Length::Fixed(b),
+                    Length::Fill,
+                    Alignment::Start,
+                    Alignment::Center
+                ),
+                handle(
+                    ResizeDirection::East,
+                    Interaction::ResizingHorizontally,
+                    Length::Fixed(b),
+                    Length::Fill,
+                    Alignment::End,
+                    Alignment::Center
+                ),
                 // 2. Esquinas - Prioridad sobre los bordes (por estar después en el stack)
                 // NW (Arriba-Izquierda) -> Cursor \
-                handle(ResizeDirection::NorthWest, Interaction::ResizingDiagonallyDown, Length::Fixed(c), Length::Fixed(c), Alignment::Start, Alignment::Start),
+                handle(
+                    ResizeDirection::NorthWest,
+                    Interaction::ResizingDiagonallyDown,
+                    Length::Fixed(c),
+                    Length::Fixed(c),
+                    Alignment::Start,
+                    Alignment::Start
+                ),
                 // NE (Arriba-Derecha)   -> Cursor /
-                handle(ResizeDirection::NorthEast, Interaction::ResizingDiagonallyUp,   Length::Fixed(c), Length::Fixed(c), Alignment::End,   Alignment::Start),
+                handle(
+                    ResizeDirection::NorthEast,
+                    Interaction::ResizingDiagonallyUp,
+                    Length::Fixed(c),
+                    Length::Fixed(c),
+                    Alignment::End,
+                    Alignment::Start
+                ),
                 // SW (Abajo-Izquierda)  -> Cursor /
-                handle(ResizeDirection::SouthWest, Interaction::ResizingDiagonallyUp,   Length::Fixed(c), Length::Fixed(c), Alignment::Start, Alignment::End),
+                handle(
+                    ResizeDirection::SouthWest,
+                    Interaction::ResizingDiagonallyUp,
+                    Length::Fixed(c),
+                    Length::Fixed(c),
+                    Alignment::Start,
+                    Alignment::End
+                ),
                 // SE (Abajo-Derecha)    -> Cursor \
-                handle(ResizeDirection::SouthEast, Interaction::ResizingDiagonallyDown, Length::Fixed(c), Length::Fixed(c), Alignment::End,   Alignment::End),
+                handle(
+                    ResizeDirection::SouthEast,
+                    Interaction::ResizingDiagonallyDown,
+                    Length::Fixed(c),
+                    Length::Fixed(c),
+                    Alignment::End,
+                    Alignment::End
+                ),
             ];
 
             // STACK FINAL: resize_handles DEBE ser el último elemento para capturar eventos
             stack![
                 window_frame,   // Contenido visual abajo
                 resize_handles  // Capa invisible de control arriba
-            ].into()
+            ]
+            .into()
         }
     }
 
@@ -2651,7 +2781,7 @@ impl RusTale {
         let _ = tray_menu.append_items(&[&game_action, &show_i, &quit_i]);
 
         let icon = util::icons::load_tray_icon();
-        
+
         // --- CAMBIO AQUÍ: Capturar error en lugar de .ok() ---
         let builder_result = TrayIconBuilder::new()
             .with_menu(Box::new(tray_menu))
@@ -2664,7 +2794,7 @@ impl RusTale {
                 println!("Tray icon created OK.");
                 // Escribir log de éxito (temporal para debug)
                 Some(icon)
-            },
+            }
             Err(e) => {
                 // Escribir log de error
                 eprintln!("ERROR: Failed to create tray icon: {}", e);
@@ -2672,7 +2802,6 @@ impl RusTale {
             }
         }
     }
-
 
     /// Rebuilds the tray menu based on current game state
     fn rebuild_tray_menu(&mut self) {

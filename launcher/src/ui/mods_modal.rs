@@ -7,9 +7,7 @@ use crate::{theme, util};
 use iced::widget::{
     Id, Space, button, column, container, image, pick_list, row, scrollable, svg, text_input,
 };
-use iced::{
-    Alignment, Background, Border, Color, ContentFit, Element, Length, Renderer, Size, Task, Theme,
-};
+use iced::{Alignment, Color, ContentFit, Element, Length, Renderer, Size, Task, Theme};
 use std::collections::{HashMap, HashSet};
 
 const MODS_SCROLL_ID: &str = "mods_scroll_area";
@@ -52,7 +50,15 @@ pub enum ModsMessage {
     ModsLoadedComplex(Result<(Vec<ModInfo>, Vec<crate::game::zip_mods::PatchManifest>), String>),
     OpenMods,
     CheckForUpdates,
-    UpdatesChecked(Result<Vec<String>, String>),
+    UpdatesChecked(
+        Result<
+            (
+                Vec<String>,
+                std::collections::HashMap<String, Vec<crate::game::mods_api::GenericFile>>,
+            ),
+            String,
+        >,
+    ),
     UpdateMod(ModInfo),
     UpdateModToVersion(ModInfo, String, bool), // (ModInfo, FileID, is_patch)
     UpdateModStart(ModInfo),
@@ -147,7 +153,13 @@ impl ModsState {
                 // Limpiar cache al reabrir para refrescar datos frescos
                 self.mods_with_updates.clear();
 
-                self.load_mods_task(base_dir, settings)
+                let load_task = self.load_mods_task(base_dir.clone(), settings.clone());
+                // También verificar actualizaciones automáticamente al abrir
+                let update_task = Task::perform(async move { Ok::<(), String>(()) }, |_| {
+                    ModsMessage::CheckForUpdates
+                });
+
+                Task::batch([load_task, update_task])
             }
             ModsMessage::RefreshLocalBackground => self.load_mods_task(base_dir, settings),
             ModsMessage::ModsLoaded(res) => {
@@ -167,6 +179,73 @@ impl ModsState {
                         self.installed_mods = jars;
                         self.patch_mods = patches;
                         self.error = None;
+
+                        // Populate installed_ids with mod IDs from JAR mods and ZIP patches
+                        self.installed_ids.clear();
+                        
+                        // Add mod IDs from JAR mods that have metadata
+                        for jar_mod in &self.installed_mods {
+                            if let Some(meta) = &jar_mod.metadata {
+                                self.installed_ids.insert(meta.mod_id.clone());
+                            }
+                        }
+                        
+                        // Add remote IDs from ZIP patches
+                        for patch in &self.patch_mods {
+                            if let Some(remote_id) = &patch.remote_id {
+                                self.installed_ids.insert(remote_id.clone());
+                            }
+                        }
+
+                        // Pedir miniaturas para los instalados que tengan logo_url
+                        let mut tasks = Vec::new();
+                        for m in &self.installed_mods {
+                            if let Some(meta) = &m.metadata {
+                                if let Some(logo) = &meta.logo_url {
+                                    if !self.thumbnails.contains_key(&meta.mod_id) {
+                                        let url = logo.clone();
+                                        let id = meta.mod_id.clone();
+                                        let c = client.clone();
+                                        tasks.push(Task::perform(
+                                            async move {
+                                                (
+                                                    id,
+                                                    crate::util::image_cache::load_image(&c, &url)
+                                                        .await
+                                                        .map_err(|e| e.to_string()),
+                                                )
+                                            },
+                                            |(id, res)| ModsMessage::ImageLoaded(id, res),
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+
+                        for p in &self.patch_mods {
+                            if let (Some(rid), Some(logo)) = (&p.remote_id, &p.logo_url) {
+                                if !self.thumbnails.contains_key(rid) {
+                                    let url = logo.clone();
+                                    let id = rid.clone();
+                                    let c = client.clone();
+                                    tasks.push(Task::perform(
+                                        async move {
+                                            (
+                                                id,
+                                                crate::util::image_cache::load_image(&c, &url)
+                                                    .await
+                                                    .map_err(|e| e.to_string()),
+                                            )
+                                        },
+                                        |(id, res)| ModsMessage::ImageLoaded(id, res),
+                                    ));
+                                }
+                            }
+                        }
+
+                        if !tasks.is_empty() {
+                            return Task::batch(tasks);
+                        }
                     }
                     Err(e) => {
                         if self.is_open {
@@ -188,6 +267,19 @@ impl ModsState {
                 Task::perform(
                     async move {
                         let _ = crate::game::mods::toggle_mod(&bd, &ch, &v, &mod_info).await;
+
+                        // Actualizar manifest
+                        if let Some(meta) = &mod_info.metadata {
+                            let mut manifest = crate::game::mods::load_manifest(&bd, &ch, &v).await;
+                            if let Some(entry) =
+                                manifest.iter_mut().find(|m| m.mod_id == meta.mod_id)
+                            {
+                                entry.enabled = !mod_info.enabled;
+                                let _ =
+                                    crate::game::mods::save_manifest(&bd, &ch, &v, &manifest).await;
+                            }
+                        }
+
                         Ok::<(), String>(())
                     },
                     |_| ModsMessage::RefreshLocalBackground,
@@ -195,9 +287,36 @@ impl ModsState {
             }
             ModsMessage::DeleteLocal(mod_info) => {
                 self.loading = true;
+                let bd = base_dir.clone();
+                let s = settings.clone();
                 Task::perform(
                     async move {
+                        // Eliminar el archivo físico
                         let _ = crate::game::mods::delete_mod(&mod_info).await;
+
+                        // También eliminar del manifest si tiene metadatos
+                        if let Some(meta) = &mod_info.metadata {
+                            let version_str = if s.game_version == 0 {
+                                "latest".to_string()
+                            } else {
+                                s.game_version.to_string()
+                            };
+
+                            let mut manifest =
+                                crate::game::mods::load_manifest(&bd, &s.channel, &version_str)
+                                    .await;
+                            // Remover la entrada del mod eliminado
+                            manifest.retain(|m| m.mod_id != meta.mod_id);
+                            // Guardar el manifest actualizado
+                            let _ = crate::game::mods::save_manifest(
+                                &bd,
+                                &s.channel,
+                                &version_str,
+                                &manifest,
+                            )
+                            .await;
+                        }
+
                         Ok::<(), String>(())
                     },
                     |_| ModsMessage::RefreshLocalBackground,
@@ -429,6 +548,9 @@ impl ModsState {
                                 provider: gen_mod.provider,
                                 mod_id: gen_mod.id.clone(),
                                 file_id: file_id_to_save,
+                                enabled: true,
+                                summary: Some(gen_mod.summary.clone()),
+                                logo_url: gen_mod.logo_url.clone(),
                                 install_date: chrono::Utc::now(),
                                 update_available: None,
                             })
@@ -513,6 +635,8 @@ impl ModsState {
                                 meta.as_ref().map(|m| m.mod_id.clone()),
                                 meta.as_ref().map(|m| m.file_id.clone()),
                                 meta.as_ref().map(|m| m.provider),
+                                meta.as_ref().map(|m| m.summary.clone()).flatten(),
+                                meta.as_ref().map(|m| m.logo_url.clone()).flatten(),
                             )
                         })
                         .await
@@ -600,6 +724,8 @@ impl ModsState {
                 Task::perform(
                     async move {
                         let mut updates = Vec::new();
+                        let mut cached_map = std::collections::HashMap::new();
+
                         // Determinar version del juego "limpia" para comparar
                         let version_str = if settings_clone.game_version == 0 {
                             "latest".to_string()
@@ -618,33 +744,55 @@ impl ModsState {
                         let repo = CurseForgeRepository::new();
                         let current_game_ver = version_str.clone();
 
+                        // 1. Verificar JAR Mods
                         for installed in manifest {
                             if installed.provider == ModProvider::CurseForge {
-                                // Llamada API
                                 if let Ok(versions) = repo.get_versions(&installed.mod_id).await {
-                                    // 1. Filtrar solo los archivos compatibles con MI versión de Hytale
                                     let compatible_file = versions.iter().find(|f| {
                                         current_game_ver == "latest"
                                             || f.game_versions.contains(&current_game_ver)
                                     });
 
-                                    // 2. Si existe uno compatible y su ID es diferente al instalado -> Hay update
                                     if let Some(latest) = compatible_file {
-                                        // Comparación de String IDs
                                         if latest.file_id != installed.file_id {
-                                            println!(
-                                                "[Updates] Found update for {}: {} -> {}",
-                                                installed.mod_name,
-                                                installed.file_id,
-                                                latest.file_id
-                                            );
                                             updates.push(installed.file_name.clone());
+                                        }
+                                        cached_map.insert(installed.mod_id.clone(), versions);
+                                    }
+                                }
+                            }
+                        }
+
+                        // 2. Verificar ZIP Patches
+                        let paths = crate::game::GamePaths::new(base_dir_clone.clone());
+                        let patches = crate::game::zip_mods::list_patches(
+                            paths.core_patches_dir(&settings_clone.channel, &version_str),
+                        )
+                        .unwrap_or_default();
+
+                        for p in patches {
+                            if let (Some(rid), Some(prov)) = (p.remote_id, p.provider) {
+                                if prov == ModProvider::CurseForge {
+                                    if let Ok(versions) = repo.get_versions(&rid).await {
+                                        let compatible_file = versions.iter().find(|f| {
+                                            current_game_ver == "latest"
+                                                || f.game_versions.contains(&current_game_ver)
+                                        });
+
+                                        if let Some(latest) = compatible_file {
+                                            // En patches, file_id es Option<String>
+                                            if Some(latest.file_id.clone()) != p.file_id {
+                                                // Usamos mod_id local del patch para marcarlo con update
+                                                updates.push(p.mod_id.clone());
+                                            }
+                                            cached_map.insert(rid.clone(), versions);
                                         }
                                     }
                                 }
                             }
                         }
-                        Ok(updates)
+
+                        Ok((updates, cached_map))
                     },
                     ModsMessage::UpdatesChecked,
                 )
@@ -652,8 +800,12 @@ impl ModsState {
             ModsMessage::UpdatesChecked(res) => {
                 self.checking_updates = false;
                 match res {
-                    Ok(updates) => {
+                    Ok((updates, versions)) => {
                         self.mods_with_updates = updates.into_iter().collect();
+                        // Poblar el cache con lo que encontramos al buscar actualizaciones
+                        for (mod_id, files) in versions {
+                            self.cached_versions.insert(mod_id, files);
+                        }
                     }
                     Err(e) => {
                         self.error = Some(format!("Error checking updates: {}", e));
@@ -743,7 +895,7 @@ impl ModsState {
                             } else {
                                 settings_clone.game_version.to_string()
                             };
-                            let (mods_dir, _) = crate::game::mods::ensure_mod_dirs(
+                            let (mods_dir, disabled_dir) = crate::game::mods::ensure_mod_dirs(
                                 &base_dir_clone,
                                 &settings_clone.channel,
                                 &version_str,
@@ -783,9 +935,18 @@ impl ModsState {
                             .await
                             .map_err(|e| e.to_string())?;
 
-                            // 5. Borrar el viejo (si es diferente)
-                            if old_file_name != new_file_name && old_path.exists() {
-                                let _ = tokio::fs::remove_file(old_path).await;
+                            // 5. Borrar el viejo (manejar tanto activos como desactivados)
+                            // Primero el desactivado (siempre, para evitar que quede huérfano)
+                            let disabled_old_path = disabled_dir.join(&old_file_name);
+                            if disabled_old_path.exists() {
+                                let _ = tokio::fs::remove_file(&disabled_old_path).await;
+                            }
+
+                            // Luego el activo solo si el nombre cambió (si es igual, download_file ya lo pisó)
+                            if old_file_name != new_file_name {
+                                if old_path.exists() {
+                                    let _ = tokio::fs::remove_file(&old_path).await;
+                                }
                             }
 
                             // 6. Actualizar el Manifiesto JSON
@@ -799,6 +960,7 @@ impl ModsState {
                             if let Some(entry) = manifest.iter_mut().find(|m| m.mod_id == mod_id) {
                                 entry.file_name = new_file_name.clone();
                                 entry.file_id = target_file.file_id.clone();
+                                entry.enabled = true; // Forzar habilitado al actualizar
                                 entry.install_date = chrono::Utc::now();
                                 entry.update_available = None;
                             }
@@ -858,6 +1020,9 @@ impl ModsState {
                                     provider: old_meta.provider,
                                     mod_id: old_meta.mod_id,
                                     file_id,
+                                    enabled: true, // Siempre habilitar al actualizar para asegurar consistencia
+                                    summary: old_meta.summary.clone(),
+                                    logo_url: old_meta.logo_url.clone(),
                                     install_date: chrono::Utc::now(),
                                     update_available: None,
                                 })
@@ -1094,7 +1259,8 @@ impl ModsState {
 
             let mut pl = column![Element::from(h)].spacing(10);
             for p in &self.patch_mods {
-                pl = pl.push(self.view_patch_row(p, localization, ctx));
+                let has_update = self.mods_with_updates.contains(&p.mod_id);
+                pl = pl.push(self.view_patch_row(p, has_update, localization, ctx));
             }
             content_items.push(theme::magic_container(pl.into(), ctx));
         }
@@ -1174,11 +1340,17 @@ impl ModsState {
         };
 
         // --------------------------------------------------------
-        // SECCION CENTRAL: Nombre + Dropdown de versiones
+        // SECCION CENTRAL: Nombre + Dropdown de versiones + Summary
         // --------------------------------------------------------
         let mut center_info = column![theme::text_body(display_name, ctx)]
             .spacing(4)
             .width(Length::Fill);
+
+        if let Some(meta) = &mi.metadata {
+            if let Some(summary) = &meta.summary {
+                center_info = center_info.push(theme::text_caption(summary, ctx));
+            }
+        }
 
         // Si tenemos metadatos (fue instalado via gestor), mostramos selector
         if let Some(meta) = &mi.metadata {
@@ -1247,22 +1419,17 @@ impl ModsState {
             // Mientras instala no permitimos acciones
             actions.push(theme::text_micro("WAIT...", ctx).into());
         } else {
-            // Indicador Visual de Update (Solo icono verde si hay update, el botón ya es el dropdown)
+            // Botón UPDATE funcional cuando hay actualización disponible
             if has_update {
-                actions.push(
-                    container(theme::text_micro("UPDATE", ctx))
-                        .padding([2, 6])
-                        .style(|t: &Theme| container::Style {
-                            background: Some(Background::Color(t.palette().success)),
-                            border: Border {
-                                radius: 4.0.into(),
-                                ..Default::default()
-                            },
-                            text_color: Some(Color::BLACK),
-                            ..Default::default()
-                        })
+                let update_btn = theme::magic_button(
+                    button(theme::text_micro("UPDATE", ctx))
+                        .on_press(ModsMessage::UpdateMod(mi.clone()))
+                        .style(move |t: &Theme, s| theme::success_button_style(&palette, t, s))
+                        .padding([4, 8])
                         .into(),
+                    ctx,
                 );
+                actions.push(update_btn.into());
             }
 
             // Toggle Enable/Disable
@@ -1308,7 +1475,40 @@ impl ModsState {
         theme::magic_container(
             theme::list_item_row(
                 row![
-                    // Usamos el contenedor de info central que creamos arriba
+                    // Miniatura o Icono (PUZZLE para JAR mods)
+                    Element::from(if let Some(meta) = &mi.metadata {
+                        if let Some(h) = self.thumbnails.get(&meta.mod_id) {
+                            theme::magic_image::<ModsMessage>(
+                                image(h.clone())
+                                    .width(40)
+                                    .height(40)
+                                    .content_fit(ContentFit::Cover)
+                                    .into(),
+                                ctx,
+                            )
+                        } else {
+                            theme::svg(
+                                svg(util::icons::icon(util::icons::PUZZLE))
+                                    .width(20)
+                                    .height(20)
+                                    .style(|_, _| iced::widget::svg::Style {
+                                        color: Some(Color::BLACK),
+                                    }),
+                                ctx,
+                            )
+                        }
+                    } else {
+                        theme::svg(
+                            svg(util::icons::icon(util::icons::PUZZLE))
+                                .width(20)
+                                .height(20)
+                                .style(|_, _| iced::widget::svg::Style {
+                                    color: Some(Color::BLACK),
+                                }),
+                            ctx,
+                        )
+                    }),
+                    // Columna central con Nombre + Selector
                     center_info,
                     // Estado visual pequeño (opcional)
                     theme::text_micro(
@@ -1629,6 +1829,7 @@ impl ModsState {
     fn view_patch_row<'a>(
         &'a self,
         p: &'a PatchManifest,
+        has_update: bool,
         localization: &'a crate::lang::Localization,
         ctx: theme::UIContext,
     ) -> Element<'a, ModsMessage, Theme, Renderer> {
@@ -1657,6 +1858,9 @@ impl ModsState {
                     .unwrap_or(crate::game::mods_api::ModProvider::CurseForge),
                 mod_id: rid.clone(),
                 file_id: p.file_id.clone().unwrap_or_default(),
+                enabled: p.enabled,
+                summary: p.summary.clone(),
+                logo_url: p.logo_url.clone(),
                 install_date: p.install_date,
                 update_available: None,
             }),
@@ -1665,6 +1869,10 @@ impl ModsState {
         let mut center_info = column![theme::text_body(&p.mod_name, ctx)]
             .spacing(4)
             .width(Length::Fill);
+
+        if let Some(summary) = &p.summary {
+            center_info = center_info.push(theme::text_caption(summary, ctx));
+        }
 
         // Selector de versiones para Patches
         if let Some(meta) = &temp_mi.metadata {
@@ -1685,8 +1893,9 @@ impl ModsState {
                     .find(|f| Some(f.file_id.clone()) == p.file_id)
                     .cloned();
 
+                let temp_mi_clone = temp_mi.clone();
                 let pick = pick_list(files.as_slice(), selected, move |f| {
-                    ModsMessage::UpdateModToVersion(temp_mi.clone(), f.file_id.clone(), true)
+                    ModsMessage::UpdateModToVersion(temp_mi_clone.clone(), f.file_id.clone(), true)
                 })
                 .text_size(12)
                 .placeholder("Select version...")
@@ -1727,6 +1936,19 @@ impl ModsState {
         if is_installing {
             actions.push(theme::text_micro("WAIT...", ctx).into());
         } else {
+            // Botón UPDATE funcional cuando hay actualización disponible
+            if has_update {
+                let update_btn = theme::magic_button(
+                    button(theme::text_micro("UPDATE", ctx))
+                        .on_press(ModsMessage::UpdateMod(temp_mi.clone()))
+                        .style(move |t: &Theme, s| theme::success_button_style(&palette, t, s))
+                        .padding([4, 8])
+                        .into(),
+                    ctx,
+                );
+                actions.push(update_btn.into());
+            }
+
             let tb = if p.enabled {
                 theme::magic_button(
                     button(theme::text_caption(localization.t("mods.disable"), ctx))
@@ -1771,15 +1993,51 @@ impl ModsState {
         theme::magic_container(
             theme::list_item_row(
                 row![
-                    theme::svg(
-                        svg(util::icons::icon(util::icons::ZIP))
-                            .width(20)
-                            .height(20)
-                            .style(|_, _| iced::widget::svg::Style {
-                                color: Some(Color::BLACK),
-                            }),
-                        ctx,
-                    ),
+                    // Icono visual (ZIP para patches, o logo si existe)
+                    Element::from(if let Some(logo) = &p.logo_url {
+                        if let Some(rid) = &p.remote_id {
+                            if let Some(h) = self.thumbnails.get(rid) {
+                                theme::magic_image::<ModsMessage>(
+                                    image(h.clone())
+                                        .width(40)
+                                        .height(40)
+                                        .content_fit(ContentFit::Cover)
+                                        .into(),
+                                    ctx,
+                                )
+                            } else {
+                                theme::svg(
+                                    svg(util::icons::icon(util::icons::ZIP))
+                                        .width(20)
+                                        .height(20)
+                                        .style(|_, _| iced::widget::svg::Style {
+                                            color: Some(Color::BLACK),
+                                        }),
+                                    ctx,
+                                )
+                            }
+                        } else {
+                            theme::svg(
+                                svg(util::icons::icon(util::icons::ZIP))
+                                    .width(20)
+                                    .height(20)
+                                    .style(|_, _| iced::widget::svg::Style {
+                                        color: Some(Color::BLACK),
+                                    }),
+                                ctx,
+                            )
+                        }
+                    } else {
+                        theme::svg(
+                            svg(util::icons::icon(util::icons::ZIP))
+                                .width(20)
+                                .height(20)
+                                .style(|_, _| iced::widget::svg::Style {
+                                    color: Some(Color::BLACK),
+                                }),
+                            ctx,
+                        )
+                    }),
                     center_info,
                 ]
                 .spacing(10)

@@ -16,6 +16,8 @@ pub struct PatchManifest {
     pub remote_id: Option<String>,
     pub file_id: Option<String>,
     pub provider: Option<crate::game::mods_api::ModProvider>,
+    pub summary: Option<String>,
+    pub logo_url: Option<String>,
 }
 
 /// Install a new ZIP patch (Initial phase)
@@ -27,6 +29,8 @@ pub fn install_new_patch(
     remote_id: Option<String>,
     file_id: Option<String>,
     provider: Option<crate::game::mods_api::ModProvider>,
+    summary: Option<String>,
+    logo_url: Option<String>,
 ) -> Result<()> {
     let mod_id = uuid::Uuid::new_v4().to_string();
     let patch_dir = core_patches_root.join(&mod_id);
@@ -49,6 +53,8 @@ pub fn install_new_patch(
         remote_id,
         file_id,
         provider,
+        summary,
+        logo_url,
     )?;
 
     Ok(())
@@ -65,6 +71,8 @@ fn apply_patch_logic(
     remote_id: Option<String>,
     file_id: Option<String>,
     provider: Option<crate::game::mods_api::ModProvider>,
+    summary: Option<String>,
+    logo_url: Option<String>,
 ) -> Result<()> {
     let file = fs::File::open(zip_path)?;
     let mut archive = ZipArchive::new(file)?;
@@ -162,6 +170,8 @@ fn apply_patch_logic(
         remote_id,
         file_id,
         provider,
+        summary,
+        logo_url,
     };
 
     let json = serde_json::to_string_pretty(&manifest)?;
@@ -260,6 +270,8 @@ pub fn enable_patch(
         manifest.remote_id,
         manifest.file_id,
         manifest.provider,
+        manifest.summary,
+        manifest.logo_url,
     )?;
 
     Ok(())
