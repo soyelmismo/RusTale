@@ -339,10 +339,10 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
     let is_singleplayer = args.iter().any(|a| a == "--singleplayer");
     let is_dedicated_server_flag = std::env::var("RUSTALE_IS_SERVER").is_ok();
 
-    let show_console = (is_server_jar || is_dedicated_server_flag) && !is_singleplayer;
 
     #[cfg(target_os = "windows")]
     {
+        let show_console = (is_server_jar || is_dedicated_server_flag) && !is_singleplayer;
         if !show_console {
             // Hide black console window for client or singleplayer
             cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW

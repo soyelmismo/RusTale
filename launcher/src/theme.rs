@@ -30,6 +30,7 @@ pub struct UIContext {
     pub time: f32,
     pub mouse_pos: Point,     // Posicion real del raton para efectos magneticos
     pub mouse_stillness: f32, // 0.0 (se mueve) a 1.0 (quieto por X segundos)
+    pub is_resizing: bool,     // <--- NUEVO CAMPO
 }
 
 // --- PALETTE SYSTEM ---
@@ -77,8 +78,20 @@ impl SmoothTranslateState {
         intensity: f32,
         lsd_enabled: bool,
         offset: Vector,
+        is_resizing: bool, // <--- NUEVO PARÁMETRO
     ) -> Vector {
-        if !lsd_enabled {
+        // Si está desactivado O se está redimensionando la ventana
+        if !lsd_enabled || is_resizing {
+            // CRÍTICO: Reiniciar la velocidad y la repulsión a cero.
+            // Esto evita que cuando termines de redimensionar, los objetos
+            // salgan disparados por la inercia acumulada.
+            self.current_velocity.set(Vector::new(0.0, 0.0));
+            self.current_repulsion.set(Vector::new(0.0, 0.0));
+            self.intensity.set(0.0);
+            
+            // Si quieres mantener el movimiento de "onda" suave (jitter) durante el resize,
+            // puedes devolver solo la parte del jitter. 
+            // Pero para máxima estabilidad, devolvemos 0.0.
             return Vector::new(0.0, 0.0);
         }
 
@@ -195,6 +208,7 @@ pub struct SmoothTranslate<'a, Message> {
     time: f32,
     lsd_intensity: f32,
     lsd_enabled: bool,
+    is_resizing: bool, // <--- NUEVO CAMPO
 }
 
 pub fn background_tint_color(palette: &Palette) -> Color {
@@ -1441,7 +1455,14 @@ impl<'a, Message> SmoothTranslate<'a, Message> {
             time: offset.0.abs() + offset.1.abs(),
             lsd_intensity,
             lsd_enabled,
+            is_resizing: false, // Valor por defecto, se sobreescribe en magic_*
         }
+    }
+    
+    // Método helper para encadenar
+    pub fn resizing(mut self, is_resizing: bool) -> Self {
+        self.is_resizing = is_resizing;
+        self
     }
 
     // Helper para mantener la firma limpia si ya pasas ctx en otros lados
@@ -1526,6 +1547,7 @@ impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Messa
             self.lsd_intensity,
             self.lsd_enabled,
             self.offset,
+            self.is_resizing, // <--- PASAR AQUÍ
         );
 
         renderer.with_translation(displacement, |r| {
@@ -1563,6 +1585,7 @@ impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Messa
             self.lsd_intensity,
             self.lsd_enabled && !self.proximity_only,
             self.offset,
+            self.is_resizing, // <--- PASAR AQUÍ
         );
 
         // Traducir el cursor para que coincida con lo que el usuario ve
@@ -1618,6 +1641,7 @@ impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Messa
             self.lsd_intensity,
             self.lsd_enabled && !self.proximity_only,
             self.offset,
+            self.is_resizing, // <--- PASAR AQUÍ
         );
 
         // Ajustamos la translacion para que el overlay aparezca en la posicion visual correcta
@@ -2045,5 +2069,110 @@ pub fn dropdown_menu_style(palette: &Palette, _t: &Theme) -> container::Style {
         },
         text_color: Some(palette.text_primary),
         ..Default::default()
+    }
+}
+
+// --- NUEVOS ESTILOS PARA WINDOW FRAME & TITLE BAR ---
+
+pub fn window_frame_style(_palette: &Palette, _t: &Theme, is_maximized: bool) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(Color::TRANSPARENT)), // El fondo lo maneja el contenido interno
+        border: Border {
+            color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
+            width: if is_maximized { 0.0 } else { 1.0 }, // Sin borde si está maximizado
+            radius: if is_maximized { 0.0.into() } else { 10.0.into() }, // Redondeado solo si es ventana
+        },
+        // OPTIMIZACIÓN: Reducir blur_radius de 15.0 a 5.0 para mejorar rendimiento
+        shadow: if is_maximized {
+            Shadow::default()
+        } else {
+            Shadow {
+                color: Color::from_rgba(0.0, 0.0, 0.0, 0.4),
+                offset: Vector::new(0.0, 2.0),
+                blur_radius: 5.0, // Reducido para rendimiento
+            }
+        },
+        ..Default::default()
+    }
+}
+
+pub fn title_bar_style(palette: &Palette, _t: &Theme) -> container::Style {
+    container::Style {
+        // Fondo semitransparente oscuro para que el texto se lea bien sobre imágenes claras
+        background: Some(Background::Color(Color::from_rgba(0.05, 0.05, 0.08, 0.8))), 
+        text_color: Some(palette.text_primary),
+        ..Default::default()
+    }
+}
+
+// Botón de control de ventana (Min/Max/Close)
+pub fn window_control_button_style(
+    palette: &Palette,
+    _t: &Theme,
+    status: button::Status,
+    is_close: bool,
+) -> button::Style {
+    let base = button::Style {
+        background: None,
+        text_color: palette.text_secondary,
+        ..Default::default()
+    };
+
+    match status {
+        button::Status::Hovered | button::Status::Pressed => {
+            if is_close {
+                button::Style {
+                    background: Some(Background::Color(Color::from_rgb(0.9, 0.2, 0.2))), // Rojo al hover
+                    text_color: Color::WHITE,
+                    ..base
+                }
+            } else {
+                button::Style {
+                    background: Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.1))),
+                    text_color: palette.text_primary,
+                    ..base
+                }
+            }
+        },
+        _ => base,
+    }
+}
+
+// Helper widget para botones de ventana
+pub fn window_control_button<'a, Message: Clone + 'a>(
+    icon_svg: &'static str,
+    msg: Message,
+    is_close: bool,
+    palette: &'a Palette,
+    ctx: UIContext
+) -> Element<'a, Message, Theme, Renderer> {
+    let btn = button(
+        container(
+            iced_svg(crate::util::icons::icon(icon_svg))
+                .width(12)
+                .height(12)
+                .style(move |_t, _s| iced::widget::svg::Style {
+                    color: Some(if is_close { 
+                        Color::WHITE // Icono blanco para el rojo
+                    } else {
+                        palette.text_primary
+                    }), 
+                })
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+    )
+    .on_press(msg)
+    .width(45) // Ancho estándar de botón de ventana
+    .height(32) // Altura completa de la barra
+    .style(move |t, s| window_control_button_style(palette, t, s, is_close));
+
+    // Aplicar LSD sutil (solo movimiento, no "derretimiento" excesivo para que sean clickeables)
+    if ctx.lsd_enabled && !is_close {
+        magic_button(btn.into(), ctx)
+    } else {
+        btn.into()
     }
 }

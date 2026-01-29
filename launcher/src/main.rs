@@ -1,10 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use clap::Parser;
 use futures::SinkExt;
 use iced::widget::{Space, column, container, image, mouse_area, row, shader, stack};
 use iced::{
-    Alignment, Color, ContentFit, Element, Length, Size, Subscription, Task, Theme, clipboard,
-    mouse::Interaction, window,
+    Alignment, Color, ContentFit, Element, Length, Padding, Size, Subscription, Task, Theme, clipboard,
+    mouse::Interaction, window, Point, event::{self, Event}, mouse
 };
 use single_instance::SingleInstance;
 use std::sync::{
@@ -225,21 +226,30 @@ pub fn main() -> iced::Result {
         resizable: true,
         icon: iced::window::icon::from_file_data(include_bytes!("../assets/logo.png"), None).ok(),
 
-        // 2. Set the initial visibility CORRECTLY from the start
+        // --- CAMBIOS PARA CUSTOM TITLEBAR ---
         visible: !is_quickplay,
+        decorations: false, // Desactivar barra nativa
+        transparent: true,  // Permitir transparencia real (bordes redondeados/semitransparencia)
+        // ------------------------------------
 
         position: iced::window::Position::Centered,
         exit_on_close_request: false,
-        decorations: true,
 
         ..Default::default()
     })
     .settings(iced::Settings {
-        antialiasing: false,
+        antialiasing: true, // Mejor borde redondeado
         ..Default::default()
     })
     .scale_factor(|app: &RusTale| app.settings.scale_factor)
     .run()
+}
+
+// --- AÑADIR ESTE ENUM ---
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ResizeDirection {
+    North, South, East, West,
+    NorthEast, NorthWest, SouthEast, SouthWest
 }
 
 #[derive(Debug, Clone)]
@@ -312,6 +322,13 @@ pub enum Message {
     WindowDrag,
     MinimizeWindow,
     MaximizeWindow,
+    
+    // --- NUEVOS MENSAJES PARA REDIMENSIÓN MANUAL ---
+    ResizePressed(ResizeDirection),
+    ResizeReleased,
+    WindowEvent(window::Event),
+    // ---------------------------------------------
+    
     ServerPatchProgress(f32),
 }
 
@@ -353,7 +370,18 @@ struct RusTale {
     last_mouse_move_time: std::time::Instant,
     lsd_enabled_time: Option<std::time::Instant>, // Para activacion progresiva
     is_maximized: bool,
-    last_title_click: std::time::Instant, // Añadir esto
+    last_title_click: std::time::Instant,
+    
+    // --- NUEVOS CAMPOS PARA REDIMENSIÓN ---
+    resizing_direction: Option<ResizeDirection>,
+    current_window_size: Size,
+    current_window_pos: Point,
+    
+    // Guardamos el estado AL MOMENTO DE HACER CLICK
+    drag_start_window_pos: Point,
+    drag_start_window_size: Size,
+    drag_start_mouse_screen_pos: Point, // Mouse absoluto (WindowPos + MousePos)
+    // ------------------------------------- // Añadir esto
 }
 
 impl RusTale {
@@ -466,6 +494,17 @@ impl RusTale {
                 },
                 is_maximized: false,
                 last_title_click: std::time::Instant::now(),
+                
+                // --- NUEVOS CAMPOS PARA REDIMENSIÓN ---
+                resizing_direction: None,
+                current_window_size: Size::new(width, height),
+                current_window_pos: Point::ORIGIN,
+                
+                // Guardamos el estado AL MOMENTO DE HACER CLICK
+                drag_start_window_pos: Point::ORIGIN,
+                drag_start_window_size: Size::new(width, height),
+                drag_start_mouse_screen_pos: Point::ORIGIN,
+                // -------------------------------------
             },
             Task::batch(vec![
                 Task::done(Message::Initialize),
@@ -513,14 +552,25 @@ impl RusTale {
         let tray_sub = Subscription::run(tray_events);
         let menu_sub = Subscription::run(menu_events);
 
-        let window_sub = window::events().map(|(_id, event)| match event {
-            window::Event::Resized(size) => Message::WindowResized(size),
-            window::Event::CloseRequested => Message::CloseRequested,
-            _ => Message::None,
+        let window_sub = window::events().map(|(_id, event)| Message::WindowEvent(event));
+
+        // SUSCRIPCIÓN GLOBAL DE MOUSE
+        // Siempre activa para que los cursores funcionen correctamente en todos los lados
+        let global_mouse = event::listen_with(|event, _status, _id| {
+            match event {
+                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                    Some(Message::ResizeReleased)
+                }
+                _ => None, 
+            }
         });
 
-        // Mouse listener para efectos magneticos
-        let mouse_sub = if self.is_window_visible && self.settings.theme.lsd_mode {
+        // CAMBIO AQUÍ: Eliminamos "&& self.settings.theme.lsd_mode"
+        // Necesitamos rastrear el mouse siempre que la ventana sea visible para:
+        // 1. Efectos LSD (si están activos)
+        // 2. Redimensionamiento de ventana (siempre activo)
+        // 3. Mantener self.cursor_position actualizado para el cálculo del arrastre inicial
+        let mouse_sub = if self.is_window_visible { 
             iced::event::listen_with(|event, _status, _window_id| {
                 if let iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) = event {
                     Some(Message::CursorMoved(position))
@@ -551,6 +601,7 @@ impl RusTale {
             window_sub,
             tick_sub,
             mouse_sub,
+            global_mouse, // <--- AÑADIR ESTO
         ])
     }
 
@@ -596,10 +647,117 @@ impl RusTale {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::CursorMoved(pos) => {
-                self.cursor_position = pos;
+            Message::CursorMoved(relative_position) => {
+                self.cursor_position = relative_position;
                 self.last_mouse_move_time = std::time::Instant::now();
 
+                if let Some(dir) = self.resizing_direction {
+                    // 1. Calcular dónde está el mouse en la PANTALLA ahora mismo
+                    // Nota: relative_position es inestable mientras movemos la ventana,
+                    // pero current_window_pos + relative_position siempre da la pos absoluta correcta.
+                    let current_mouse_screen_x = self.current_window_pos.x + relative_position.x;
+                    let current_mouse_screen_y = self.current_window_pos.y + relative_position.y;
+
+                    // 2. Calcular cuánto se ha movido el mouse desde que hicimos click
+                    let delta_x = current_mouse_screen_x - self.drag_start_mouse_screen_pos.x;
+                    let delta_y = current_mouse_screen_y - self.drag_start_mouse_screen_pos.y;
+
+                    // 3. Aplicar ese delta al tamaño/posición ORIGINAL (Snapshot)
+                    let start_w = self.drag_start_window_size.width;
+                    let start_h = self.drag_start_window_size.height;
+                    let start_x = self.drag_start_window_pos.x;
+                    let start_y = self.drag_start_window_pos.y;
+
+                    let mut new_w = start_w;
+                    let mut new_h = start_h;
+                    let mut new_x = start_x;
+                    let mut new_y = start_y;
+
+                    let min_w = 480.0;
+                    let min_h = 390.0;
+
+                    match dir {
+                        ResizeDirection::East => {
+                            new_w = (start_w + delta_x).max(min_w);
+                        }
+                        ResizeDirection::South => {
+                            new_h = (start_h + delta_y).max(min_h);
+                        }
+                        ResizeDirection::SouthEast => {
+                            new_w = (start_w + delta_x).max(min_w);
+                            new_h = (start_h + delta_y).max(min_h);
+                        }
+                        ResizeDirection::West => {
+                            // Al mover a la izquierda, el ancho crece si delta es negativo
+                            let proposed_width = start_w - delta_x;
+                            if proposed_width >= min_w {
+                                new_w = proposed_width;
+                                new_x = start_x + delta_x;
+                            } else {
+                                // Si llegamos al mínimo, fijamos posición y ancho
+                                new_w = min_w;
+                                new_x = start_x + (start_w - min_w);
+                            }
+                        }
+                        ResizeDirection::North => {
+                            let proposed_height = start_h - delta_y;
+                            if proposed_height >= min_h {
+                                new_h = proposed_height;
+                                new_y = start_y + delta_y;
+                            } else {
+                                new_h = min_h;
+                                new_y = start_y + (start_h - min_h);
+                            }
+                        }
+                        ResizeDirection::NorthWest => {
+                            // North logic
+                            let proposed_height = start_h - delta_y;
+                            if proposed_height >= min_h { new_h = proposed_height; new_y = start_y + delta_y; }
+                            else { new_h = min_h; new_y = start_y + (start_h - min_h); }
+                            
+                            // West logic
+                            let proposed_width = start_w - delta_x;
+                            if proposed_width >= min_w { new_w = proposed_width; new_x = start_x + delta_x; }
+                            else { new_w = min_w; new_x = start_x + (start_w - min_w); }
+                        }
+                        ResizeDirection::NorthEast => {
+                            // North logic
+                            let proposed_height = start_h - delta_y;
+                            if proposed_height >= min_h { new_h = proposed_height; new_y = start_y + delta_y; }
+                            else { new_h = min_h; new_y = start_y + (start_h - min_h); }
+                            // East logic
+                            new_w = (start_w + delta_x).max(min_w);
+                        }
+                        ResizeDirection::SouthWest => {
+                            // South logic
+                            new_h = (start_h + delta_y).max(min_h);
+                            // West logic
+                            let proposed_width = start_w - delta_x;
+                            if proposed_width >= min_w { new_w = proposed_width; new_x = start_x + delta_x; }
+                            else { new_w = min_w; new_x = start_x + (start_w - min_w); }
+                        }
+                    }
+
+                    // 4. Aplicar cambios
+                    let mut commands = Vec::new();
+
+                    // IMPORTANTE: NO actualizar self.current_window_pos/size manualmente aquí.
+                    // Deja que el sistema operativo responda con un evento WindowEvent::Moved/Resized.
+                    // Esto elimina el "jitter" o locura al redimensionar hacia la izquierda/arriba.
+
+                    if (new_x - self.current_window_pos.x).abs() > 0.5 || (new_y - self.current_window_pos.y).abs() > 0.5 {
+                        commands.push(window::oldest().and_then(move |id| window::move_to(id, Point::new(new_x, new_y))));
+                    }
+
+                    if (new_w - self.current_window_size.width).abs() > 0.5 || (new_h - self.current_window_size.height).abs() > 0.5 {
+                        commands.push(window::oldest().and_then(move |id| window::resize(id, Size::new(new_w, new_h))));
+                    }
+
+                    if !commands.is_empty() {
+                        return Task::batch(commands);
+                    }
+                }
+                
                 return Task::none();
             }
             Message::Tick(_now) => {
@@ -1820,6 +1978,52 @@ impl RusTale {
                 self.is_maximized = !self.is_maximized;
                 window::oldest().and_then(|id| window::toggle_maximize(id))
             }
+            
+            // --- NUEVA LÓGICA DE REDIMENSIONAMIENTO MANUAL ---
+            Message::WindowEvent(event) => {
+                match event {
+                    window::Event::Resized(size) => {
+                        self.current_window_size = size;
+                        self.window_size = size; // Sincronizar con tu variable existente
+                        self.settings.width = size.width as u32;
+                        self.settings.height = size.height as u32;
+                        // Importante: propagar el mensaje original si lo usabas
+                        return Task::done(Message::WindowResized(size)); 
+                    }
+                    window::Event::Moved(point) => {
+                        self.current_window_pos = point;
+                    }
+                    window::Event::CloseRequested => {
+                        return Task::done(Message::CloseRequested);
+                    }
+                    _ => {}
+                }
+                Task::none()
+            }
+
+            Message::ResizePressed(dir) => {
+                self.resizing_direction = Some(dir);
+                
+                // Guardamos el estado inicial exacto
+                self.drag_start_window_pos = self.current_window_pos;
+                self.drag_start_window_size = self.current_window_size;
+                
+                // Calculamos Mouse Absoluto: Posición Ventana + Posición Mouse Relativa
+                // (Usamos self.cursor_position que ya se actualiza en CursorMoved)
+                self.drag_start_mouse_screen_pos = Point::new(
+                    self.current_window_pos.x + self.cursor_position.x,
+                    self.current_window_pos.y + self.cursor_position.y
+                );
+                
+                Task::none()
+            }
+            
+            Message::ResizeReleased => {
+                self.resizing_direction = None;
+                Task::none()
+            }
+            // ---------------------------------------------
+            
             Message::CancelAction => {
                 self.cancellation_token.store(true, Ordering::Relaxed);
                 self.status = LauncherStatus::Ready;
@@ -1954,6 +2158,7 @@ impl RusTale {
             time: self.start_time.elapsed().as_secs_f32(),
             mouse_pos: self.cursor_position,
             mouse_stillness: stillness,
+            is_resizing: self.resizing_direction.is_some(), // <--- AÑADIR ESTA LÍNEA
         };
 
         let tint_color = theme::background_tint_color(palette);
@@ -2102,7 +2307,70 @@ impl RusTale {
                 .into()
         };
 
-        let final_view = stack![bg, tint_overlay, main_content];
+        // --- CONSTRUCCIÓN DE LA BARRA DE TÍTULO ---
+        let title_bar = container(
+            row![
+                // Icono PNG
+                container(
+                    image(crate::util::icons::load_window_icon_handle())
+                        .width(20)
+                        .height(20)
+                        .content_fit(ContentFit::Contain)
+                )
+                .padding(Padding::new(0.0).left(10.0).right(10.0)), // Padding lateral
+                
+                // Título (Arrastrable)
+                mouse_area(
+                    container(
+                        theme::text_small(self.title(), ctx)
+                    )
+                    .width(Length::Fill)
+                    .align_y(Alignment::Center)
+                )
+                .on_press(Message::WindowDrag)
+                .interaction(Interaction::Grab), // Cursor de mano al arrastrar
+
+                // Botones de control
+                row![
+                    // Minimizar
+                    theme::window_control_button(
+                        crate::util::icons::MINUS, 
+                        Message::MinimizeWindow, 
+                        false, 
+                        &palette,
+                        ctx
+                    ),
+                    // Maximizar / Restaurar
+                    theme::window_control_button(
+                        if self.is_maximized { crate::util::icons::RESTORE } else { crate::util::icons::SQUARE }, 
+                        Message::MaximizeWindow, 
+                        false, 
+                        &palette,
+                        ctx
+                    ),
+                    // Cerrar (Rojo)
+                    theme::window_control_button(
+                        crate::util::icons::X, 
+                        Message::CloseRequested, 
+                        true, // is_close
+                        &palette,
+                        ctx
+                    ),
+                ]
+            ]
+            .align_y(Alignment::Center)
+            .height(32) // Altura de la barra de título
+        )
+        .style(move |t| theme::title_bar_style(&palette, t))
+        .width(Length::Fill);
+
+        // Estructura principal visual (Fondo + Barra + Contenido)
+        let visual_content = column![
+            title_bar,
+            container(main_content).width(Length::Fill).height(Length::Fill)
+        ];
+
+        let final_view = stack![bg, tint_overlay, visual_content];
 
         // Contenido principal del modal (El cuadro gris con botones)
         let modal_layer = if self.settings_state.is_open {
@@ -2148,7 +2416,7 @@ impl RusTale {
         };
 
         // --- STACK FINAL ---
-        let final_stack = stack![
+        let content_with_modal = stack![
             final_view, // Tu fondo y contenido principal (izquierda abajo)
             // 1. Capa de oscurecimiento + Modal Centrado
             if let Some(modal) = modal_layer {
@@ -2158,80 +2426,63 @@ impl RusTale {
             }
         ];
 
-        // --- STACK FINAL CON CURSORES DE REDIMENSIONAMIENTO (VISUAL SOLO) ---
-        let content_with_resizers = stack![
-            final_stack,
-            // BORDE SUPERIOR (Cursor Vertical)
-            container(
-                mouse_area(Space::new().width(Length::Fill).height(Length::Fixed(5.0)))
-                    .interaction(Interaction::ResizingVertically)
-            )
-            .align_y(Alignment::Start),
-            // BORDE INFERIOR (Cursor Vertical)
-            container(
-                mouse_area(Space::new().width(Length::Fill).height(Length::Fixed(5.0)))
-                    .interaction(Interaction::ResizingVertically)
-            )
-            .align_y(Alignment::End),
-            // BORDE IZQUIERDO (Cursor Horizontal)
-            container(
-                mouse_area(Space::new().width(Length::Fixed(5.0)).height(Length::Fill))
-                    .interaction(Interaction::ResizingHorizontally)
-            )
-            .align_x(Alignment::Start),
-            // BORDE DERECHO (Cursor Horizontal)
-            container(
-                mouse_area(Space::new().width(Length::Fixed(5.0)).height(Length::Fill))
-                    .interaction(Interaction::ResizingHorizontally)
-            )
-            .align_x(Alignment::End),
-            // ESQUINA SUPERIOR IZQUIERDA (Cursor Diagonal)
-            container(
-                mouse_area(
-                    Space::new()
-                        .width(Length::Fixed(15.0))
-                        .height(Length::Fixed(15.0))
-                )
-                .interaction(Interaction::ResizingDiagonallyUp)
-            )
-            .align_x(Alignment::Start)
-            .align_y(Alignment::Start),
-            // ESQUINA SUPERIOR DERECHA (Cursor Diagonal)
-            container(
-                mouse_area(
-                    Space::new()
-                        .width(Length::Fixed(15.0))
-                        .height(Length::Fixed(15.0))
-                )
-                .interaction(Interaction::ResizingDiagonallyUp)
-            )
-            .align_x(Alignment::End)
-            .align_y(Alignment::Start),
-            // ESQUINA INFERIOR IZQUIERDA (Cursor Diagonal)
-            container(
-                mouse_area(
-                    Space::new()
-                        .width(Length::Fixed(15.0))
-                        .height(Length::Fixed(15.0))
-                )
-                .interaction(Interaction::ResizingDiagonallyDown)
-            )
-            .align_x(Alignment::Start)
-            .align_y(Alignment::End),
-            // ESQUINA INFERIOR DERECHA (Cursor Diagonal)
-            container(
-                mouse_area(
-                    Space::new()
-                        .width(Length::Fixed(15.0))
-                        .height(Length::Fixed(15.0))
-                )
-                .interaction(Interaction::ResizingDiagonallyDown)
-            )
-            .align_x(Alignment::End)
-            .align_y(Alignment::End)
-        ];
+        // --- WINDOW FRAME (aplica borde redondeado y sombra) ---
+        let window_frame = container(content_with_modal)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(move |t| theme::window_frame_style(&palette, t, self.is_maximized));
 
-        content_with_resizers.into()
+        // --- SISTEMA DE REDIMENSIONAMIENTO (8 LADOS) ---
+        if self.is_maximized {
+            window_frame.into()
+        } else {
+            let b = 10.0;  // Grosor del borde para arrastrar
+            let c = 20.0;  // Tamaño de la zona de las esquinas
+
+            // Helper para crear una capa de redimensión alineada
+            // Envuelve la zona sensible en un contenedor de pantalla completa para posicionarla
+            let handle = |dir: ResizeDirection, interaction: Interaction, w: Length, h: Length, align_x: Alignment, align_y: Alignment| {
+                container(
+                    mouse_area(
+                        container(Space::new())
+                            .width(w)
+                            .height(h)
+                            .style(|_| container::Style::default()) // Transparente
+                    )
+                    .on_press(Message::ResizePressed(dir))
+                    .on_release(Message::ResizeReleased)
+                    .interaction(interaction)
+                )
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(align_x)
+                .align_y(align_y)
+            };
+
+            let resize_handles = stack![
+                // 1. Bordes (Lados) - Ocupan todo el largo/ancho correspondiente
+                handle(ResizeDirection::North, Interaction::ResizingVertically,   Length::Fill, Length::Fixed(b), Alignment::Center, Alignment::Start),
+                handle(ResizeDirection::South, Interaction::ResizingVertically,   Length::Fill, Length::Fixed(b), Alignment::Center, Alignment::End),
+                handle(ResizeDirection::West,  Interaction::ResizingHorizontally, Length::Fixed(b), Length::Fill, Alignment::Start,  Alignment::Center),
+                handle(ResizeDirection::East,  Interaction::ResizingHorizontally, Length::Fixed(b), Length::Fill, Alignment::End,    Alignment::Center),
+
+                // 2. Esquinas - Prioridad sobre los bordes (por estar después en el stack)
+                // NW (Arriba-Izquierda) -> Cursor \
+                handle(ResizeDirection::NorthWest, Interaction::ResizingDiagonallyDown, Length::Fixed(c), Length::Fixed(c), Alignment::Start, Alignment::Start),
+                // NE (Arriba-Derecha)   -> Cursor /
+                handle(ResizeDirection::NorthEast, Interaction::ResizingDiagonallyUp,   Length::Fixed(c), Length::Fixed(c), Alignment::End,   Alignment::Start),
+                // SW (Abajo-Izquierda)  -> Cursor /
+                handle(ResizeDirection::SouthWest, Interaction::ResizingDiagonallyUp,   Length::Fixed(c), Length::Fixed(c), Alignment::Start, Alignment::End),
+                // SE (Abajo-Derecha)    -> Cursor \
+                handle(ResizeDirection::SouthEast, Interaction::ResizingDiagonallyDown, Length::Fixed(c), Length::Fixed(c), Alignment::End,   Alignment::End),
+            ];
+
+            // STACK FINAL: resize_handles DEBE ser el último elemento para capturar eventos
+            stack![
+                window_frame,   // Contenido visual abajo
+                resize_handles  // Capa invisible de control arriba
+            ].into()
+        }
     }
 
     /// Creates a tray icon with the appropriate menu based on game state

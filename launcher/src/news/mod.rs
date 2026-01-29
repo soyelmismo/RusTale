@@ -17,8 +17,8 @@ pub async fn fetch_news(client: &reqwest::Client) -> Result<Vec<BlogPost>> {
 
     let posts: Vec<BlogPost> = response.json().await.context("Failed to parse news JSON")?;
 
-    // Limitar a las 5 noticias mas recientes
-    let mut limited_posts = posts.into_iter().take(5).collect::<Vec<_>>();
+    // Limitar a las 10 noticias mas recientes (aumentado de 5)
+    let mut limited_posts = posts.into_iter().take(10).collect::<Vec<_>>();
 
     // Ordenar por fecha (mas reciente primero)
     limited_posts.sort_by(|a, b| b.published_at.cmp(&a.published_at));

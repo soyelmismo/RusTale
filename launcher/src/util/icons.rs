@@ -1,5 +1,6 @@
 use iced::widget::svg;
 use image::imageops::FilterType;
+use once_cell::sync::Lazy;
 
 pub const PLUS: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>"#;
 pub const EDIT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>"#;
@@ -48,4 +49,15 @@ pub fn load_tray_icon() -> tray_icon::Icon {
     let rgba = rgba_image.into_raw();
 
     tray_icon::Icon::from_rgba(rgba, width, height).expect("Failed to build tray icon")
+}
+
+pub fn load_window_icon_handle() -> iced::widget::image::Handle {
+    // OPTIMIZACIÓN: Cachear el Handle del icono para evitar recrear bytes en cada frame
+    static WINDOW_ICON: Lazy<iced::widget::image::Handle> = Lazy::new(|| {
+        iced::widget::image::Handle::from_bytes(
+            include_bytes!("../../assets/logo.png").to_vec()
+        )
+    });
+    
+    WINDOW_ICON.clone()
 }
