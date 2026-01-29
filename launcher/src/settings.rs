@@ -238,11 +238,17 @@ impl SettingsState {
         .spacing(10)
         .align_y(Alignment::Center);
 
+        let minimize_tray_text = if cfg!(target_os = "linux") {
+            localization.t("settings.minimize_to_tray_linux")
+        } else {
+            localization.t("settings.minimize_to_tray")
+        };
+
         let minimize_tray_chk = row![
             checkbox(self.temp_settings.minimize_to_tray)
                 .on_toggle(SettingsMessage::ToggleMinimizeTray)
                 .style(move |t, s| theme::checkbox_style(&palette, t, s)),
-            theme::text_body(localization.t("settings.minimize_to_tray"), ctx)
+            theme::text_body(minimize_tray_text, ctx)
         ]
         .spacing(10)
         .align_y(Alignment::Center);

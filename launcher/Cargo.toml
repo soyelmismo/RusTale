@@ -99,6 +99,9 @@ single-instance = "0.3.3"
 
 bytemuck = { version = "1.24.0", features = ["derive"] }
 
+# Environment variables
+dotenv = "0.15.0"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18.2"
 

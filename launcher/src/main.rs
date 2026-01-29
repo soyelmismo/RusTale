@@ -1753,12 +1753,34 @@ impl RusTale {
             }
             Message::CloseRequested => {
                 if self.settings.minimize_to_tray {
-                    self.is_window_visible = false;
-                    window::oldest().and_then(|id| window::set_mode(id, window::Mode::Hidden))
+                    // Si el icono existe...
+                    if self.tray_icon.is_some() {
+                        
+                        // [LINUX FIX] En Linux/Wayland, 'Hidden' congela la ventana.
+                        // Usamos 'Minimize' que es seguro. La ventana se queda en barra de tareas
+                        // pero no se congela y el icono del tray sigue funcionando.
+                        #[cfg(target_os = "linux")]
+                        {
+                            self.is_window_visible = true; // Mantener lógica de visible para que Iced siga dibujando
+                            window::oldest().and_then(|id| window::minimize(id, true))
+                        }
+
+                        // [WINDOWS] En Windows 'Hidden' funciona perfecto para Tray real.
+                        #[cfg(not(target_os = "linux"))]
+                        {
+                            self.is_window_visible = false;
+                            window::oldest().and_then(|id| window::set_mode(id, window::Mode::Hidden))
+                        }
+
+                    } else {
+                        // Si no hay icono, salimos para no atrapar al usuario
+                        self.save_and_exit()
+                    }
                 } else {
                     self.save_and_exit()
                 }
             }
+
             Message::WindowResized(size) => {
                 self.window_size = size;
 
@@ -2229,13 +2251,32 @@ impl RusTale {
         let _ = tray_menu.append_items(&[&game_action, &show_i, &quit_i]);
 
         let icon = util::icons::load_tray_icon();
-        TrayIconBuilder::new()
+        
+        // --- CAMBIO AQUÍ: Capturar error en lugar de .ok() ---
+        let builder_result = TrayIconBuilder::new()
             .with_menu(Box::new(tray_menu))
             .with_tooltip("RusTale Launcher")
             .with_icon(icon)
-            .build()
-            .ok()
+            .build();
+
+        match builder_result {
+            Ok(icon) => {
+                println!("Tray icon created OK.");
+                // Escribir log de éxito (temporal para debug)
+                let _ = std::fs::write("tray_status.log", "SUCCESS: Tray icon created OK.");
+                Some(icon)
+            },
+            Err(e) => {
+                // Escribir log de error
+                println!("ERROR: Failed to create tray icon: {}", e);
+                let err_msg = format!("ERROR: Failed to create tray icon: {}", e);
+                let _ = std::fs::write("tray_status.log", &err_msg);
+                eprintln!("{}", err_msg);
+                None
+            }
+        }
     }
+
 
     /// Rebuilds the tray menu based on current game state
     fn rebuild_tray_menu(&mut self) {

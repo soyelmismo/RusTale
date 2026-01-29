@@ -6,6 +6,10 @@ const API_BASE: &str = "https://api.curseforge.com/v1";
 const GAME_ID: i32 = 70216;
 
 fn get_api_key() -> Result<String> {
+    // Cargar variables de entorno desde archivo .env si existe (solo en debug)
+    #[cfg(debug_assertions)]
+    dotenv::dotenv().ok();
+
     if let Ok(key) = env::var("CURSEFORGE_API_KEY") {
         if !key.trim().is_empty() {
             return Ok(key);

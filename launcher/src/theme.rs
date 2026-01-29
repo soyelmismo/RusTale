@@ -16,11 +16,10 @@ use iced::{
 use std::cell::Cell;
 
 // --- CONSTANTS ---
-pub const ACCENT_GREEN: Color = Color::from_rgb(0.2, 0.8, 0.2);
 pub const STANDARD_PADDING: f32 = 20.0;
 pub const STANDARD_SPACING: u32 = 15;
 
-pub const LSD_RAMP_UP_SECONDS: f32 = 1.0;
+pub const LSD_RAMP_UP_SECONDS: f32 = 300.0;
 
 #[derive(Debug, Clone, Copy)]
 pub struct UIContext {

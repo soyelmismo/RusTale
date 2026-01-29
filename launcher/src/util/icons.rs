@@ -1,4 +1,5 @@
 use iced::widget::svg;
+use image::imageops::FilterType;
 
 pub const PLUS: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>"#;
 pub const EDIT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>"#;
@@ -34,9 +35,17 @@ pub fn icon(svg_data: &'static str) -> svg::Handle {
 pub fn load_tray_icon() -> tray_icon::Icon {
     let image_bytes = include_bytes!("../../assets/icon.png");
     let image = image::load_from_memory(image_bytes)
-        .expect("Failed to load tray icon")
-        .to_rgba8();
-    let (width, height) = image.dimensions();
-    let rgba = image.into_raw();
+        .expect("Failed to load tray icon");
+
+    // --- CORRECCIÓN LINUX: Redimensionar icono ---
+    // KDE rechaza iconos grandes enviados por DBus. 
+    // Redimensionamos a 32x32 para asegurar compatibilidad.
+    let resized = image.resize_exact(32, 32, FilterType::Lanczos3);
+    let rgba_image = resized.to_rgba8();
+    
+    let width = rgba_image.width();
+    let height = rgba_image.height();
+    let rgba = rgba_image.into_raw();
+
     tray_icon::Icon::from_rgba(rgba, width, height).expect("Failed to build tray icon")
 }

@@ -73,6 +73,7 @@
         "enable_online_fix": "Habilitar parche multijugador",
         "online_fix_desc": "Redirige la autenticación para jugar en servidores no oficiales.",
         "minimize_to_tray": "Minimizar a la bandeja al cerrar",
+        "minimize_to_tray_linux": "Minimizar al cerrar",
         "minimize_on_play": "Ocultar ventana al iniciar el juego",
         "quickplay": "Habilitar QuickPlay",
         "quickplay_desc": "Inicia el juego directamente.",
