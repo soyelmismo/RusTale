@@ -40,6 +40,9 @@ pub struct LsdShader {
     accent: Color,
     shader_id: u32,   // ID del shader actual
     alpha: f32,       // Transparencia (0.0 a 1.0)
+    intensity: f32,   // Intensidad dinámica basada en mouse_stillness
+    click_intensity: f32, // Pico de intensidad para ondas de choque
+    last_click_time: Instant, // Para controlar el decaimiento del pulso
 }
 
 impl LsdShader {
@@ -49,6 +52,7 @@ impl LsdShader {
         accent: Color,
         shader_id: u32,
         alpha: f32,
+        intensity: f32,
     ) -> Self {
         Self {
             start_time,
@@ -56,7 +60,19 @@ impl LsdShader {
             accent,
             shader_id,
             alpha,
+            intensity,
+            click_intensity: 0.0,
+            last_click_time: Instant::now(),
         }
+    }
+
+    pub fn trigger_click(&mut self) {
+        self.click_intensity = 1.3; // Pico fuerte para la onda de choque
+        self.last_click_time = Instant::now();
+    }
+
+    pub fn update_mouse_position(&mut self, pos: Point) {
+        self.mouse_pos = pos;
     }
 }
 
@@ -74,6 +90,13 @@ impl<Message> shader::Program<Message> for LsdShader {
         let time = self.start_time.elapsed().as_secs_f32() * 0.5;
         let aspect = bounds.width / bounds.height;
 
+        // Decaimiento del pulso de clic (exponencial)
+        let click_decay = (self.last_click_time.elapsed().as_secs_f32() * 8.0).exp();
+        let current_click_intensity = self.click_intensity / click_decay;
+        
+        // Combinar intensidad base con pulso de clic
+        let combined_intensity = self.intensity + current_click_intensity;
+
         LsdPrimitive {
             uniforms: Uniforms {
                 time,
@@ -83,7 +106,7 @@ impl<Message> shader::Program<Message> for LsdShader {
                 accent_r: self.accent.r,
                 accent_g: self.accent.g,
                 accent_b: self.accent.b,
-                intensity: 1.0, // Factor de intensidad global
+                intensity: combined_intensity.min(10.0), // Limitar para evitar explosiones
                 alpha: self.alpha,
                 shader_id: self.shader_id,
                 dummy1: 0.0,

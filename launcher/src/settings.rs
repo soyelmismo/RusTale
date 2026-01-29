@@ -761,52 +761,57 @@ impl SettingsState {
 
                 list = list.push(
                     container(
-                        row![
-                            theme::text_small(label, ctx),
-                            Space::new().width(Length::Fill), // Espacio flexible para empujar a la derecha
-                            button(
-                                container(theme::svg(
-                                    svg(util::icons::icon(util::icons::FOLDER))
-                                        .style(move |t, s| theme::svg_accent(&palette, t, s)),
-                                    ctx
-                                ),)
-                                .center_x(Length::Fill)
-                                .center_y(Length::Fill)
-                                .style(move |t| theme::container_style_transparent(&palette, t))
-                            )
-                            .on_press(SettingsMessage::OpenVersionFolder(version_val))
-                            .width(40) // Ancho específico para el botón
-                            .style(move |t, s| theme::secondary_button_style(&palette, t, s)),
-                            Space::new().width(5),
-                            button(
-                                container(theme::svg(
-                                    svg(util::icons::icon(util::icons::WRENCH))
-                                        .style(move |t, s| theme::svg_accent(&palette, t, s)),
-                                    ctx
-                                ),)
-                                .center_x(Length::Fill)
-                                .center_y(Length::Fill)
-                                .style(move |t| theme::container_style_transparent(&palette, t))
-                            )
-                            .on_press(SettingsMessage::RepairVersion(version_val))
-                            .width(40) // Ancho específico para el botón
-                            .style(move |t, s| theme::secondary_button_style(&palette, t, s)),
-                            Space::new().width(5),
-                            button(
-                                container(theme::svg(
-                                    svg(util::icons::icon(util::icons::TRASH))
-                                        .style(move |t, s| theme::svg_accent(&palette, t, s)),
-                                    ctx
-                                ),)
-                                .center_x(Length::Fill)
-                                .center_y(Length::Fill)
-                                .style(move |t| theme::container_style_transparent(&palette, t))
-                            )
-                            .on_press(SettingsMessage::DeleteVersion(version_val))
-                            .width(40) // Ancho específico para el botón
-                            .style(move |t, s| theme::secondary_button_style(&palette, t, s)),
-                        ]
-                        .align_y(Alignment::Center),
+                        theme::magic_row(
+                            vec![
+                                theme::text_small(label, ctx).into(),
+                                Space::new().width(Length::Fill).into(), // Espacio flexible para empujar a la derecha
+                                button(
+                                    container(theme::svg(
+                                        svg(util::icons::icon(util::icons::FOLDER))
+                                            .style(move |t, s| theme::svg_accent(&palette, t, s)),
+                                        ctx
+                                    ),)
+                                    .center_x(Length::Fill)
+                                    .center_y(Length::Fill)
+                                    .style(move |t| theme::container_style_transparent(&palette, t))
+                                )
+                                .on_press(SettingsMessage::OpenVersionFolder(version_val))
+                                .width(40) // Ancho específico para el botón
+                                .style(move |t, s| theme::secondary_button_style(&palette, t, s))
+                                .into(),
+                                Space::new().width(5).into(),
+                                button(
+                                    container(theme::svg(
+                                        svg(util::icons::icon(util::icons::WRENCH))
+                                            .style(move |t, s| theme::svg_accent(&palette, t, s)),
+                                        ctx
+                                    ),)
+                                    .center_x(Length::Fill)
+                                    .center_y(Length::Fill)
+                                    .style(move |t| theme::container_style_transparent(&palette, t))
+                                )
+                                .on_press(SettingsMessage::RepairVersion(version_val))
+                                .width(40) // Ancho específico para el botón
+                                .style(move |t, s| theme::secondary_button_style(&palette, t, s))
+                                .into(),
+                                Space::new().width(5).into(),
+                                button(
+                                    container(theme::svg(
+                                        svg(util::icons::icon(util::icons::TRASH))
+                                            .style(move |t, s| theme::svg_accent(&palette, t, s)),
+                                        ctx
+                                    ),)
+                                    .center_x(Length::Fill)
+                                    .center_y(Length::Fill)
+                                    .style(move |t| theme::container_style_transparent(&palette, t))
+                                )
+                                .on_press(SettingsMessage::DeleteVersion(version_val))
+                                .width(40) // Ancho específico para el botón
+                                .style(move |t, s| theme::secondary_button_style(&palette, t, s))
+                                .into(),
+                            ],
+                            ctx
+                        )
                     )
                     .padding(5)
                     .style(move |t| theme::sidebar_style(&palette, t))

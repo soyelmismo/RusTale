@@ -2,9 +2,15 @@
 var uv = in.uv * 2.0 - 1.0;
 uv.x *= u.aspect;
 
-// Interactividad sutil con el mouse
+// Interactividad táctil con el mouse - genera ondas de choque al hacer clic
 // mouse_x/y vienen normalizados (-1 a 1) desde el vertex shader
-let mouse_interaction = vec2<f32>(u.mouse_x, -u.mouse_y) * 0.2;
+// u.intensity se usa como disparador de pulso momentáneo al hacer clic
+
+// Onda de choque que se expande desde la posición del mouse
+let click_wave = sin(length(uv - vec2(u.mouse_x, -u.mouse_y)) * 20.0 - u.time * 10.0);
+
+// Interacción base del mouse con distorsión psicodélica
+let mouse_interaction = vec2<f32>(u.mouse_x, -u.mouse_y) * (0.2 + (u.intensity * 0.05 * click_wave));
 var pos = uv - mouse_interaction;
 
 var final_col = vec3<f32>(0.0);

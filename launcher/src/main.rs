@@ -257,6 +257,7 @@ pub enum Message {
     None,
     Tick(std::time::Instant),
     CursorMoved(iced::Point),
+    ShaderClicked, // Nuevo mensaje para clic en el shader
     Initialize,
     Mods(ModsMessage),                        // New type of wrapper message
     ModsLoaded(Result<Vec<ModInfo>, String>), // Result of the load
@@ -385,6 +386,11 @@ struct RusTale {
     drag_start_window_size: Size,
     drag_start_mouse_screen_pos: Point, // Mouse absoluto (WindowPos + MousePos)
     // -------------------------------------
+    
+    // --- CAMPOS PARA EFECTOS TÁCTILES DEL SHADER ---
+    shader_click_intensity: f32,      // Intensidad del pulso actual
+    shader_click_time: std::time::Instant, // Tiempo del último clic
+    // ---------------------------------------------
     
     // NUEVOS CAMPOS PARA TRANSICIÓN DE SHADERS
     active_shader_idx: u32,
@@ -537,6 +543,11 @@ impl RusTale {
                 drag_start_mouse_screen_pos: Point::ORIGIN,
                 // -------------------------------------
                 
+                // --- CAMPOS PARA EFECTOS TÁCTILES DEL SHADER ---
+                shader_click_intensity: 0.0,
+                shader_click_time: std::time::Instant::now(),
+                // ---------------------------------------------
+                
                 // NUEVOS CAMPOS PARA TRANSICIÓN DE SHADERS
                 active_shader_idx: 0,
                 next_shader_idx: 0,
@@ -613,6 +624,8 @@ impl RusTale {
             iced::event::listen_with(|event, _status, _window_id| {
                 if let iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) = event {
                     Some(Message::CursorMoved(position))
+                } else if let iced::Event::Mouse(iced::mouse::Event::ButtonPressed(mouse::Button::Left)) = event {
+                    Some(Message::ShaderClicked) // Detectar clic izquierdo
                 } else {
                     None
                 }
@@ -912,6 +925,13 @@ impl RusTale {
             }
             Message::CursorMoved(pos) => {
                 self.cursor_position = pos;
+                Task::none()
+            }
+            
+            Message::ShaderClicked => {
+                // Disparar pulso de onda de choque en el shader
+                self.shader_click_intensity = 2.0; // Pico fuerte para la onda
+                self.shader_click_time = std::time::Instant::now();
                 Task::none()
             }
 
@@ -2237,9 +2257,9 @@ impl RusTale {
         // 0.0 seg -> 0.0 (movimiento)
         // 3.0 seg -> 1.0 (quietud total)
         let stillness = (elapsed_idle / 3.0).clamp(0.0, 1.0);
-        let lsd_intensity = if self.lsd_preview {
-            1.0 // Fuerza maxima instantanea al pasar el mouse por encima (Preview)
-        } else if let Some(t) = self.lsd_enabled_time {
+        
+        // Calculamos la intensidad base (ramp-up original)
+        let base_intensity = if let Some(t) = self.lsd_enabled_time {
             let elapsed = t.elapsed().as_secs_f32();
             // Si el LSD estaba activado al inicio, dar intensidad maxima inmediatamente
             if self.settings.theme.lsd_mode && elapsed < 0.1 {
@@ -2250,6 +2270,23 @@ impl RusTale {
         } else {
             0.0
         };
+
+        // CAMBIO: Modificamos lsd_intensity basado en la quietud y clics
+        // Si lsd_preview es true (hover en botón), intensidad al máximo.
+        // Si no, la intensidad base se reduce un 70% si el mouse está quieto (breath effect).
+        // Además, añadimos el pulso de clic con decaimiento exponencial.
+        let click_decay = (self.shader_click_time.elapsed().as_secs_f32() * 8.0).exp();
+        let click_pulse = self.shader_click_intensity / click_decay;
+        
+        let lsd_intensity = if self.lsd_preview {
+            1.0 + click_pulse // Máximo + pulso de clic
+        } else {
+            // Formula mágica: 
+            // 1. Mantiene 30% de intensidad mínima (0.3) cuando está quieto.
+            // 2. Sube al 100% (1.0) cuando mueves el mouse.
+            // 3. Añadimos el pulso de clic para efectos táctiles
+            (base_intensity * (1.0 - (stillness * 0.7))) + click_pulse
+        }.min(10.0); // Limitar para evitar explosiones visuales
 
         let ctx = theme::UIContext {
             palette: *palette,
@@ -2388,6 +2425,7 @@ impl RusTale {
                         palette.accent,
                         self.active_shader_idx,
                         1.0, // Totalmente opaco el fondo
+                        lsd_intensity, // Usar la intensidad dinámica
                     ))
                     .width(Length::Fill)
                     .height(Length::Fill),
@@ -2399,6 +2437,7 @@ impl RusTale {
                         palette.accent,
                         self.next_shader_idx,
                         self.shader_transition, // Opacidad subiendo de 0 a 1
+                        lsd_intensity, // Usar la intensidad dinámica
                     ))
                     .width(Length::Fill)
                     .height(Length::Fill)
@@ -2412,6 +2451,7 @@ impl RusTale {
                     palette.accent,
                     self.active_shader_idx,
                     1.0,
+                    lsd_intensity, // Usar la intensidad dinámica
                 ))
                 .width(Length::Fill)
                 .height(Length::Fill)
