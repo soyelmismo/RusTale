@@ -74,15 +74,6 @@ pub enum UpdateStatus {
     Error(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DropdownState {
-    Closed,
-    Language,
-    Theme,
-    Channel,
-    Version,
-    OnlineMode,
-}
 
 #[derive(Debug, Clone)]
 pub enum SettingsMessage {
@@ -230,9 +221,13 @@ impl SettingsState {
     ) -> Element<'a, SettingsMessage> {
         let palette = ctx.palette;
         let news_checkbox = row![
-            checkbox(self.temp_settings.enable_news)
-                .on_toggle(SettingsMessage::EnableNewsToggled)
-                .style(move |t, s| theme::checkbox_style(&palette, t, s)),
+            theme::magic_checkbox(
+                checkbox(self.temp_settings.enable_news)
+                    .on_toggle(SettingsMessage::EnableNewsToggled)
+                    .style(move |t, s| theme::checkbox_style(&palette, t, s))
+                    .into(), 
+                ctx
+            ),
             theme::text_body(localization.t("settings.enable_news"), ctx),
         ]
         .spacing(10)
@@ -245,36 +240,52 @@ impl SettingsState {
         };
 
         let minimize_tray_chk = row![
-            checkbox(self.temp_settings.minimize_to_tray)
-                .on_toggle(SettingsMessage::ToggleMinimizeTray)
-                .style(move |t, s| theme::checkbox_style(&palette, t, s)),
+            theme::magic_checkbox(
+                checkbox(self.temp_settings.minimize_to_tray)
+                    .on_toggle(SettingsMessage::ToggleMinimizeTray)
+                    .style(move |t, s| theme::checkbox_style(&palette, t, s))
+                    .into(),
+                ctx
+            ),
             theme::text_body(minimize_tray_text, ctx)
         ]
         .spacing(10)
         .align_y(Alignment::Center);
 
         let minimize_play_chk = row![
-            checkbox(self.temp_settings.minimize_on_play)
-                .on_toggle(SettingsMessage::ToggleMinimizePlay)
-                .style(move |t, s| theme::checkbox_style(&palette, t, s)),
+            theme::magic_checkbox(
+                checkbox(self.temp_settings.minimize_on_play)
+                    .on_toggle(SettingsMessage::ToggleMinimizePlay)
+                    .style(move |t, s| theme::checkbox_style(&palette, t, s))
+                    .into(),
+                ctx
+            ),
             theme::text_body(localization.t("settings.minimize_on_play"), ctx)
         ]
         .spacing(10)
         .align_y(Alignment::Center);
 
         let auto_update_chk = row![
-            checkbox(self.temp_settings.enable_auto_update)
-                .on_toggle(SettingsMessage::AutoUpdateToggled)
-                .style(move |t, s| theme::checkbox_style(&palette, t, s)),
+            theme::magic_checkbox(
+                checkbox(self.temp_settings.enable_auto_update)
+                    .on_toggle(SettingsMessage::AutoUpdateToggled)
+                    .style(move |t, s| theme::checkbox_style(&palette, t, s))
+                    .into(),
+                ctx
+            ),
             theme::text_body(localization.t("settings.auto_update"), ctx),
         ]
         .spacing(10)
         .align_y(Alignment::Center);
 
         let quickplay_chk = row![
-            checkbox(self.temp_settings.quickplay)
-                .on_toggle(SettingsMessage::QuickplayToggled)
-                .style(move |t, s| theme::checkbox_style(&palette, t, s)),
+            theme::magic_checkbox(
+                checkbox(self.temp_settings.quickplay)
+                    .on_toggle(SettingsMessage::QuickplayToggled)
+                    .style(move |t, s| theme::checkbox_style(&palette, t, s))
+                    .into(),
+                ctx
+            ),
             column![
                 theme::text_body(localization.t("settings.quickplay"), ctx),
                 theme::text_caption(localization.t("settings.quickplay_desc"), ctx),
@@ -355,25 +366,33 @@ impl SettingsState {
             // Saturacion
             column![
                 theme::text_small(localization.t("settings.saturation"), ctx),
-                slider(
-                    0.0..=2.0,
-                    self.temp_settings.theme.saturation,
-                    SettingsMessage::ThemeSaturationChanged
+                theme::magic_slider(
+                    slider(
+                        0.0..=2.0,
+                        self.temp_settings.theme.saturation,
+                        SettingsMessage::ThemeSaturationChanged
+                    )
+                    .step(0.1)
+                    .style(move |t, s| theme::slider_style(&palette, t, s))
+                    .into(),
+                    ctx
                 )
-                .step(0.1)
-                .style(move |t, s| theme::slider_style(&palette, t, s))
             ]
             .spacing(5),
             // Contraste
             column![
                 theme::text_small(localization.t("settings.contrast"), ctx),
-                slider(
-                    0.5..=1.5,
-                    self.temp_settings.theme.contrast,
-                    SettingsMessage::ThemeContrastChanged
+                theme::magic_slider(
+                    slider(
+                        0.5..=1.5,
+                        self.temp_settings.theme.contrast,
+                        SettingsMessage::ThemeContrastChanged
+                    )
+                    .step(0.1)
+                    .style(move |t, s| theme::slider_style(&palette, t, s))
+                    .into(),
+                    ctx
                 )
-                .step(0.1)
-                .style(move |t, s| theme::slider_style(&palette, t, s))
             ]
             .spacing(5),
         ]
@@ -431,9 +450,13 @@ impl SettingsState {
                     // 3. La fila organiza los elementos de forma independiente
                     row![
                         // El checkbox esta completamente aislado
-                        checkbox(self.temp_settings.theme.lsd_mode)
-                            .on_toggle(SettingsMessage::LsdToggled)
-                            .style(move |t, s| theme::checkbox_style(&palette, t, s)),
+                        theme::magic_checkbox(
+                            checkbox(self.temp_settings.theme.lsd_mode)
+                                .on_toggle(SettingsMessage::LsdToggled)
+                                .style(move |t, s| theme::checkbox_style(&palette, t, s))
+                                .into(),
+                            ctx
+                        ),
                         text_content
                     ]
                     .spacing(15) // Espaciado generoso para evitar interferencias
@@ -671,9 +694,13 @@ impl SettingsState {
         .align_y(Alignment::Center);
 
         let online_fix_checkbox = row![
-            checkbox(self.temp_settings.enable_online_fix)
-                .on_toggle(SettingsMessage::EnableOnlineFixToggled)
-                .style(move |t, s| theme::checkbox_style(&palette, t, s)),
+            theme::magic_checkbox(
+                checkbox(self.temp_settings.enable_online_fix)
+                    .on_toggle(SettingsMessage::EnableOnlineFixToggled)
+                    .style(move |t, s| theme::checkbox_style(&palette, t, s))
+                    .into(), 
+                ctx
+            ),
             column![
                 theme::text_body(localization.t("settings.enable_online_fix"), ctx),
                 theme::text_small(localization.t("settings.online_fix_desc"), ctx),
@@ -1112,13 +1139,17 @@ impl SettingsState {
                             ),
                             ctx
                         ),
-                        slider(
-                            1.0..=2.0,
-                            self.temp_settings.scale_factor,
-                            SettingsMessage::ScaleFactorChanged,
+                        theme::magic_slider(
+                            slider(
+                                1.0..=2.0,
+                                self.temp_settings.scale_factor,
+                                SettingsMessage::ScaleFactorChanged,
+                            )
+                            .step(0.05)
+                            .style(move |t, s| theme::slider_style(&palette, t, s))
+                            .into(),
+                            ctx
                         )
-                        .step(0.05)
-                        .style(move |t, s| theme::slider_style(&palette, t, s))
                     ]
                     .spacing(5)
                     .into(),
@@ -1173,14 +1204,17 @@ impl SettingsState {
                                 ),
                                 ctx,
                             ),
-                            slider(
-                                1.0..=16.0,
-                                self.temp_settings.min_memory as f32,
-                                SettingsMessage::MinMemoryChanged,
-                            )
-                            .step(1.0)
-                            .style(move |t, s| theme::slider_style(&palette, t, s))
-                            .into(),
+                            theme::magic_slider(
+                                slider(
+                                    1.0..=16.0,
+                                    self.temp_settings.min_memory as f32,
+                                    SettingsMessage::MinMemoryChanged,
+                                )
+                                .step(1.0)
+                                .style(move |t, s| theme::slider_style(&palette, t, s))
+                                .into(),
+                                ctx
+                            ),
                             theme::text_body(
                                 &format!(
                                     "{}: {} GB",
@@ -1189,14 +1223,17 @@ impl SettingsState {
                                 ),
                                 ctx,
                             ),
-                            slider(
-                                1.0..=32.0,
-                                self.temp_settings.max_memory as f32,
-                                SettingsMessage::MaxMemoryChanged,
-                            )
-                            .step(1.0)
-                            .style(move |t, s| theme::slider_style(&palette, t, s))
-                            .into(),
+                            theme::magic_slider(
+                                slider(
+                                    1.0..=32.0,
+                                    self.temp_settings.max_memory as f32,
+                                    SettingsMessage::MaxMemoryChanged,
+                                )
+                                .step(1.0)
+                                .style(move |t, s| theme::slider_style(&palette, t, s))
+                                .into(),
+                                ctx
+                            ),
                             section_title(localization.t("settings.jvm_args"), ctx),
                             theme::magic_text_area(
                                 iced::widget::text_editor(&self.jvm_args_content)

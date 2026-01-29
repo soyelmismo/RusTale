@@ -1,34 +1,6 @@
 use std::path::PathBuf;
 use anyhow::Result;
 
-/// Resolves the path to Assets.zip for a specific client version
-/// This allows the dedicated server to use assets directly from the client installation
-/// without copying the large Assets.zip file
-pub fn resolve_client_assets_path(
-    app_dir: &PathBuf,
-    branch: &str,
-    version: &str,
-) -> Result<PathBuf> {
-    let version_dir_name = if version == "latest" || version == "0" {
-        "latest"
-    } else {
-        version
-    };
-    
-    let client_version_dir = app_dir.join(branch).join(version_dir_name);
-    let assets_path = client_version_dir.join("Assets.zip");
-    
-    if !assets_path.exists() {
-        return Err(anyhow::anyhow!(
-            "Assets.zip not found for client version {} in branch {}: {:?}",
-            version,
-            branch,
-            assets_path
-        ));
-    }
-    
-    Ok(assets_path)
-}
 
 /// Finds the best matching client version for the server
 /// Priority: exact version -> latest with matching version number -> error

@@ -3,6 +3,13 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
+    // -----------------------------------------------------------
+    // [CRITICAL] VIGILAR CARPETA DE SHADERS
+    // Si algún archivo .wgsl cambia, se añade o se elimina, 
+    // se fuerza la recompilación para actualizar rust-embed.
+    println!("cargo:rerun-if-changed=../assets/shaders");
+    // -----------------------------------------------------------
+
     // Compilar recursos de Windows (icono y version)
     #[cfg(target_os = "windows")]
     {

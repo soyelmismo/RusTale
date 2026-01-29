@@ -50,9 +50,10 @@ pub struct Palette {
 
 #[derive(Debug, Default)]
 struct SmoothTranslateState {
-    smoothed_stillness: Cell<f32>,
-    last_mouse_pos: Cell<iced::Point>,
-    last_time: Cell<f32>,
+    // [FIX] Usar '_' para suprimir advertencias de campos calculados pero no leidos logicamente aun
+    _smoothed_stillness: Cell<f32>,
+    _last_mouse_pos: Cell<iced::Point>,
+    _last_time: Cell<f32>,
     current_repulsion: Cell<Vector>,
     current_velocity: Cell<Vector>, // Para inercia de masa (reaccion tardia)
     intensity: Cell<f32>,           // Estado persistente de intensidad
@@ -61,9 +62,9 @@ struct SmoothTranslateState {
 impl SmoothTranslateState {
     pub fn new() -> Self {
         Self {
-            smoothed_stillness: Cell::new(0.0),
-            last_mouse_pos: Cell::new(iced::Point::ORIGIN),
-            last_time: Cell::new(0.0),
+            _smoothed_stillness: Cell::new(0.0),
+            _last_mouse_pos: Cell::new(iced::Point::ORIGIN),
+            _last_time: Cell::new(0.0),
             current_repulsion: Cell::new(Vector::new(0.0, 0.0)),
             current_velocity: Cell::new(Vector::new(0.0, 0.0)),
             intensity: Cell::new(0.0),
@@ -363,7 +364,7 @@ pub fn magic_column<'a, M: 'a + Clone>(
                 false,
                 ctx.lsd_intensity,
                 ctx.lsd_enabled,
-            ));
+            ).resizing(ctx.is_resizing));
 
             col = col.push(wrapped_item);
         }
@@ -396,7 +397,7 @@ pub fn magic_row<'a, M: 'a + Clone>(
                 false,
                 ctx.lsd_intensity,
                 ctx.lsd_enabled,
-            ));
+            ).resizing(ctx.is_resizing));
 
             col = col.push(wrapped_item);
         }
@@ -493,7 +494,7 @@ pub fn lsd_magic_text<'a, M: 'a>(
             false, // Que se mueva siempre
             1.0,   // Fuerza máxima
             true,  // Ignorar modo global OFF
-        )));
+        ).resizing(ctx.is_resizing)));
     }
 
     row.into()
@@ -1264,7 +1265,7 @@ where
             false,
             ctx.lsd_intensity,
             ctx.lsd_enabled,
-        ))
+        ).resizing(ctx.is_resizing))
     } else {
         element
     }
@@ -1695,7 +1696,7 @@ pub fn text<'a, M: 'a>(
             false,
             ctx.lsd_intensity,
             ctx.lsd_enabled,
-        ))
+        ).resizing(ctx.is_resizing))
     } else {
         element
     }
@@ -1743,7 +1744,7 @@ pub fn text_lsd_letters<'a, M: 'a>(
             false,
             lsd_intensity,
             lsd_enabled,
-        ));
+        ).resizing(ctx.is_resizing));
 
         letter_row = letter_row.push(magic_char);
     }
@@ -1765,7 +1766,7 @@ pub fn svg<'a, M: 'a>(content: impl Into<Element<'a, M>>, ctx: UIContext) -> Ele
             false,
             ctx.lsd_intensity,
             ctx.lsd_enabled,
-        ))
+        ).resizing(ctx.is_resizing))
     } else {
         element
     }
@@ -1791,7 +1792,7 @@ where
             false,
             ctx.lsd_intensity,
             ctx.lsd_enabled,
-        ))
+        ).resizing(ctx.is_resizing))
     } else {
         element
     }
@@ -1815,7 +1816,7 @@ where
             false,
             ctx.lsd_intensity,
             ctx.lsd_enabled,
-        ))
+        ).resizing(ctx.is_resizing))
     } else {
         element
     }
@@ -1902,7 +1903,7 @@ where
             false,
             ctx.lsd_intensity,
             ctx.lsd_enabled,
-        ))
+        ).resizing(ctx.is_resizing))
     } else {
         element
     }
@@ -1925,7 +1926,7 @@ where
             false,
             ctx.lsd_intensity,
             ctx.lsd_enabled,
-        ))
+        ).resizing(ctx.is_resizing))
     } else {
         element
     }
@@ -1948,7 +1949,7 @@ where
             false,
             ctx.lsd_intensity,
             ctx.lsd_enabled,
-        ))
+        ).resizing(ctx.is_resizing))
     } else {
         element
     }
@@ -1974,7 +1975,7 @@ where
             false,
             ctx.lsd_intensity,
             ctx.lsd_enabled,
-        ))
+        ).resizing(ctx.is_resizing))
     } else {
         element
     }
@@ -2018,7 +2019,7 @@ where
             false,
             ctx.lsd_intensity,
             ctx.lsd_enabled,
-        ))
+        ).resizing(ctx.is_resizing))
     } else {
         element
     }
@@ -2041,7 +2042,7 @@ where
             false,
             ctx.lsd_intensity,
             ctx.lsd_enabled,
-        ))
+        ).resizing(ctx.is_resizing))
     } else {
         element
     }

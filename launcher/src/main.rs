@@ -2,7 +2,7 @@
 
 use clap::Parser;
 use futures::SinkExt;
-use iced::widget::{Space, column, container, image, mouse_area, row, shader, stack};
+use iced::widget::{Space, column, container, image, mouse_area, row, stack};
 use iced::{
     Alignment, Color, ContentFit, Element, Length, Padding, Size, Subscription, Task, Theme, clipboard,
     mouse::Interaction, window, Point, event::{self, Event}, mouse
@@ -329,6 +329,9 @@ pub enum Message {
     WindowEvent(window::Event),
     // ---------------------------------------------
     
+    // --- NUEVO: Mensaje para cambiar shader ---
+    NextShader,
+    
     ServerPatchProgress(f32),
 }
 
@@ -381,6 +384,14 @@ struct RusTale {
     drag_start_window_pos: Point,
     drag_start_window_size: Size,
     drag_start_mouse_screen_pos: Point, // Mouse absoluto (WindowPos + MousePos)
+    // -------------------------------------
+    
+    // NUEVOS CAMPOS PARA TRANSICIÓN DE SHADERS
+    active_shader_idx: u32,
+    next_shader_idx: u32,
+    shader_transition: f32, // 0.0 a 1.0
+    total_shaders_available: u32,
+    shader_change_timer: f32, // Acumulador para cambio automático
     // ------------------------------------- // Añadir esto
 }
 
@@ -412,6 +423,26 @@ impl RusTale {
             .unwrap_or_else(|_| reqwest::Client::new());
 
         let client_for_bg = api_client.clone();
+
+        // 1. CARGA INICIAL DE SHADERS CON SEGURIDAD
+        // Crea carpeta si no existe (la app.rs initialize es async, esto es pre-load rápido o hazlo en initialize)
+        // Recomendado: Llamar build_uber_shader() AQUI
+        
+        let total_shaders = std::panic::catch_unwind(|| {
+            let shader_code = crate::ui::shader_manager::build_uber_shader();
+            lsd_shader::set_global_wgsl(shader_code);
+            crate::ui::shader_manager::get_shader_count()
+        }).unwrap_or_else(|_| {
+            eprintln!("[SHADER] Panic during shader initialization! Using safe mode fallback.");
+            lsd_shader::set_safe_mode_shader();
+            1 // Fallback: 1 shader (safe mode)
+        });
+        
+        // Si safe_mode está activado en la configuración, forzamos shader simple
+        if initial_settings.safe_mode || crate::ui::lsd_shader::should_use_safe_mode() {
+            println!("[SHADER] Safe mode enabled, using simple shader");
+            lsd_shader::set_safe_mode_shader();
+        }
 
         // --- BACKGROUND OPTIMIZATION ---
         // Background URL
@@ -505,6 +536,14 @@ impl RusTale {
                 drag_start_window_size: Size::new(width, height),
                 drag_start_mouse_screen_pos: Point::ORIGIN,
                 // -------------------------------------
+                
+                // NUEVOS CAMPOS PARA TRANSICIÓN DE SHADERS
+                active_shader_idx: 0,
+                next_shader_idx: 0,
+                shader_transition: 0.0,
+                total_shaders_available: total_shaders as u32, // Usar el valor calculado
+                shader_change_timer: 0.0,
+                // -------------------------------------
             },
             Task::batch(vec![
                 Task::done(Message::Initialize),
@@ -594,6 +633,25 @@ impl RusTale {
             Subscription::none()
         };
 
+        // NUEVO: Escucha de teclado para cambiar shaders
+        let keyboard_sub = if self.is_window_visible {
+            iced::event::listen_with(|event, _status, _window_id| {
+                if let Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event {
+                    match key {
+                        // Flecha derecha para siguiente shader
+                        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowRight) => Some(Message::NextShader),
+                        // Alternativa: Tecla 'S'
+                        iced::keyboard::Key::Character(c) if c.as_str() == "s" => Some(Message::NextShader),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            })
+        } else {
+            Subscription::none()
+        };
+
         Subscription::batch(vec![
             game_runner,
             tray_sub,
@@ -601,7 +659,8 @@ impl RusTale {
             window_sub,
             tick_sub,
             mouse_sub,
-            global_mouse, // <--- AÑADIR ESTO
+            global_mouse,
+            keyboard_sub, // <--- Agregar esto al batch final
         ])
     }
 
@@ -772,6 +831,28 @@ impl RusTale {
                 let ox = (t * 1.3).sin() * 1.0 + (t * 2.8).cos() * 0.5 + (t * 0.7).sin() * 0.3;
                 let oy = (t * 0.9).cos() * 1.0 + (t * 3.5).sin() * 0.5 + (t * 1.1).cos() * 0.3;
                 self.lsd_offset = (ox, oy);
+
+                // CAMBIO AUTOMÁTICO DE SHADER CADA 30 SEGUNDOS
+                if self.shader_transition > 0.0 {
+                    // Avanzar transición (ajustar velocidad 0.01 -> más lento, 0.05 -> rápido)
+                    self.shader_transition += 0.02; 
+                    
+                    if self.shader_transition >= 1.0 {
+                        // Transición completada
+                        self.active_shader_idx = self.next_shader_idx;
+                        self.shader_transition = 0.0;
+                    }
+                } else {
+                    // Esperar tiempo para cambiar
+                    self.shader_change_timer += 0.033; // ~30ms por tick
+                    if self.shader_change_timer > 30.0 { // Cambiar cada 30 segundos
+                        self.shader_change_timer = 0.0;
+                        // Siguiente shader ciclico
+                        self.next_shader_idx = (self.active_shader_idx + 1) % self.total_shaders_available;
+                        self.shader_transition = 0.01; // Iniciar transición
+                    }
+                }
+
                 return Task::none();
             }
 
@@ -2022,6 +2103,26 @@ impl RusTale {
                 self.resizing_direction = None;
                 Task::none()
             }
+            
+            Message::NextShader => {
+                // Solo cambiar si el modo LSD está activo Y NO estamos ya en transición
+                if self.settings.theme.lsd_mode && self.shader_transition <= 0.0 {
+                    
+                    // 1. Calcular índice siguiente (Ciclo circular)
+                    self.next_shader_idx = (self.active_shader_idx + 1) % self.total_shaders_available;
+                    
+                    // 2. Iniciar la transición visual
+                    // Establecer en un valor pequeño pero > 0.0 arranca el fade-in en view()
+                    self.shader_transition = 0.01; 
+                    
+                    // 3. Resetear el temporizador automático
+                    // Para que no vuelva a cambiar automáticamente a los 2 segundos de que tú lo cambiaste
+                    self.shader_change_timer = 0.0;
+                    
+                    println!("Manual Switch: {} -> {}", self.active_shader_idx, self.next_shader_idx);
+                }
+                Task::none()
+            }
             // ---------------------------------------------
             
             Message::CancelAction => {
@@ -2276,18 +2377,46 @@ impl RusTale {
         };
 
         let bg: Element<'_, Message> = if self.settings.theme.lsd_mode {
-            // USAR EL SHADER GPU
-            // Usamos un shader widget que ocupa todo el espacio
-            shader(lsd_shader::LiquidLsd::new(
-                self.start_time,
-                self.cursor_position,
-                palette.accent,
-                palette.background,
-                lsd_intensity,
-            ))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+            // NUEVO SISTEMA DE TRANSICIÓN DE SHADERS
+            if self.shader_transition > 0.0 {
+                // ESTADO DE TRANSICIÓN (Stack de 2 shaders)
+                iced::widget::stack![
+                    // 1. Fondo: Shader Antiguo (Se queda quieto u oscurece)
+                    iced::widget::shader(lsd_shader::LsdShader::new(
+                        self.start_time,
+                        self.cursor_position,
+                        palette.accent,
+                        self.active_shader_idx,
+                        1.0, // Totalmente opaco el fondo
+                    ))
+                    .width(Length::Fill)
+                    .height(Length::Fill),
+
+                    // 2. Frente: Shader Nuevo (Fade In)
+                    iced::widget::shader(lsd_shader::LsdShader::new(
+                        self.start_time,
+                        self.cursor_position,
+                        palette.accent,
+                        self.next_shader_idx,
+                        self.shader_transition, // Opacidad subiendo de 0 a 1
+                    ))
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                ]
+                .into()
+            } else {
+                // ESTADO ESTÁTICO (1 solo shader para ahorrar GPU)
+                iced::widget::shader(lsd_shader::LsdShader::new(
+                    self.start_time,
+                    self.cursor_position,
+                    palette.accent,
+                    self.active_shader_idx,
+                    1.0,
+                ))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+            }
         } else if let Some(handle) = &self.bg_handle {
             // Fondo original
             image(handle.clone())
@@ -2514,15 +2643,11 @@ impl RusTale {
             Ok(icon) => {
                 println!("Tray icon created OK.");
                 // Escribir log de éxito (temporal para debug)
-                let _ = std::fs::write("tray_status.log", "SUCCESS: Tray icon created OK.");
                 Some(icon)
             },
             Err(e) => {
                 // Escribir log de error
-                println!("ERROR: Failed to create tray icon: {}", e);
-                let err_msg = format!("ERROR: Failed to create tray icon: {}", e);
-                let _ = std::fs::write("tray_status.log", &err_msg);
-                eprintln!("{}", err_msg);
+                eprintln!("ERROR: Failed to create tray icon: {}", e);
                 None
             }
         }

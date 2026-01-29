@@ -8,6 +8,69 @@ pub mod icons;
 pub mod image_cache;
 pub mod win_job;
 
+/// Sanitizes Java arguments to prevent path injection and security vulnerabilities
+fn sanitize_java_arguments(args: &[String]) -> Vec<String> {
+    let mut sanitized = Vec::new();
+    
+    for arg in args {
+        // Skip potentially dangerous absolute paths in non-JAR contexts
+        if arg.starts_with('/') || (cfg!(windows) && arg.contains(':') && arg.contains('\\')) {
+            // Allow absolute paths only for JAR files and specific safe arguments
+            let arg_lower = arg.to_lowercase();
+            if arg_lower.ends_with(".jar") || 
+               arg.starts_with("-D") || 
+               arg.starts_with("-X") || 
+               arg.starts_with("-XX:") ||
+               arg.starts_with("-javaagent:") ||
+               arg.starts_with("-cp") ||
+               arg.starts_with("-classpath") {
+                sanitized.push(arg.clone());
+            } else {
+                println!("[SECURITY] Blocked potentially dangerous absolute path: {}", arg);
+            }
+        } else {
+            // Allow relative paths and standard JVM arguments
+            sanitized.push(arg.clone());
+        }
+    }
+    
+    sanitized
+}
+
+/// Validates that the Java executable path is within expected bounds
+fn validate_java_executable(java_path: &PathBuf, bin_dir: &Path) -> Result<()> {
+    // Ensure the Java executable is within the same directory as the launcher
+    if let Some(java_parent) = java_path.parent() {
+        // FIX: same_as no existe. Usamos canonicalize para comparar rutas reales
+        // Usamos unwrap_or para no fallar si el archivo aun no existe (raro pero posible),
+        // en cuyo caso fallback a la ruta original
+        let canon_java_dir = java_parent.canonicalize().unwrap_or(java_parent.to_path_buf());
+        let canon_bin_dir = bin_dir.canonicalize().unwrap_or(bin_dir.to_path_buf());
+
+        if canon_java_dir != canon_bin_dir {
+            return Err(anyhow::anyhow!(
+                "Security violation: Java executable outside expected directory: {:?} vs {:?}",
+                java_path, bin_dir
+            ));
+        }
+    }
+    
+    // Additional check: ensure we're not executing something unexpected
+    let java_name = java_path.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+    
+    // Convert to lowercase to be safe on Windows
+    if !java_name.to_lowercase().contains("java") {
+        return Err(anyhow::anyhow!(
+            "Security violation: Attempted to execute non-Java binary: {}",
+            java_name
+        ));
+    }
+    
+    Ok(())
+}
+
 pub fn open_game_folder() {
     let path = crate::config::get_app_dir();
     open_path(path);
@@ -159,7 +222,14 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
         );
     }
 
-    let mut final_args = args.clone();
+    // Validate Java executable path for security
+    if let Err(e) = validate_java_executable(&java_real, bin_dir) {
+        println!("[SECURITY] {}", e);
+        return Err(e);
+    }
+
+    // Sanitize arguments to prevent path injection attacks
+    let mut final_args = sanitize_java_arguments(&args);
 
     println!("CWD: {:?}", std::env::current_dir());
     let cwd_res = std::env::current_dir();
@@ -333,16 +403,16 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
 
     // Detect if we should show the console
     // Show console ONLY if it is a server AND NOT singleplayer
-    let is_server_jar = args
+    let _is_server_jar = args
         .iter()
         .any(|a| a.to_lowercase().contains("hytaleserver.jar"));
-    let is_singleplayer = args.iter().any(|a| a == "--singleplayer");
-    let is_dedicated_server_flag = std::env::var("RUSTALE_IS_SERVER").is_ok();
+    let _is_singleplayer = args.iter().any(|a| a == "--singleplayer");
+    let _is_dedicated_server_flag = std::env::var("RUSTALE_IS_SERVER").is_ok();
 
 
     #[cfg(target_os = "windows")]
     {
-        let show_console = (is_server_jar || is_dedicated_server_flag) && !is_singleplayer;
+        let show_console = (_is_server_jar || _is_dedicated_server_flag) && !_is_singleplayer;
         if !show_console {
             // Hide black console window for client or singleplayer
             cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW

@@ -189,6 +189,8 @@ pub struct GameSettings {
     pub enable_auto_update: bool,
     #[serde(default)]
     pub theme: ThemeConfig,
+    #[serde(default)]
+    pub safe_mode: bool,
 }
 
 impl std::hash::Hash for GameSettings {
@@ -212,6 +214,7 @@ impl std::hash::Hash for GameSettings {
         self.quickplay.hash(state);
         self.enable_auto_update.hash(state);
         self.theme.hash(state);
+        self.safe_mode.hash(state);
     }
 }
 
@@ -249,6 +252,7 @@ impl Default for GameSettings {
             quickplay: false,
             enable_auto_update: true,
             theme: ThemeConfig::default(),
+            safe_mode: false,
         }
     }
 }
