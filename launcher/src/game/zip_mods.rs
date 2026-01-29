@@ -12,6 +12,10 @@ pub struct PatchManifest {
     pub enabled: bool,
     pub backups: Vec<(String, String)>, // (game path, relative backup path)
     pub added_files: Vec<String>,       // New files added
+    // Metadata for remote updates
+    pub remote_id: Option<String>,
+    pub file_id: Option<String>,
+    pub provider: Option<crate::game::mods_api::ModProvider>,
 }
 
 /// Install a new ZIP patch (Initial phase)
@@ -20,6 +24,9 @@ pub fn install_new_patch(
     game_root_dir: PathBuf,     // .../latest/
     core_patches_root: PathBuf, // .../latest/CorePatches/
     mod_name: String,
+    remote_id: Option<String>,
+    file_id: Option<String>,
+    provider: Option<crate::game::mods_api::ModProvider>,
 ) -> Result<()> {
     let mod_id = uuid::Uuid::new_v4().to_string();
     let patch_dir = core_patches_root.join(&mod_id);
@@ -39,6 +46,9 @@ pub fn install_new_patch(
         &patch_dir,
         mod_id,
         mod_name,
+        remote_id,
+        file_id,
+        provider,
     )?;
 
     Ok(())
@@ -52,6 +62,9 @@ fn apply_patch_logic(
     patch_dir: &Path,
     mod_id: String,
     mod_name: String,
+    remote_id: Option<String>,
+    file_id: Option<String>,
+    provider: Option<crate::game::mods_api::ModProvider>,
 ) -> Result<()> {
     let file = fs::File::open(zip_path)?;
     let mut archive = ZipArchive::new(file)?;
@@ -146,6 +159,9 @@ fn apply_patch_logic(
         enabled: true,
         backups,
         added_files,
+        remote_id,
+        file_id,
+        provider,
     };
 
     let json = serde_json::to_string_pretty(&manifest)?;
@@ -241,6 +257,9 @@ pub fn enable_patch(
         &patch_dir,
         manifest.mod_id,
         manifest.mod_name,
+        manifest.remote_id,
+        manifest.file_id,
+        manifest.provider,
     )?;
 
     Ok(())

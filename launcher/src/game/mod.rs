@@ -1,7 +1,6 @@
 pub mod auth;
 pub mod crypto;
 
-pub mod curseforge;
 pub mod downloader;
 pub mod install;
 pub mod launch;

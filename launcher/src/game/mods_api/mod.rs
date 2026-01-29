@@ -27,11 +27,41 @@ pub struct GenericMod {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GenericFile {
     pub file_id: String,
-    pub name: String,        // Nombre del archivo (ej: "IronChests-1.2.jar")
+    pub name: String,        // Nombre del archivo (ej: "mod-v1.2.jar")
     pub version_name: String,// Nombre de la versión (ej: "v1.2 Release")
     pub download_url: Option<String>,
     pub release_date: chrono::DateTime<chrono::Utc>,
-    pub game_versions: Vec<String>, // Ej: ["1.20.1"]
+    pub game_versions: Vec<String>, // Versiones compatibles del juego
+}
+
+// Esto define qué texto muestra el Dropdown
+impl std::fmt::Display for GenericFile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Usar version_name si está disponible y es diferente del nombre del archivo
+        // sino extraer versión del mod del nombre del archivo
+        let display_version = if !self.version_name.is_empty() && self.version_name != self.name {
+            &self.version_name
+        } else if let Some(name_without_ext) = self.name.strip_suffix(".jar") {
+            name_without_ext
+        } else {
+            &self.name
+        };
+        
+        // Mostrar versiones de juego compatibles de forma truncada si es muy larga
+        let game_versions = if self.game_versions.is_empty() {
+            "Any".to_string()
+        } else {
+            let joined = self.game_versions.join(", ");
+            if joined.len() > 25 {
+                format!("{}...", &joined[..25])
+            } else {
+                joined
+            }
+        };
+        
+        // Formato: "version_name [game_versions]" - más claro para el usuario
+        write!(f, "{} [{}]", display_version, game_versions)
+    }
 }
 
 // Contrato que deben cumplir CurseForge y Modrinth

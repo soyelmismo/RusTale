@@ -102,7 +102,11 @@ pub struct CfFile {
     #[serde(rename = "fileName")]
     pub file_name: String,
     #[serde(rename = "downloadUrl")]
-    pub download_url: Option<String>, 
+    pub download_url: Option<String>,
+    #[serde(rename = "gameVersions", default)]
+    pub game_versions: Vec<String>,
+    #[serde(rename = "fileDate")]
+    pub file_date: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -148,13 +152,22 @@ impl From<CfMod> for GenericMod {
 // Implementación de conversión de CfFile a GenericFile
 impl From<CfFile> for GenericFile {
     fn from(cf_file: CfFile) -> Self {
+        // Parsear fecha si es necesario, o usar now() como fallback temporal
+        let date = if let Some(d) = cf_file.file_date {
+            chrono::DateTime::parse_from_rfc3339(&d)
+                .map(|dt| dt.with_timezone(&chrono::Utc))
+                .unwrap_or(chrono::Utc::now())
+        } else {
+            chrono::Utc::now()
+        };
+
         GenericFile {
             file_id: cf_file.id.to_string(),
             name: cf_file.file_name.clone(),
-            version_name: cf_file.file_name,
+            version_name: cf_file.file_name, // CF no siempre tiene version name separado
             download_url: cf_file.download_url,
-            release_date: chrono::Utc::now(), 
-            game_versions: vec![],
+            release_date: date,
+            game_versions: cf_file.game_versions, // Pasar los datos reales
         }
     }
 }
