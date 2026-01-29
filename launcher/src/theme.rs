@@ -1518,9 +1518,25 @@ impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Messa
     ) {
         let bounds = layout.bounds();
 
-        // --- FRUSTUM CULLING 2D ---
-        // Si los bordes del widget no chocan con el viewport, salimos de la función.
-        if !viewport.intersects(&bounds) {
+        // [OPTIMIZATION] SOPHISTICATED CULLING (Culling con Margen)
+        // 1. Margen de seguridad: El efecto LSD mueve los objetos visualmente fuera de sus bounds reales.
+        //    Si hacemos un culling estricto, los objetos parpadearán al entrar en pantalla.
+        //    Añadimos 100px extra (suficiente para cubrir repulsión + jitter).
+        let safe_margin = 100.0; 
+        
+        let visible_area = Rectangle {
+            x: viewport.x - safe_margin,
+            y: viewport.y - safe_margin,
+            width: viewport.width + (safe_margin * 2.0),
+            height: viewport.height + (safe_margin * 2.0),
+        };
+
+        // 2. Comprobación rápida AABB (Axis-Aligned Bounding Box)
+        // Si no está en el área expandida, abortamos inmediatamente.
+        // Esto ahorra:
+        // - El cálculo pesado de físicas en calculate_displacement (CPU)
+        // - El envío de vértices a WGPU (GPU)
+        if !visible_area.intersects(&bounds) {
             return;
         }
 
