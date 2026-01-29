@@ -1,0 +1,55 @@
+use async_trait::async_trait;
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum ModProvider {
+    CurseForge,
+    Modrinth, // Preparado para el futuro
+}
+
+// Representa un Mod en el navegador (resultados de búsqueda)
+#[derive(Debug, Clone)]
+pub struct GenericMod {
+    pub id: String, // En CF es int, en Modrinth string. Usaremos String uniformemente.
+    pub name: String,
+    pub summary: String,
+    pub author: String,
+    pub logo_url: Option<String>,
+    pub downloads: u64,
+    pub website_url: String,
+    pub provider: ModProvider,
+    // Metadatos internos del proveedor (guardar el struct original si hace falta)
+    pub latest_files: Vec<GenericFile>, 
+}
+
+// Representa una versión específica descargable
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GenericFile {
+    pub file_id: String,
+    pub name: String,        // Nombre del archivo (ej: "IronChests-1.2.jar")
+    pub version_name: String,// Nombre de la versión (ej: "v1.2 Release")
+    pub download_url: Option<String>,
+    pub release_date: chrono::DateTime<chrono::Utc>,
+    pub game_versions: Vec<String>, // Ej: ["1.20.1"]
+}
+
+// Contrato que deben cumplir CurseForge y Modrinth
+#[async_trait]
+pub trait ModRepository: Send + Sync {
+    async fn search(&self, query: &str, index: u32, page_size: u32) -> Result<SearchResults>;
+    
+    // Obtener versiones disponibles para un Mod
+    async fn get_versions(&self, mod_id: &str) -> Result<Vec<GenericFile>>;
+    
+    // Verificar si hay update para un archivo específico
+    async fn get_latest_compatible(&self, mod_id: &str, current_file_id: &str) -> Result<Option<GenericFile>>;
+}
+
+#[derive(Debug, Clone)]
+pub struct SearchResults {
+    pub mods: Vec<GenericMod>,
+    pub total_count: u32,
+}
+
+pub mod curseforge;

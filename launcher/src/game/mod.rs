@@ -6,6 +6,7 @@ pub mod downloader;
 pub mod install;
 pub mod launch;
 pub mod mods;
+pub mod mods_api;
 pub mod patcher;
 pub mod paths;
 pub mod progress;

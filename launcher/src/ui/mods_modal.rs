@@ -1,6 +1,7 @@
 use crate::config::GameSettings;
-use crate::game::curseforge::{CfMod, SearchResult};
-use crate::game::mods::ModInfo;
+use crate::game::mods_api::{GenericMod, SearchResults, ModRepository, ModProvider};
+use crate::game::mods_api::curseforge::CurseForgeRepository;
+use crate::game::mods::{ModInfo, InstalledModMetadata};
 use crate::game::zip_mods::PatchManifest;
 use crate::{theme, util};
 use iced::widget::{
@@ -33,10 +34,10 @@ pub enum ModsMessage {
     SearchSubmit,
     NextPage,
     PrevPage,
-    SearchLoaded(Result<SearchResult, String>),
-    ImageLoaded(i32, Result<image::Handle, String>),
-    InstallMod(CfMod),
-    ModInstalled(Result<String, String>, i32),
+    SearchLoaded(Result<SearchResults, String>),
+    ImageLoaded(String, Result<image::Handle, String>),
+    InstallMod(GenericMod),
+    ModInstalled(Result<String, String>, String), // Devuelve ID string
     OpenModPage(String),
     InstallZipPatch(std::path::PathBuf, GameSettings),
     ToggleZipPatch(String, bool),
@@ -44,24 +45,30 @@ pub enum ModsMessage {
     PatchOperationFinished(Result<(), String>),
     ModsLoadedComplex(Result<(Vec<ModInfo>, Vec<crate::game::zip_mods::PatchManifest>), String>),
     OpenMods,
+    CheckForUpdates,
+    UpdatesChecked(Result<Vec<String>, String>),
+    UpdateMod(ModInfo),
 }
 
 pub struct ModsState {
     pub is_open: bool,
     pub current_tab: ModTab,
     pub search_query: String,
-    pub remote_mods: Vec<CfMod>,
+    pub remote_mods: Vec<GenericMod>,
     pub current_page: u32,
     pub total_results: u32,
     pub page_size: u32,
-    pub thumbnails: HashMap<i32, image::Handle>,
+    pub thumbnails: HashMap<String, image::Handle>,
     pub loading: bool,
     pub error: Option<String>,
     pub patch_mods: Vec<PatchManifest>,
     pub installed_mods: Vec<ModInfo>,
     pub temp_settings: GameSettings,
-    pub installing_ids: HashSet<i32>,
-    pub installed_ids: HashSet<i32>,
+    pub installing_ids: HashSet<String>,
+    pub installed_ids: HashSet<String>,
+    pub installing_mods: HashMap<String, GenericMod>, 
+    pub checking_updates: bool,
+    pub mods_with_updates: HashSet<String>,
 }
 
 impl Default for ModsState {
@@ -82,6 +89,9 @@ impl Default for ModsState {
             temp_settings: GameSettings::default(),
             installing_ids: HashSet::new(),
             installed_ids: HashSet::new(),
+            installing_mods: HashMap::new(),
+            checking_updates: false,
+            mods_with_updates: HashSet::new(),
         }
     }
 }
@@ -130,6 +140,9 @@ impl ModsState {
                         self.installed_mods = jars;
                         self.patch_mods = patches;
                         self.error = None;
+                        
+                        // Si se abre el modal y tenemos mods, podemos chequear updates automatico? 
+                        // Mejor esperar a un boton
                     }
                     Err(e) => {
                         if self.is_open {
@@ -234,10 +247,10 @@ impl ModsState {
                         self.error = None;
                         let mut tasks = Vec::new();
                         for m in &self.remote_mods {
-                            if let Some(logo) = &m.logo {
+                            if let Some(logo) = &m.logo_url {
                                 if !self.thumbnails.contains_key(&m.id) {
-                                    let url = logo.thumbnail_url.clone();
-                                    let id = m.id;
+                                    let url = logo.clone();
+                                    let id = m.id.clone();
                                     let c = client.clone();
                                     tasks.push(Task::perform(
                                         async move {
@@ -271,13 +284,17 @@ impl ModsState {
                 }
                 Task::none()
             }
-            ModsMessage::InstallMod(cf_mod) => {
-                self.installing_ids.insert(cf_mod.id);
-                let id = cf_mod.id;
-                if let Some(file) = cf_mod.latest_files.first() {
+            ModsMessage::InstallMod(remote_mod) => {
+                let id_clone = remote_mod.id.clone();
+                self.installing_ids.insert(id_clone.clone());
+                self.installing_mods.insert(id_clone.clone(), remote_mod.clone());
+                
+                if let Some(file) = remote_mod.latest_files.first() {
                     if let Some(url) = &file.download_url {
                         let (uc, fnm, bdc) =
-                            (url.clone(), file.file_name.clone(), base_dir.clone());
+                            (url.clone(), file.name.clone(), base_dir.clone());
+                        let id_task = id_clone.clone();
+                        
                         return Task::perform(
                             async move {
                                 let (c, v) = (
@@ -304,7 +321,7 @@ impl ModsState {
                                         if let Ok(m) = tokio::fs::metadata(&dest).await {
                                             if m.len() == 0 {
                                                 let _ = tokio::fs::remove_file(&dest).await;
-                                                return Err("Empty".to_string());
+                                                return Err("Empty file".to_string());
                                             }
                                         }
                                         Ok(fnm)
@@ -312,12 +329,12 @@ impl ModsState {
                                     Err(e) => Err(e.to_string()),
                                 }
                             },
-                            move |res| ModsMessage::ModInstalled(res, id),
+                            move |res| ModsMessage::ModInstalled(res, id_task),
                         );
                     }
                 }
-                self.installing_ids.remove(&id);
-                self.error = Some("No URL".to_string());
+                self.installing_ids.remove(&id_clone);
+                self.error = Some("No download URL available".to_string());
                 Task::none()
             }
             ModsMessage::OpenModPage(url) => {
@@ -326,9 +343,42 @@ impl ModsState {
             }
             ModsMessage::ModInstalled(res, id) => {
                 self.installing_ids.remove(&id);
+                let installing_mod = self.installing_mods.remove(&id); 
                 match res {
                     Ok(fnm) => {
-                        self.installed_ids.insert(id);
+                        self.installed_ids.insert(id.clone());
+                        
+                        // Guardar metadatos si tenemos información del mod
+                        if let Some(gen_mod) = installing_mod {
+                            if let Some(file) = gen_mod.latest_files.first() {
+                                let meta = InstalledModMetadata {
+                                    file_name: fnm.clone(),
+                                    mod_name: gen_mod.name.clone(),
+                                    provider: gen_mod.provider,
+                                    mod_id: gen_mod.id.clone(),
+                                    file_id: file.file_id.clone(),
+                                    install_date: chrono::Utc::now(),
+                                    update_available: None,
+                                };
+
+                                let bd = base_dir.clone();
+                                let sc = settings.channel.clone();
+                                let sv = if settings.game_version == 0 {
+                                    "latest".to_string()
+                                } else {
+                                    settings.game_version.to_string()
+                                };
+                                
+                                tokio::spawn(async move {
+                                    let mut current = crate::game::mods::load_manifest(&bd, &sc, &sv).await;
+                                    // Remover entradas viejas del mismo mod si existen (para no duplicar ID remoto)
+                                    current.retain(|m| m.mod_id != meta.mod_id);
+                                    current.push(meta);
+                                    let _ = crate::game::mods::save_manifest(&bd, &sc, &sv, &current).await;
+                                });
+                            }
+                        }
+                        
                         let (bdc, sc, sv) = (
                             base_dir.clone(),
                             settings.channel.clone(),
@@ -351,7 +401,7 @@ impl ModsState {
                         }
                     }
                     Err(e) => {
-                        self.error = Some(format!("Failed: {}", e));
+                        self.error = Some(format!("Installation Failed: {}", e));
                         Task::none()
                     }
                 }
@@ -455,6 +505,79 @@ impl ModsState {
                     }
                 }
             }
+            ModsMessage::CheckForUpdates => {
+                self.checking_updates = true;
+                self.mods_with_updates.clear();
+                
+                let base_dir_clone = base_dir.clone();
+                let settings_clone = settings.clone();
+                
+                Task::perform(
+                    async move {
+                        let mut updates = Vec::new();
+                        let version_str = if settings_clone.game_version == 0 {
+                            "latest".to_string()
+                        } else {
+                            settings_clone.game_version.to_string()
+                        };
+                        let manifest = crate::game::mods::load_manifest(
+                            &base_dir_clone, 
+                            &settings_clone.channel, 
+                            &version_str
+                        ).await;
+                        
+                        // Use CurseForge Repository specifically
+                        let repo = CurseForgeRepository::new();
+                        
+                        // Iterar sobre los mods instalados con metadatos
+                        for installed in manifest {
+                            if installed.provider == ModProvider::CurseForge {
+                                // Consultar actualizaciones
+                                if let Ok(Some(latest)) = repo.get_latest_compatible(
+                                    &installed.mod_id, 
+                                    &installed.file_id
+                                ).await {
+                                    if latest.file_id != installed.file_id {
+                                        updates.push(installed.file_name.clone());
+                                    }
+                                }
+                            }
+                        }
+                        
+                        Ok(updates)
+                    },
+                    ModsMessage::UpdatesChecked,
+                )
+            }
+            ModsMessage::UpdatesChecked(res) => {
+                self.checking_updates = false;
+                match res {
+                    Ok(updates) => {
+                        self.mods_with_updates = updates.into_iter().collect();
+                    }
+                    Err(e) => {
+                        self.error = Some(format!("Error checking updates: {}", e));
+                    }
+                }
+                Task::none()
+            }
+            ModsMessage::UpdateMod(mod_info) => {
+                // Abre pagina web para actualizar manualmente por ahora, ya que auto-update in place es complejo
+                if let Some(metadata) = &mod_info.metadata {
+                    let url = match metadata.provider {
+                        ModProvider::CurseForge => {
+                            format!("https://www.curseforge.com/minecraft/mc-mods/{}", metadata.mod_id)
+                        }
+                        ModProvider::Modrinth => {
+                            format!("https://modrinth.com/mod/{}", metadata.mod_id)
+                        }
+                    };
+                    if !url.is_empty() {
+                        let _ = open::that(url);
+                    }
+                }
+                Task::none()
+            }
         }
     }
 
@@ -483,7 +606,7 @@ impl ModsState {
         )
     }
 
-    fn perform_search(&mut self, cl: reqwest::Client) -> Task<ModsMessage> {
+    fn perform_search(&mut self, _cl: reqwest::Client) -> Task<ModsMessage> {
         self.loading = true;
         let (q, i, l) = (
             self.search_query.clone(),
@@ -492,7 +615,9 @@ impl ModsState {
         );
         Task::perform(
             async move {
-                crate::game::curseforge::search_mods(&cl, &q, i, l)
+                // Use generic repository interface
+                let repo = CurseForgeRepository::new();
+                repo.search(&q, i, l)
                     .await
                     .map_err(|e| e.to_string())
             },
@@ -580,6 +705,18 @@ impl ModsState {
         ctx: theme::UIContext,
     ) -> Element<'a, ModsMessage, Theme, Renderer> {
         let palette = ctx.palette;
+        
+        let check_updates_btn = button(
+            if self.checking_updates {
+                theme::text_caption("Checking...", ctx)
+            } else {
+                theme::text_caption(localization.t("settings.check_updates"), ctx)
+            }
+        )
+        .on_press_maybe(if !self.checking_updates { Some(ModsMessage::CheckForUpdates) } else { None })
+        .style(move |t: &Theme, s| theme::secondary_button_style(&palette, t, s))
+        .padding(5);
+
         if self.installed_mods.is_empty() && self.patch_mods.is_empty() {
             return container(theme::text_body(localization.t("mods.no_mods"), ctx))
                 .width(Length::Fill)
@@ -650,14 +787,17 @@ impl ModsState {
                 .padding(5)
                 .into(),
                 ctx,
-            )
+            ),
+            theme::magic_button(check_updates_btn.into(), ctx)
         ]
+        .spacing(10)
         .align_y(Alignment::Center);
 
         let mut ml = column![Element::from(hj)].spacing(10);
         if !self.installed_mods.is_empty() {
             for m in &self.installed_mods {
-                ml = ml.push(mod_row(m, localization, ctx));
+                let has_update = self.mods_with_updates.contains(&m.file_name);
+                ml = ml.push(mod_row(m, has_update, localization, ctx));
             }
         } else if self.patch_mods.is_empty() {
             ml = ml.push(theme::text_caption(
@@ -775,7 +915,7 @@ impl ModsState {
 
     fn view_remote_card<'a>(
         &'a self,
-        cf: &'a CfMod,
+        cf: &'a GenericMod,
         localization: &'a crate::lang::Localization,
         ctx: theme::UIContext,
     ) -> Element<'a, ModsMessage, Theme, Renderer> {
@@ -829,7 +969,7 @@ impl ModsState {
                         theme::text_micro(format!(
                             "{}: {:.0}",
                             localization.t("mods.downloads"),
-                            cf.download_count
+                            cf.downloads
                         ), ctx)
                     ]
                     .spacing(4)
@@ -849,10 +989,32 @@ impl ModsState {
 
 pub fn mod_row<'a>(
     mi: &'a ModInfo,
+    has_update: bool,
     localization: &'a crate::lang::Localization,
     ctx: theme::UIContext,
 ) -> Element<'a, ModsMessage, Theme, Renderer> {
     let palette = ctx.palette;
+
+    let mut actions = Vec::new();
+
+    if has_update {
+        actions.push(theme::magic_button(
+            button(theme::svg(
+                svg(util::icons::icon(util::icons::REFRESH))
+                    .width(14)
+                    .height(14)
+                    .style(|_, _| iced::widget::svg::Style {
+                        color: Some(Color::WHITE),
+                    }),
+                ctx,
+            ))
+            .on_press(ModsMessage::UpdateMod(mi.clone()))
+            .style(move |t: &Theme, s| theme::success_button_style(&palette, t, s))
+            .padding(8)
+            .into(),
+            ctx
+        ).into());
+    }
 
     let tb = if mi.enabled {
         theme::magic_button(
@@ -871,6 +1033,7 @@ pub fn mod_row<'a>(
             ctx,
         )
     };
+    actions.push(tb.into());
 
     let db = theme::magic_button(
         button(theme::svg(
@@ -888,6 +1051,7 @@ pub fn mod_row<'a>(
         .into(),
         ctx,
     );
+    actions.push(db.into());
 
     theme::magic_container(
         theme::list_item_row(
@@ -902,7 +1066,7 @@ pub fn mod_row<'a>(
             ]
             .align_y(Alignment::Center)
             .into(),
-            vec![tb.into(), db.into()],
+            actions,
             ctx,
         )
         .into(),
