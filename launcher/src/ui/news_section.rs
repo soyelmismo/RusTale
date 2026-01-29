@@ -305,12 +305,17 @@ impl NewsSection {
                     ]
                     .spacing(4),
                     theme::text_body(&post.title, ctx),
-                    theme::text_caption(
+                    
+                    // --- CAMBIO AQUÍ ---
+                    // Antes usabas theme::text_caption, ahora usamos theme::text_paragraph
+                    // Esto habilita el wrapping multilinea CON el efecto letra por letra
+                    theme::text_paragraph(
                         post.body_excerpt
                             .as_deref()
                             .unwrap_or_else(|| loc.t("news.no_desc")),
                         ctx
                     )
+                    // -------------------
                 ]
                 .spacing(2)
                 .width(Length::Fill)

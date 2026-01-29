@@ -2193,3 +2193,213 @@ pub fn window_control_button<'a, Message: Clone + 'a>(
         btn.into()
     }
 }
+
+// --------------------------------------------------------
+// FUNCIÓN Text Paragraph con Wrapping + LSD
+// --------------------------------------------------------
+
+pub fn text_paragraph<'a, M: 'a + Clone>(
+    content: impl Into<String>,
+    ctx: UIContext,
+) -> Element<'a, M, Theme, Renderer> {
+    let text_owned = content.into();
+    let size_px: iced::Pixels = 12.0.into();
+    let color = ctx.palette.text_secondary;
+
+    // 1. Dividir el texto en palabras
+    let words_str: Vec<&str> = text_owned.split_whitespace().collect();
+    let mut words_widgets = Vec::new();
+
+    // 2. Espaciado manual (estimado en 4px)
+    let space_width = 4.0;
+
+    for (word_idx, word) in words_str.iter().enumerate() {
+        // Procesar palabra: Letra por letra
+        let mut letters_in_word = iced::widget::row!().spacing(0);
+
+        for (char_idx, ch) in word.chars().enumerate() {
+            let char_text = iced_text(ch.to_string()).size(size_px).color(color);
+            let char_element: Element<'a, M, Theme, Renderer> = char_text.into();
+
+            // Semilla única continua
+            let seed = 1000 + (word_idx * 50) + char_idx; 
+            
+            // Cálculo LSD
+            let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, seed);
+            let final_vx = if ctx.lsd_enabled { vx * ctx.lsd_intensity } else { 0.0 };
+            let final_vy = if ctx.lsd_enabled { vy * ctx.lsd_intensity } else { 0.0 };
+
+            // Envoltura con SmoothTranslate
+            let magic_char = Element::new(SmoothTranslate::new(
+                char_element,
+                (final_vx, final_vy),
+                ctx.mouse_pos,
+                false,
+                ctx.lsd_intensity,
+                ctx.lsd_enabled,
+            ).resizing(ctx.is_resizing));
+
+            letters_in_word = letters_in_word.push(magic_char);
+        }
+
+        words_widgets.push(letters_in_word.into());
+    }
+
+    Element::new(LsdWrapper {
+        elements: words_widgets,
+        spacing: space_width,
+        line_height: 16.0,
+    })
+}
+
+// ==========================================================
+// CUSTOM WRAP LAYOUT WIDGET (ICED 0.14 COMPATIBLE)
+// ==========================================================
+
+struct LsdWrapper<'a, Message, Theme, Renderer> {
+    elements: Vec<Element<'a, Message, Theme, Renderer>>,
+    spacing: f32,
+    line_height: f32,
+}
+
+impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer> for LsdWrapper<'a, Message, Theme, Renderer>
+where
+    Renderer: iced::advanced::Renderer,
+{
+    fn size(&self) -> Size<Length> {
+        Size {
+            width: Length::Fill,
+            height: Length::Shrink,
+        }
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut widget::Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        // Inicializar árboles de hijos
+        if tree.children.len() != self.elements.len() {
+            tree.children = self.elements.iter().map(widget::Tree::new).collect();
+        }
+
+        let max_width = limits.max().width;
+        let mut row_x = 0.0;
+        let mut row_y = 0.0;
+        let mut final_height = self.line_height;
+
+        let mut nodes = Vec::new();
+
+        // layout en Iced 0.14 requiere mutable access
+        for (i, element) in self.elements.iter_mut().enumerate() {
+            let child_layout = element.as_widget_mut().layout(
+                &mut tree.children[i],
+                renderer,
+                &layout::Limits::new(Size::ZERO, limits.max()),
+            );
+            
+            let child_size = child_layout.size();
+
+            // Wrapping
+            if row_x + child_size.width > max_width && row_x > 0.0 {
+                row_x = 0.0;
+                row_y += self.line_height;
+                final_height = row_y + self.line_height;
+            }
+
+            // Movemos el nodo (en Iced 0.14, move_to consume self y retorna self)
+            let node = child_layout.move_to(Point::new(row_x, row_y));
+            nodes.push(node);
+
+            row_x += child_size.width + self.spacing;
+        }
+
+        layout::Node::with_children(
+            Size::new(max_width, final_height),
+            nodes,
+        )
+    }
+
+    fn draw(
+        &self,
+        tree: &widget::Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        for ((child, state), layout) in self.elements.iter().zip(&tree.children).zip(layout.children()) {
+            child.as_widget().draw(state, renderer, theme, style, layout, cursor, viewport);
+        }
+    }
+
+    fn children(&self) -> Vec<widget::Tree> {
+        self.elements.iter().map(widget::Tree::new).collect()
+    }
+
+    fn diff(&self, tree: &mut widget::Tree) {
+        tree.diff_children(&self.elements);
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut widget::Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn widget::Operation,
+    ) {
+        for ((child, state), layout) in self.elements.iter_mut().zip(&mut tree.children).zip(layout.children()) {
+            child.as_widget_mut().operate(state, layout, renderer, operation);
+        }
+    }
+
+    // UPDATE en lugar de ON_EVENT
+    fn update(
+        &mut self,
+        tree: &mut widget::Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        for ((child, state), layout) in self.elements.iter_mut().zip(&mut tree.children).zip(layout.children()) {
+            child.as_widget_mut().update(
+                state,
+                event,
+                layout,
+                cursor,
+                renderer,
+                clipboard,
+                shell,
+                viewport,
+            );
+        }
+    }
+    
+    // OVERLAY: Añadido argumento 'viewport' que faltaba
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut widget::Tree,
+        layout: Layout<'b>,
+        renderer: &Renderer,
+        viewport: &Rectangle, // <= Nuevo argumento requerido por Iced 0.14
+        translation: Vector,
+    ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
+        let mut overlays = Vec::new();
+        for ((child, state), layout) in self.elements.iter_mut().zip(&mut tree.children).zip(layout.children()) {
+             // Propagamos el viewport a los hijos
+             if let Some(overlay) = child.as_widget_mut().overlay(state, layout, renderer, viewport, translation) {
+                 overlays.push(overlay);
+             }
+        }
+        
+        // Iced solo permite devolver un Element de overlay fácilmente si no usamos Groups
+        overlays.pop() 
+    }
+}
