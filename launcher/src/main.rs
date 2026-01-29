@@ -2136,6 +2136,14 @@ impl RusTale {
                         self.window_size = size; // Sincronizar con tu variable existente
                         self.settings.width = size.width as u32;
                         self.settings.height = size.height as u32;
+                        
+                        // Verificar estado maximizado después de resize
+                        if let Some(window_id) = window::oldest() {
+                            if let Ok(is_maximized) = window::is_maximized(window_id) {
+                                self.is_maximized = is_maximized;
+                            }
+                        }
+                        
                         // Importante: propagar el mensaje original si lo usabas
                         return Task::done(Message::WindowResized(size));
                     }
@@ -2577,7 +2585,7 @@ impl RusTale {
             .align_y(Alignment::Center)
             .height(32), // Altura de la barra de título
         )
-        .style(move |t| theme::title_bar_style(&palette, t))
+        .style(move |t| theme::title_bar_style(&palette, t, &self.settings.theme.base_mode))
         .width(Length::Fill);
 
         // Estructura principal visual (Fondo + Barra + Contenido)

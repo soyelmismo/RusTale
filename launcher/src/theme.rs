@@ -1262,11 +1262,7 @@ pub fn menu_style(palette: &Palette, _t: &Theme) -> menu::Style {
         },
         selected_text_color: palette.text_on_accent,
         selected_background: Background::Color(palette.accent),
-        shadow: Shadow {
-            color: Color::BLACK,
-            offset: Vector::new(0.0, 4.0),
-            blur_radius: 10.0,
-        },
+        shadow: Shadow::default(),
     }
 }
 
@@ -2142,10 +2138,18 @@ pub fn window_frame_style(_palette: &Palette, _t: &Theme, is_maximized: bool) ->
     }
 }
 
-pub fn title_bar_style(palette: &Palette, _t: &Theme) -> container::Style {
+pub fn title_bar_style(palette: &Palette, _t: &Theme, base_mode: &crate::config::BaseThemeMode) -> container::Style {
+    use crate::config::BaseThemeMode;
+    
+    // Color de fondo adaptativo según el tema
+    let background_color = match base_mode {
+        BaseThemeMode::Light => Color::from_rgba(0.95, 0.95, 0.97, 0.9),  // Fondo claro semitransparente
+        BaseThemeMode::Grey => Color::from_rgba(0.15, 0.15, 0.18, 0.9),   // Fondo gris semitransparente
+        BaseThemeMode::Black => Color::from_rgba(0.05, 0.05, 0.08, 0.9),  // Fondo oscuro semitransparente
+    };
+    
     container::Style {
-        // Fondo semitransparente oscuro para que el texto se lea bien sobre imágenes claras
-        background: Some(Background::Color(Color::from_rgba(0.05, 0.05, 0.08, 0.8))), 
+        background: Some(Background::Color(background_color)), 
         text_color: Some(palette.text_primary),
         ..Default::default()
     }
@@ -2199,7 +2203,11 @@ pub fn window_control_button<'a, Message: Clone + 'a>(
                 .height(12)
                 .style(move |_t, _s| iced::widget::svg::Style {
                     color: Some(if is_close { 
-                        Color::WHITE // Icono blanco para el rojo
+                        if palette.background.r > 0.5 {
+                            Color::BLACK // Icono negro para tema claro
+                        } else {
+                            Color::WHITE // Icono blanco para tema oscuro
+                        }
                     } else {
                         palette.text_primary
                     }), 
