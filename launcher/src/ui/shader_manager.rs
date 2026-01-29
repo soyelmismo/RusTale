@@ -27,7 +27,7 @@ struct Uniforms {
 fn rot(a: f32) -> mat2x2<f32> {
     let c = cos(a);
     let s = sin(a);
-    return mat2x2<f32>(c, -s, s, c);
+    return mat2x2<f32>(vec2<f32>(c, s), vec2<f32>(-s, c));
 }
 
 // Vertex Shader Estandar (Cuadrado pantalla completa)
@@ -53,40 +53,56 @@ fn vs_main(@builtin(vertex_index) v_index: u32) -> VertexOutput {
 "#;
 
 pub fn build_uber_shader() -> String {
-    let mut shader_functions = String::new();
+    let mut shader_functions = String::new(); // Código que va dentro de shader_N
+    let mut global_helpers = String::new();   // Funciones auxiliares globales
     let mut switch_cases = String::new();
     
     println!("[Shader] Building embedded uber shader...");
 
-    // Recolectar nombres de archivo embebidos y ORDENARLOS
-    // El ordenamiento es crítico para que 'shader_id' sea determinista y no residual
+    // Importante: Ordenar archivos para garantizar ID deterministas
     let mut filenames: Vec<String> = ShaderAssets::iter()
-        .map(|f: std::borrow::Cow<'_, str>| f.into_owned())
+        .map(|f| f.into_owned())
         .filter(|name| name.ends_with(".wgsl"))
         .collect();
     
-    filenames.sort(); // A-Z
+    filenames.sort(); 
 
     println!("[Shader] Found {} embedded shaders", filenames.len());
 
     let mut id_counter = 0;
 
     for filename in filenames {
-        // Obtener contenido directo del binario
         if let Some(file) = ShaderAssets::get(&filename) {
             if let Ok(content) = std::str::from_utf8(file.data.as_ref()) {
                 println!("[Shader] Registering ID {}: {}", id_counter, filename);
                 
-                // Limpieza de funciones peligrosas (manteniendo lógica del parche anterior)
                 let mut safe_content = content.to_string();
                 safe_content = safe_content.replace("atan2(", "atan(");
-                // NOTA: No reemplazamos abs() o exp() si usamos WGSL moderno
                 
+                // --- CORE FIX: Separar Helpers del Main Body ---
+                // WGSL prohíbe definir funciones dentro de funciones.
+                // Buscamos el separador usado en forest.wgsl o asumimos todo es body.
+                
+                let (helpers, body) = if let Some(idx) = safe_content.find("// --- MAIN SHADER ---") {
+                    let (h, b) = safe_content.split_at(idx);
+                    (h, b)
+                } else {
+                    ("", safe_content.as_str())
+                };
+
+                // 1. Agregar Helpers al scope global (si hay)
+                if !helpers.trim().is_empty() {
+                    global_helpers.push_str(&format!("// Helpers form {}\n", filename));
+                    global_helpers.push_str(helpers);
+                    global_helpers.push_str("\n");
+                }
+
+                // 2. Encapsular el Body en la función única shader_X
                 let func_name = format!("shader_{}", id_counter);
                 
                 shader_functions.push_str(&format!(
-                    "// File: {}\nfn {}(in: VertexOutput) -> vec4<f32> {{\n{}\n}}\n", 
-                    filename, func_name, safe_content
+                    "// Body of: {}\nfn {}(in: VertexOutput) -> vec4<f32> {{\n{}\n}}\n", 
+                    filename, func_name, body
                 ));
                 
                 switch_cases.push_str(&format!("        case {}u: {{ return {}(in); }}\n", id_counter, func_name));
@@ -95,19 +111,22 @@ pub fn build_uber_shader() -> String {
         }
     }
 
-    let main_func = format!(r#"
-@fragment
+    // Estructura final:
+    // 1. HEADER (Structs, Uniforms)
+    // 2. GLOBAL HELPERS (Funciones extraídas de forest.wgsl)
+    // 3. SHADER FUNCTIONS (Los cuerpos principales envueltos en fn shader_N)
+    // 4. FS_MAIN (Switch gigante)
+    let result = format!("{}\n{}\n{}\n@fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {{
     var col = vec4<f32>(0.0);
     switch (u.shader_id) {{
 {}
         default: {{ col = shader_0(in); }}
     }}
+    // Aplicar mezcla de alpha global aquí (pre-multiplicado)
     return vec4<f32>(col.rgb, col.a * u.alpha);
 }}
-"#, switch_cases);
-
-    let result = format!("{}\n{}\n{}", HEADER, shader_functions, main_func);
+", HEADER, global_helpers, shader_functions, switch_cases);
 
     result
 }

@@ -37,4 +37,4 @@ var col = accent * accum * u.intensity;
 // Viñeta
 col *= 1.0 - dot(uv, uv) * 0.4;
 
-return vec4<f32>(col, 1.0);
+return vec4<f32>(col, u.alpha);

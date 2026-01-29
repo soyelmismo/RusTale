@@ -2258,45 +2258,44 @@ impl RusTale {
         // 3.0 seg -> 1.0 (quietud total)
         let stillness = (elapsed_idle / 3.0).clamp(0.0, 1.0);
         
-        // Calculamos la intensidad base (ramp-up original)
-        let base_intensity = if let Some(t) = self.lsd_enabled_time {
+        // 1. CALCULAR PROGRESO DE TRANSICIÓN (Time Ramp)
+        // ramp_alpha va de 0.0 (Invisible) a 1.0 (Totalmente Visible/Opaco)
+        // Se basa únicamente en el tiempo transcurrido desde que se activó el LSD.
+        let ramp_alpha = if let Some(t) = self.lsd_enabled_time {
             let elapsed = t.elapsed().as_secs_f32();
-            // Si el LSD estaba activado al inicio, dar intensidad maxima inmediatamente
-            if self.settings.theme.lsd_mode && elapsed < 0.1 {
-                1.0
-            } else {
-                (elapsed / theme::LSD_RAMP_UP_SECONDS).min(1.0)
-            }
+            // Transición suave basada en la constante configurada (3 segundos)
+            (elapsed / theme::LSD_RAMP_UP_SECONDS).clamp(0.0, 1.0)
         } else {
             0.0
         };
 
-        // CAMBIO: Modificamos lsd_intensity basado en la quietud y clics
-        // Si lsd_preview es true (hover en botón), intensidad al máximo.
-        // Si no, la intensidad base se reduce un 70% si el mouse está quieto (breath effect).
-        // Además, añadimos el pulso de clic con decaimiento exponencial.
+        // 2. CALCULAR INTENSIDAD DEL EFECTO VISUAL (Matemáticas del Shader)
+        // Esto controla qué tan fuerte brillan los fractales o cuánto se deforma el texto.
+        // Si es Preview: Intensidad máxima.
+        // Si no: Respiración (1.0 -> 0.3 al estar quieto)
         let click_decay = (self.shader_click_time.elapsed().as_secs_f32() * 8.0).exp();
         let click_pulse = self.shader_click_intensity / click_decay;
         
-        let lsd_intensity = if self.lsd_preview {
-            1.0 + click_pulse // Máximo + pulso de clic
+        let effect_intensity = if self.lsd_preview {
+            1.0 + click_pulse
         } else {
-            // Formula mágica: 
-            // 1. Mantiene 30% de intensidad mínima (0.3) cuando está quieto.
-            // 2. Sube al 100% (1.0) cuando mueves el mouse.
-            // 3. Añadimos el pulso de clic para efectos táctiles
-            (base_intensity * (1.0 - (stillness * 0.7))) + click_pulse
-        }.min(10.0); // Limitar para evitar explosiones visuales
+            // Formula de "respiración":
+            // Cuando está quieto (stillness 1.0), baja al 30% (0.3).
+            // Cuando mueve el mouse, sube al 100% (1.0).
+            // NOTA: Multiplicamos por ramp_alpha aquí para que la *distorsión*
+            // empiece suave, pero esto NO afecta a la transparencia de la capa.
+            (ramp_alpha * (1.0 - (stillness * 0.7))) + click_pulse
+        }.min(10.0); // Tope de seguridad
 
         let ctx = theme::UIContext {
             palette: *palette,
             lsd_offset: self.lsd_offset,
             lsd_enabled: self.settings.theme.lsd_mode || self.lsd_preview,
-            lsd_intensity,
+            lsd_intensity: effect_intensity, // Para los widgets usamos la calculada con respiración
             time: self.start_time.elapsed().as_secs_f32(),
             mouse_pos: self.cursor_position,
             mouse_stillness: stillness,
-            is_resizing: self.resizing_direction.is_some(), // <--- AÑADIR ESTA LÍNEA
+            is_resizing: self.resizing_direction.is_some(),
         };
 
         let tint_color = theme::background_tint_color(palette);
@@ -2413,59 +2412,15 @@ impl RusTale {
             }
         };
 
-        let bg: Element<'_, Message> = if self.settings.theme.lsd_mode {
-            // NUEVO SISTEMA DE TRANSICIÓN DE SHADERS
-            if self.shader_transition > 0.0 {
-                // ESTADO DE TRANSICIÓN (Stack de 2 shaders)
-                iced::widget::stack![
-                    // 1. Fondo: Shader Antiguo (Se queda quieto u oscurece)
-                    iced::widget::shader(lsd_shader::LsdShader::new(
-                        self.start_time,
-                        self.cursor_position,
-                        palette.accent,
-                        self.active_shader_idx,
-                        1.0, // Totalmente opaco el fondo
-                        lsd_intensity, // Usar la intensidad dinámica
-                    ))
-                    .width(Length::Fill)
-                    .height(Length::Fill),
-
-                    // 2. Frente: Shader Nuevo (Fade In)
-                    iced::widget::shader(lsd_shader::LsdShader::new(
-                        self.start_time,
-                        self.cursor_position,
-                        palette.accent,
-                        self.next_shader_idx,
-                        self.shader_transition, // Opacidad subiendo de 0 a 1
-                        lsd_intensity, // Usar la intensidad dinámica
-                    ))
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                ]
-                .into()
-            } else {
-                // ESTADO ESTÁTICO (1 solo shader para ahorrar GPU)
-                iced::widget::shader(lsd_shader::LsdShader::new(
-                    self.start_time,
-                    self.cursor_position,
-                    palette.accent,
-                    self.active_shader_idx,
-                    1.0,
-                    lsd_intensity, // Usar la intensidad dinámica
-                ))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into()
-            }
-        } else if let Some(handle) = &self.bg_handle {
-            // Fondo original
+        // --- LOGICA DE FONDO (STACK COMPUESTO) ---
+        // 1. Capa Base: Imagen Estática o Color
+        let base_layer: Element<'_, Message> = if let Some(handle) = &self.bg_handle {
             image(handle.clone())
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .content_fit(ContentFit::Cover)
                 .into()
         } else {
-            // Fondo negro fallback
             container(Space::new())
                 .width(Length::Fill)
                 .height(Length::Fill)
@@ -2474,6 +2429,31 @@ impl RusTale {
                     ..Default::default()
                 })
                 .into()
+        };
+
+        // 2. Capa Shader: Se superpone con Alpha variable
+        let bg: Element<'_, Message> = if self.settings.theme.lsd_mode {
+            // [FIX] Usamos ramp_alpha directamente. 
+            // Esto asegura que la capa del shader vaya de 0% opacidad a 100% opacidad 
+            // de forma lineal, independiente de si el shader "respira" o se distorsiona.
+            let shader_opacity = ramp_alpha; 
+
+            // Pasamos shader_opacity al argumento 'alpha' y effect_intensity al 'intensity'
+            let shader_layer = iced::widget::shader(lsd_shader::LsdShader::new(
+                self.start_time,
+                self.cursor_position,
+                palette.accent,
+                self.active_shader_idx,
+                shader_opacity,   // <--- CORREGIDO: Controla opacidad pura (fade in)
+                effect_intensity, // <--- CORREGIDO: Controla violencia matemática del fractal
+            ))
+            .width(Length::Fill)
+            .height(Length::Fill);
+
+            // Apilamos: Imagen estática abajo, Shader arriba (transicionando transparencia)
+            iced::widget::stack![base_layer, shader_layer].into()
+        } else {
+            base_layer
         };
 
         // --- CONSTRUCCIÓN DE LA BARRA DE TÍTULO ---

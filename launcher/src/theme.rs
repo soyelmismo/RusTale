@@ -19,7 +19,7 @@ use std::cell::Cell;
 pub const STANDARD_PADDING: f32 = 20.0;
 pub const STANDARD_SPACING: u32 = 15;
 
-pub const LSD_RAMP_UP_SECONDS: f32 = 300.0;
+pub const LSD_RAMP_UP_SECONDS: f32 = 300.0; // Temporarily reduced for testing (was 300.0)
 
 #[derive(Debug, Clone, Copy)]
 pub struct UIContext {
@@ -188,9 +188,12 @@ impl SmoothTranslateState {
         let center_dist = mouse_pos.distance(bounds.center());
         let jitter_multiplier = (1.0 + (center_dist / 200.0)).min(2.5);
 
+        // CAMBIO: Multiplicamos el resultado del seno/coseno por `intensity` 
+        // Esto asegura que si intensity es 0.0 (inicio de la transición),
+        // el jitter sea matemáticamente 0.0 (quietud total).
         let jitter = Vector::new(
-            (time * 3.5 + offset.x * 0.1).sin() * 0.15 * jitter_multiplier,
-            (time * 4.2 + offset.y * 0.13).cos() * 0.15 * jitter_multiplier,
+            (time * 3.5 + offset.x * 0.1).sin() * 0.15 * jitter_multiplier * intensity,
+            (time * 4.2 + offset.y * 0.13).cos() * 0.15 * jitter_multiplier * intensity,
         );
 
         Vector::new(
@@ -355,7 +358,7 @@ pub fn magic_column<'a, M: 'a + Clone>(
         for (i, item) in items.into_iter().enumerate() {
             // Generamos una disparidad unica para cada fila de la columna
             // Esto hace que la columna parezca gelatina en lugar de un bloque rigido
-            let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, i + 10);
+            let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, i + 10, ctx.lsd_intensity);
 
             let wrapped_item = Element::new(SmoothTranslate::new(
                 item,
@@ -388,7 +391,7 @@ pub fn magic_row<'a, M: 'a + Clone>(
         for (i, item) in items.into_iter().enumerate() {
             // Generamos una disparidad unica para cada fila de la columna
             // Esto hace que la columna parezca gelatina en lugar de un bloque rigido
-            let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, i + 12);
+            let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, i + 12, ctx.lsd_intensity);
 
             let wrapped_item = Element::new(SmoothTranslate::new(
                 item,
@@ -1257,10 +1260,10 @@ where
     M: 'a + Clone,
 {
     if ctx.lsd_enabled {
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 9);
+        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 9, ctx.lsd_intensity);
         Element::new(SmoothTranslate::new(
             element,
-            (vx * ctx.lsd_intensity, vy * ctx.lsd_intensity),
+            (vx, vy), // Pasar vectores directos
             ctx.mouse_pos,
             false,
             ctx.lsd_intensity,
@@ -1674,25 +1677,33 @@ impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Messa
     }
 }
 
-fn get_seeded_disparity(offset: (f32, f32), seed: usize) -> (f32, f32) {
+// Modificamos la firma para aceptar 'intensity'
+fn get_seeded_disparity(offset: (f32, f32), seed: usize, intensity: f32) -> (f32, f32) {
+    // CLAVE: Si la intensidad es muy baja (inicio del ramp-up), 
+    // forzamos cero absoluto para que el texto esté pixel-perfecto en su sitio original.
+    if intensity < 0.05 {
+        return (0.0, 0.0);
+    }
+
     let s = seed as f32;
 
-    // 1. Ruido pseudo-aleatorio estático para dispersión (fijo por seed)
-    // Reducción drástica (0.4) para que las letras no se desordenen
+    // 1. Ruido pseudo-aleatorio estático
     let scatter_x = (s * 12.9898).sin().fract() * 0.4 - 0.2;
     let scatter_y = (s * 78.233).sin().fract() * 0.4 - 0.2;
 
-    // 2. Modulacion caotica del offset dinamico
-    // Reducimos la influencia caótica (cos/sin del offset) para un movimiento más de "bloque"
-    let phase = (s * 0.15).fract() * 6.28; // Fase con menos variación entre letras
+    // 2. Modulacion caotica
+    let phase = (s * 0.15).fract() * 6.28; 
     let chaotic_offset_x = (offset.0 * (phase + offset.1 * 0.02).cos()
-        - offset.1 * (phase + offset.0 * 0.02).sin())
-        * 0.85;
+        - offset.1 * (phase + offset.0 * 0.02).sin()) * 0.85;
     let chaotic_offset_y = (offset.0 * (phase + offset.1 * 0.02).sin()
-        + offset.1 * (phase + offset.0 * 0.02).cos())
-        * 0.85;
+        + offset.1 * (phase + offset.0 * 0.02).cos()) * 0.85;
 
-    (scatter_x + chaotic_offset_x, scatter_y + chaotic_offset_y)
+    // CLAVE 2: Multiplicamos el resultado final por la intensidad.
+    // Esto hace que el "desorden" crezca desde el centro hacia afuera.
+    (
+        (scatter_x + chaotic_offset_x) * intensity, 
+        (scatter_y + chaotic_offset_y) * intensity
+    )
 }
 
 pub fn text<'a, M: 'a>(
@@ -1701,13 +1712,11 @@ pub fn text<'a, M: 'a>(
 ) -> Element<'a, M, Theme, Renderer> {
     let element: Element<'a, M, Theme, Renderer> = content.into();
     if ctx.lsd_enabled {
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 1);
-        let vx = vx * ctx.lsd_intensity;
-        let vy = vy * ctx.lsd_intensity;
-
+        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 1, ctx.lsd_intensity);
+        
         Element::new(SmoothTranslate::new(
             element,
-            (vx, vy),
+            (vx, vy), // Pasar vectores directos
             ctx.mouse_pos,
             false,
             ctx.lsd_intensity,
@@ -1747,15 +1756,15 @@ pub fn text_lsd_letters<'a, M: 'a>(
 
         let char_element: Element<'a, M, Theme, Renderer> = char_text.into();
 
-        // Calcular offset unico para cada letra usando el indice como seed
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 100 + i);
-        let vx = vx * ctx.lsd_intensity;
-        let vy = vy * ctx.lsd_intensity;
-
-        // Envolver cada letra en su propio SmoothTranslate
+        // Calcular offset único (La función ya devuelve valores ponderados por intensidad)
+        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 100 + i, lsd_intensity);
+        
+        // NO vuelvas a multiplicar por lsd_intensity aquí
+        
+        // Envolver cada letra
         let magic_char = Element::new(SmoothTranslate::new(
             char_element,
-            (vx, vy),
+            (vx, vy), // Pasar vectores directos
             mouse_pos,
             false,
             lsd_intensity,
@@ -1771,13 +1780,11 @@ pub fn text_lsd_letters<'a, M: 'a>(
 pub fn svg<'a, M: 'a>(content: impl Into<Element<'a, M>>, ctx: UIContext) -> Element<'a, M> {
     let element = content.into();
     if ctx.lsd_enabled {
-        let (vx, vy) = get_seeded_disparity((ctx.lsd_offset.0 + 0.5, ctx.lsd_offset.1 + 0.5), 15);
-        let vx = vx * ctx.lsd_intensity;
-        let vy = vy * ctx.lsd_intensity;
+        let (vx, vy) = get_seeded_disparity((ctx.lsd_offset.0 + 0.5, ctx.lsd_offset.1 + 0.5), 15, ctx.lsd_intensity);
 
         Element::new(SmoothTranslate::new(
             element,
-            (vx, vy),
+            (vx, vy), // Pasar vectores directos
             ctx.mouse_pos,
             false,
             ctx.lsd_intensity,
@@ -1797,9 +1804,7 @@ where
 {
     if ctx.lsd_enabled {
         // Usamos una semilla unica (2) e intensidad plena
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 2);
-        let vx = vx * ctx.lsd_intensity;
-        let vy = vy * ctx.lsd_intensity;
+        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 2, ctx.lsd_intensity);
 
         Element::new(SmoothTranslate::new(
             element,
@@ -1821,9 +1826,7 @@ where
     M: 'a + Clone,
 {
     if ctx.lsd_enabled {
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 3);
-        let vx = vx * ctx.lsd_intensity;
-        let vy = vy * ctx.lsd_intensity;
+        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 3, ctx.lsd_intensity);
 
         Element::new(SmoothTranslate::new(
             element,
@@ -1883,7 +1886,7 @@ where
     if ctx.lsd_enabled {
         // Usamos una semilla diferente (11) para que el área de texto se mueva
         // de forma distinta a los inputs pequeños
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 11);
+        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 11, ctx.lsd_intensity);
 
         Element::new(SmoothTranslate::new(
             container(element)
@@ -1891,7 +1894,7 @@ where
                 .height(Length::Fixed(150.0)) // Altura de área de texto real
                 .padding(2)
                 .into(),
-            (vx * ctx.lsd_intensity, vy * ctx.lsd_intensity),
+            (vx, vy),
             ctx.mouse_pos,
             false,
             ctx.lsd_intensity,
@@ -1911,10 +1914,10 @@ where
     M: 'a + Clone,
 {
     if ctx.lsd_enabled {
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 4);
+        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 4, ctx.lsd_intensity);
         Element::new(SmoothTranslate::new(
             element,
-            (vx * ctx.lsd_intensity, vy * ctx.lsd_intensity),
+            (vx, vy), // Pasar vectores directos
             ctx.mouse_pos,
             false,
             ctx.lsd_intensity,
@@ -1934,10 +1937,10 @@ where
 {
     if ctx.lsd_enabled {
         // Semilla 5 para checkboxes
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 5);
+        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 5, ctx.lsd_intensity);
         Element::new(SmoothTranslate::new(
             element,
-            (vx * ctx.lsd_intensity, vy * ctx.lsd_intensity),
+            (vx, vy), // Pasar vectores directos
             ctx.mouse_pos,
             false,
             ctx.lsd_intensity,
@@ -1957,10 +1960,10 @@ where
 {
     if ctx.lsd_enabled {
         // Semilla 1.5 para imagenes (similar a svg)
-        let (vx, vy) = get_seeded_disparity((ctx.lsd_offset.0 + 0.3, ctx.lsd_offset.1 + 0.3), 1);
+        let (vx, vy) = get_seeded_disparity((ctx.lsd_offset.0 + 0.3, ctx.lsd_offset.1 + 0.3), 1, ctx.lsd_intensity);
         Element::new(SmoothTranslate::new(
             element,
-            (vx * ctx.lsd_intensity, vy * ctx.lsd_intensity),
+            (vx, vy), // Pasar vectores directos
             ctx.mouse_pos,
             false,
             ctx.lsd_intensity,
@@ -1980,9 +1983,7 @@ where
 {
     if ctx.lsd_enabled {
         // Semilla 6 para contenedores (mas sutil)
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 6);
-        let vx = vx * ctx.lsd_intensity;
-        let vy = vy * ctx.lsd_intensity;
+        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 6, ctx.lsd_intensity);
 
         Element::new(SmoothTranslate::new(
             element,
@@ -2007,10 +2008,10 @@ where
     // SIEMPRE envolvemos en SmoothTranslate para mantener el árbol de widgets estable.
     // Si lsd_enabled es false, SmoothTranslate simplemente no aplicará efectos,
     // pero el widget "padre" seguirá siendo el mismo para el motor de Iced.
-    let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 5);
+    let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 5, ctx.lsd_intensity);
     Element::new(SmoothTranslate::new(
         element,
-        (vx * ctx.lsd_intensity, vy * ctx.lsd_intensity),
+        (vx, vy), // Pasar vectores directos
         ctx.mouse_pos,
         !ctx.lsd_enabled, // proximity_only si está desactivado
         ctx.lsd_intensity,
@@ -2027,7 +2028,7 @@ where
 {
     if ctx.lsd_enabled {
         // Semilla 7 para sliders (vibrante)
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 7);
+        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 7, ctx.lsd_intensity);
         Element::new(SmoothTranslate::new(
             element,
             (vx, vy),
@@ -2050,7 +2051,7 @@ where
 {
     if ctx.lsd_enabled {
         // Semilla 8 para tooltips
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 8);
+        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 8, ctx.lsd_intensity);
         Element::new(SmoothTranslate::new(
             element,
             (vx, vy),
@@ -2225,14 +2226,14 @@ pub fn text_paragraph<'a, M: 'a + Clone>(
             let seed = 1000 + (word_idx * 50) + char_idx; 
             
             // Cálculo LSD
-            let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, seed);
-            let final_vx = if ctx.lsd_enabled { vx * ctx.lsd_intensity } else { 0.0 };
-            let final_vy = if ctx.lsd_enabled { vy * ctx.lsd_intensity } else { 0.0 };
+            let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, seed, ctx.lsd_intensity);
+            
+            // NO vuelvas a multiplicar por lsd_intensity aquí
 
             // Envoltura con SmoothTranslate
             let magic_char = Element::new(SmoothTranslate::new(
                 char_element,
-                (final_vx, final_vy),
+                (vx, vy), // Pasar vectores directos
                 ctx.mouse_pos,
                 false,
                 ctx.lsd_intensity,

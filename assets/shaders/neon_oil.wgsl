@@ -60,5 +60,5 @@ final_col = mix(final_col, accent, 0.15);
 let vign = 1.0 - smoothstep(0.5, 2.0, length(uv));
 final_col *= vign;
 
-// Salida final aplicando intensidad global
-return vec4<f32>(final_col * u.intensity, 1.0);
+// Salida final aplicando intensidad global y opacidad
+return vec4<f32>(final_col * u.intensity, u.alpha);
