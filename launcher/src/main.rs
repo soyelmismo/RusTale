@@ -317,6 +317,7 @@ pub enum Message {
     AppExit,
     CloseRequested,
     WindowResized(Size),
+    WindowResizedWithMaximized(Size, bool),
     OpenMods,
     ModsLoadedComplex(Result<(Vec<ModInfo>, Vec<PatchManifest>), String>), // Result of the load
     LauncherUpdate(updater::UpdaterMessage),
@@ -2102,6 +2103,21 @@ impl RusTale {
 
                 Task::none()
             }
+            Message::WindowResizedWithMaximized(size, is_maximized) => {
+                self.window_size = size;
+                self.is_maximized = is_maximized;
+
+                // Actualizamos los settings en memoria
+                self.settings.width = size.width as u32;
+                self.settings.height = size.height as u32;
+
+                // Sincronizamos tambien el estado temporal para que, si el modal esta abierto,
+                // no se sobrescriba con la resolucion vieja al pulsar "Save".
+                self.settings_state.temp_settings.width = size.width as u32;
+                self.settings_state.temp_settings.height = size.height as u32;
+
+                Task::none()
+            }
             Message::AppExit => self.save_and_exit(),
             Message::WindowDrag => {
                 let now = std::time::Instant::now();
@@ -2138,14 +2154,14 @@ impl RusTale {
                         self.settings.height = size.height as u32;
                         
                         // Verificar estado maximizado después de resize
-                        if let Some(window_id) = window::oldest() {
-                            if let Ok(is_maximized) = window::is_maximized(window_id) {
-                                self.is_maximized = is_maximized;
-                            }
-                        }
-                        
-                        // Importante: propagar el mensaje original si lo usabas
-                        return Task::done(Message::WindowResized(size));
+                        // En Iced 0.14, las funciones de ventana devuelven Task
+                        let size_clone = size;
+                        return window::oldest()
+                            .and_then(|window_id| window::is_maximized(window_id))
+                            .map(move |is_maximized| {
+                                // No podemos modificar self directamente aquí, necesitamos un mensaje
+                                Message::WindowResizedWithMaximized(size_clone, is_maximized)
+                            });
                     }
                     window::Event::Moved(point) => {
                         self.current_window_pos = point;
@@ -2532,61 +2548,61 @@ impl RusTale {
         };
 
         // --- CONSTRUCCIÓN DE LA BARRA DE TÍTULO ---
-        let title_bar = container(
-            row![
-                // Icono PNG
-                container(
-                    image(crate::util::icons::load_window_icon_handle())
-                        .width(20)
-                        .height(20)
-                        .content_fit(ContentFit::Contain)
-                )
-                .padding(Padding::new(0.0).left(10.0).right(10.0)), // Padding lateral
-                // Título (Arrastrable)
-                mouse_area(
+        let title_bar = mouse_area(
+            container(
+                row![
+                    // Icono PNG
+                    container(
+                        image(crate::util::icons::load_window_icon_handle())
+                            .width(20)
+                            .height(20)
+                            .content_fit(ContentFit::Contain)
+                    )
+                    .padding(Padding::new(0.0).left(10.0).right(10.0)), // Padding lateral
+                    // Título
                     container(theme::text_small(self.title(), ctx))
                         .width(Length::Fill)
-                        .align_y(Alignment::Center)
-                )
-                .on_press(Message::WindowDrag)
-                .interaction(Interaction::Grab), // Cursor de mano al arrastrar
-                // Botones de control
-                row![
-                    // Minimizar
-                    theme::window_control_button(
-                        crate::util::icons::MINUS,
-                        Message::MinimizeWindow,
-                        false,
-                        &palette,
-                        ctx
-                    ),
-                    // Maximizar / Restaurar
-                    theme::window_control_button(
-                        if self.is_maximized {
-                            crate::util::icons::RESTORE
-                        } else {
-                            crate::util::icons::SQUARE
-                        },
-                        Message::MaximizeWindow,
-                        false,
-                        &palette,
-                        ctx
-                    ),
-                    // Cerrar (Rojo)
-                    theme::window_control_button(
-                        crate::util::icons::X,
-                        Message::CloseRequested,
-                        true, // is_close
-                        &palette,
-                        ctx
-                    ),
+                        .align_y(Alignment::Center),
+                    // Botones de control
+                    row![
+                        // Minimizar
+                        theme::window_control_button(
+                            crate::util::icons::MINUS,
+                            Message::MinimizeWindow,
+                            false,
+                            &palette,
+                            ctx
+                        ),
+                        // Maximizar / Restaurar
+                        theme::window_control_button(
+                            if self.is_maximized {
+                                crate::util::icons::RESTORE
+                            } else {
+                                crate::util::icons::SQUARE
+                            },
+                            Message::MaximizeWindow,
+                            false,
+                            &palette,
+                            ctx
+                        ),
+                        // Cerrar (Rojo)
+                        theme::window_control_button(
+                            crate::util::icons::X,
+                            Message::CloseRequested,
+                            true, // is_close
+                            &palette,
+                            ctx
+                        ),
+                    ]
                 ]
-            ]
-            .align_y(Alignment::Center)
-            .height(32), // Altura de la barra de título
+                .align_y(Alignment::Center)
+                .height(32), // Altura de la barra de título
+            )
+            .style(move |t| theme::title_bar_style(&palette, t, &self.settings.theme.base_mode))
+            .width(Length::Fill)
         )
-        .style(move |t| theme::title_bar_style(&palette, t, &self.settings.theme.base_mode))
-        .width(Length::Fill);
+        .on_press(Message::WindowDrag)
+        .interaction(Interaction::Grab); // Cursor de mano al arrastrar
 
         // Estructura principal visual (Fondo + Barra + Contenido)
         let visual_content = column![

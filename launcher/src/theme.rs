@@ -2029,6 +2029,12 @@ pub fn magic_scrollable<'a, M>(
 where
     M: 'a + Clone,
 {
+    // Si estamos redimensionando, evitamos crear el SmoothTranslate Wrapper para el Scrollable.
+    // Esto evita un nivel de indirección en el cálculo de layout de toda la lista.
+    if ctx.is_resizing {
+        return element;
+    }
+
     // SIEMPRE envolvemos en SmoothTranslate para mantener el árbol de widgets estable.
     // Si lsd_enabled es false, SmoothTranslate simplemente no aplicará efectos,
     // pero el widget "padre" seguirá siendo el mismo para el motor de Iced.
@@ -2232,7 +2238,7 @@ pub fn window_control_button<'a, Message: Clone + 'a>(
 }
 
 // --------------------------------------------------------
-// FUNCIÓN Text Paragraph con Wrapping + LSD
+// FUNCIÓN Text Paragraph con Wrapping + LSD + OPTIMIZACIÓN RESIZE
 // --------------------------------------------------------
 
 pub fn text_paragraph<'a, M: 'a + Clone>(
@@ -2242,6 +2248,22 @@ pub fn text_paragraph<'a, M: 'a + Clone>(
     let text_owned = content.into();
     let size_px: iced::Pixels = 12.0.into();
     let color = ctx.palette.text_secondary;
+
+    // [CRITICAL PERFORMANCE FIX]
+    // Durante el redimensionamiento, el cálculo de layout de "LsdWrapper" (letra por letra)
+    // es demasiado costoso (O(N) donde N es el número de caracteres).
+    // Si estamos redimensionando, retornamos un Texto nativo simple. 
+    // El motor de texto nativo de Iced es extremadamente rápido recalculando saltos de línea.
+    if ctx.is_resizing {
+        return iced::widget::text(text_owned)
+            .size(size_px)
+            .color(color)
+            .width(Length::Fill)
+            // Permitimos wrapping nativo
+            // Nota: En Iced 0.14 text se wrappea automáticamente si está en un container limitado,
+            // o no tiene .wrapping explícito (depende de la versión, asumimos default wrapping behavior).
+            .into();
+    }
 
     // 1. Dividir el texto en palabras
     let words_str: Vec<&str> = text_owned.split_whitespace().collect();
@@ -2274,7 +2296,7 @@ pub fn text_paragraph<'a, M: 'a + Clone>(
                 false,
                 ctx.lsd_intensity,
                 ctx.lsd_enabled,
-            ).resizing(ctx.is_resizing));
+            ).resizing(ctx.is_resizing)); // Esto mantiene el jitter apagado, pero el switch de arriba es el que salva los FPS
 
             letters_in_word = letters_in_word.push(magic_char);
         }
