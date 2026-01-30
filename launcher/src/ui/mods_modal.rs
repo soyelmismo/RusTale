@@ -593,7 +593,7 @@ impl ModsState {
                             ))
                         });
                         let fp = md.join(&fnm);
-                        if fnm.ends_with(".zip") && crate::game::zip_mods::is_patch_mod(&fp) {
+                        if fnm.ends_with(".zip") && crate::game::zip_mods::is_patch_mod(&fp).0 {
                             Task::done(ModsMessage::InstallZipPatch(fp, settings, meta))
                         } else {
                             Task::done(ModsMessage::RefreshLocalBackground)
@@ -631,6 +631,9 @@ impl ModsState {
                                 zp,
                                 gd,
                                 pd,
+                                c.clone(),
+                                v.clone(),
+                                nm.clone(), // mod_id basado en el nombre del archivo
                                 nm,
                                 meta.as_ref().map(|m| m.mod_id.clone()),
                                 meta.as_ref().map(|m| m.file_id.clone()),
@@ -666,7 +669,7 @@ impl ModsState {
                         let (gd, pd) = (p.version_dir(&c, &v), p.core_patches_dir(&c, &v));
                         tokio::task::spawn_blocking(move || {
                             if en {
-                                crate::game::zip_mods::enable_patch(gd, pd, &id)
+                                crate::game::zip_mods::enable_patch(gd, pd, c.clone(), v.clone(), &id)
                             } else {
                                 crate::game::zip_mods::disable_patch(gd, pd, &id)
                             }
