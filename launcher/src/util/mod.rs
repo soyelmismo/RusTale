@@ -11,29 +11,37 @@ pub mod win_job;
 /// Sanitizes Java arguments to prevent path injection and security vulnerabilities
 fn sanitize_java_arguments(args: &[String]) -> Vec<String> {
     let mut sanitized = Vec::new();
-    
+
     for arg in args {
         // Skip potentially dangerous absolute paths in non-JAR contexts
         if arg.starts_with('/') || (cfg!(windows) && arg.contains(':') && arg.contains('\\')) {
             // Allow absolute paths only for JAR files and specific safe arguments
             let arg_lower = arg.to_lowercase();
             if arg_lower.ends_with(".jar") || 
+               arg_lower.ends_with(".zip") || // Allow .zip files for assets
                arg.starts_with("-D") || 
                arg.starts_with("-X") || 
                arg.starts_with("-XX:") ||
                arg.starts_with("-javaagent:") ||
                arg.starts_with("-cp") ||
-               arg.starts_with("-classpath") {
+               arg.starts_with("-classpath") ||
+               // Allow --assets argument path for Hytale server
+               (args.iter().position(|a| a == "--assets").map_or(false, |pos| pos + 1 < args.len() && &args[pos + 1] == arg) ||
+                arg.starts_with("--assets"))
+            {
                 sanitized.push(arg.clone());
             } else {
-                println!("[SECURITY] Blocked potentially dangerous absolute path: {}", arg);
+                println!(
+                    "[SECURITY] Blocked potentially dangerous absolute path: {}",
+                    arg
+                );
             }
         } else {
             // Allow relative paths and standard JVM arguments
             sanitized.push(arg.clone());
         }
     }
-    
+
     sanitized
 }
 
@@ -44,22 +52,23 @@ fn validate_java_executable(java_path: &PathBuf, bin_dir: &Path) -> Result<()> {
         // FIX: same_as no existe. Usamos canonicalize para comparar rutas reales
         // Usamos unwrap_or para no fallar si el archivo aun no existe (raro pero posible),
         // en cuyo caso fallback a la ruta original
-        let canon_java_dir = java_parent.canonicalize().unwrap_or(java_parent.to_path_buf());
+        let canon_java_dir = java_parent
+            .canonicalize()
+            .unwrap_or(java_parent.to_path_buf());
         let canon_bin_dir = bin_dir.canonicalize().unwrap_or(bin_dir.to_path_buf());
 
         if canon_java_dir != canon_bin_dir {
             return Err(anyhow::anyhow!(
                 "Security violation: Java executable outside expected directory: {:?} vs {:?}",
-                java_path, bin_dir
+                java_path,
+                bin_dir
             ));
         }
     }
-    
+
     // Additional check: ensure we're not executing something unexpected
-    let java_name = java_path.file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("");
-    
+    let java_name = java_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
     // Convert to lowercase to be safe on Windows
     if !java_name.to_lowercase().contains("java") {
         return Err(anyhow::anyhow!(
@@ -67,7 +76,7 @@ fn validate_java_executable(java_path: &PathBuf, bin_dir: &Path) -> Result<()> {
             java_name
         ));
     }
-    
+
     Ok(())
 }
 
@@ -216,10 +225,7 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
             ));
         }
     } else {
-        println!(
-            "[INFO] Hijack mode active. Real java: {:?}",
-            java_real
-        );
+        println!("[INFO] Hijack mode active. Real java: {:?}", java_real);
     }
 
     // Validate Java executable path for security
@@ -243,9 +249,6 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
     // 2. Scan for server.jar
     println!("Scanning arguments...");
 
-    // We do NOT filter AOT args here anymore, because we want to patch them if present.
-    // final_args.retain(|arg| !arg.starts_with("-XX:AOTCache"));
-
     for (_i, arg) in args.iter().enumerate() {
         let arg_low = arg.to_lowercase();
         if arg_low.contains("hytaleserver") && arg_low.ends_with(".jar") {
@@ -259,19 +262,13 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
                     let abs = cwd.join(arg);
                     if abs.exists() {
                         original_jar_path = abs;
-                        println!(
-                            "Resolved relative path to: {:?}",
-                            original_jar_path
-                        );
+                        println!("Resolved relative path to: {:?}", original_jar_path);
                     }
                 }
             }
 
             if original_jar_path.exists() {
-                println!(
-                    "Intercepting Server JAR at: {:?}",
-                    original_jar_path
-                );
+                println!("Intercepting Server JAR at: {:?}", original_jar_path);
 
                 let server_dir = original_jar_path
                     .parent()
@@ -296,7 +293,7 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
                     );
                     original_jar_path.clone()
                 } else {
-                    let patched_jar_name = format!("HytaleServer.{}.{}.jar", mode_str, port);
+                    let patched_jar_name = format!("HytaleServer.{}.{}.jar", port, mode_str);
                     let side_by_side_path = server_dir.join(patched_jar_name);
 
                     if side_by_side_path.exists() {
@@ -314,7 +311,7 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
                     side_by_side_path
                 };
 
-                // Ensure AOT backup for safety
+                /* // Ensure AOT backup for safety
                 let _ = crate::game::patcher::handle_aot_backups(server_dir);
 
                 // Check/Generate AOT for the TARGET JAR
@@ -352,7 +349,7 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
                     } else {
                         println!("AOT Generation Completed.");
                     }
-                }
+                } */
 
                 // Apply replacements in final_args
                 // 1. Replace JAR path with the target one
@@ -360,28 +357,14 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
                     final_args[idx] = target_jar_path.to_string_lossy().to_string();
                 }
 
-                // 2. Scan for AOT arg to update it to the target AOT
-                // ONLY if the AOT file exists, otherwise delete the arg to avoid crashes
+                // 2. Always remove AOT arg to avoid issues
                 let aot_arg_pos = final_args
                     .iter()
                     .position(|r| r.starts_with("-XX:AOTCache"));
 
                 if let Some(idx) = aot_arg_pos {
-                    if target_aot_path.exists() {
-                        final_args[idx] =
-                            format!("-XX:AOTCache={}", target_aot_path.to_string_lossy());
-                        println!("Updated AOT Arg to: {}", final_args[idx]);
-
-                        // Add logging for AOT to debug mapping issues
-                        if !final_args.iter().any(|a| a.starts_with("-Xlog:aot")) {
-                            final_args.insert(0, "-Xlog:aot".to_string());
-                        }
-                    } else {
-                        println!(
-                            "AOT Cache not found. Removing AOT argument to avoid startup failure.",
-                        );
-                        final_args.remove(idx);
-                    }
+                    println!("Removing AOT argument to avoid startup issues.");
+                    final_args.remove(idx);
                 }
                 // Break after handling the server jar arg
                 break;
@@ -409,7 +392,6 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
     let _is_singleplayer = args.iter().any(|a| a == "--singleplayer");
     let _is_dedicated_server_flag = std::env::var("RUSTALE_IS_SERVER").is_ok();
 
-
     #[cfg(target_os = "windows")]
     {
         let show_console = (_is_server_jar || _is_dedicated_server_flag) && !_is_singleplayer;
@@ -433,10 +415,7 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
             use std::os::windows::io::AsRawHandle;
             let handle = child.as_raw_handle() as _;
             if let Err(e) = job.add_process(handle) {
-                println!(
-                    "[WARN] Failed to assign child to JobObject: {}",
-                    e
-                );
+                println!("[WARN] Failed to assign child to JobObject: {}", e);
                 None
             } else {
                 println!("[INFO] Child assigned to JobObject (auto-kill enabled)");

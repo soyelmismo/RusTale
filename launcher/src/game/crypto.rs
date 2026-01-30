@@ -1,41 +1,127 @@
-use base64::{
-    Engine as _,
-    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
-};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use ed25519_dalek::{Signer, SigningKey};
-use once_cell::sync::Lazy;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::PathBuf;
 use std::sync::Mutex;
 
 // Identificador de clave usado por el protocolo Hytale
 pub const KEY_ID: &str = "2025-10-01";
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct JwkSet {
-    keys: Vec<Jwk>,
+    pub keys: Vec<Jwk>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Jwk {
-    kty: String, // Key Type (OKP para Ed25519)
-    crv: String, // Curve (Ed25519)
-    x: String,   // Public Key (Base64URL)
-    kid: String, // Key ID
+    pub kty: String, // Key Type (OKP para Ed25519)
+    pub crv: String, // Curve (Ed25519)
+    pub x: String,   // Public Key (Base64URL)
+    pub kid: String, // Key ID
     #[serde(rename = "use")]
-    use_key: String, // "sig"
+    pub use_key: String, // "sig"
 }
-pub fn get_jwks() -> JwkSet {
-    let lock = KEY_PAIR.lock().unwrap();
-    let verifying_key = lock.verifying_key();
-    let public_bytes = verifying_key.to_bytes();
 
-    // Codificacion Base64 URL-Safe sin Padding (Requisito RFC 8037)
+// Estado global en RAM (ya no se guarda en HDD)
+static SESSION_KEYS: Mutex<Option<SigningKey>> = Mutex::new(None);
+static SESSION_JWKS: Mutex<Option<JwkSet>> = Mutex::new(None);
+
+/// Obtiene el JWKS global actual. Si no existen, las inicializa una única vez.
+pub fn get_global_jwks() -> JwkSet {
+    let mut jwks_lock = SESSION_JWKS.lock().unwrap();
+    if let Some(jwks) = &*jwks_lock {
+        return jwks.clone();
+    }
+
+    // Si no existen, generarlas por primera vez (Lazy Init)
+    drop(jwks_lock);
+    initialize_constant_keys();
+    SESSION_JWKS.lock().unwrap().as_ref().unwrap().clone()
+}
+
+pub fn get_jwks() -> JwkSet {
+    get_global_jwks()
+}
+
+/// Firma un mensaje usando las claves de sesión actuales
+pub fn sign_message(message: &str) -> String {
+    let mut key_lock = SESSION_KEYS.lock().unwrap();
+
+    // Asegurar que las claves existan
+    if key_lock.is_none() {
+        // If we have JWKS but no keys, it means we are a client of a remote emulator.
+        // We CANNOT sign messages because we don't have the private key.
+        let jwks_lock = SESSION_JWKS.lock().unwrap();
+        if jwks_lock.is_some() {
+            eprintln!(
+                "[Crypto] Error: Attempted to sign message but we only have remote public keys. This token will be invalid!"
+            );
+            return "INVALID_SIGNATURE_REMOTE_ONLY".to_string();
+        }
+        drop(jwks_lock);
+
+        drop(key_lock);
+        force_regenerate_keys();
+        key_lock = SESSION_KEYS.lock().unwrap();
+    }
+
+    if let Some(key) = key_lock.as_ref() {
+        let signature = key.sign(message.as_bytes());
+        URL_SAFE_NO_PAD.encode(signature.to_bytes())
+    } else {
+        "ERROR_NO_KEY".to_string()
+    }
+}
+
+/// Firma un mensaje con las claves del servidor (unificado con sesión en RAM)
+pub fn sign_message_with_server_keys(message: &str) -> String {
+    sign_message(message)
+}
+
+/// Retorna el JWK público actual como un Value de serde_json
+pub fn get_public_jwk_as_value() -> serde_json::Value {
+    let jwks = get_jwks();
+    if let Some(key) = jwks.keys.first() {
+        serde_json::json!({
+            "kty": key.kty,
+            "crv": key.crv,
+            "x": key.x,
+            "kid": key.kid,
+            "use": key.use_key
+        })
+    } else {
+        // Fallback (no debería ocurrir)
+        serde_json::json!({})
+    }
+}
+
+pub fn get_server_public_jwk_as_value() -> serde_json::Value {
+    get_public_jwk_as_value()
+}
+
+/// Fuerza la regeneración de claves JWT (Solo en RAM)
+/// Se llama en cada inicio de juego o servidor
+pub fn force_regenerate_keys() {
+    let mut key_lock = SESSION_KEYS.lock().unwrap();
+    let mut jwks_lock = SESSION_JWKS.lock().unwrap();
+
+    // WARNING: If we already have keys or JWKS from a remote, do NOT regenerate
+    // unless explicitly asked (which we don't have an API for yet).
+    if key_lock.is_some() || jwks_lock.is_some() {
+        return;
+    }
+
+    // Generar bytes aleatorios para la clave privada
+    let mut bytes = [0u8; 32];
+    rand::rng().fill(&mut bytes);
+    let signing_key = SigningKey::from_bytes(&bytes);
+
+    // Derivar clave pública y formatear como JWK
+    let verifying_key = signing_key.verifying_key();
+    let public_bytes = verifying_key.to_bytes();
     let x_b64 = URL_SAFE_NO_PAD.encode(public_bytes);
 
-    JwkSet {
+    let jwks = JwkSet {
         keys: vec![Jwk {
             kty: "OKP".to_string(),
             crv: "Ed25519".to_string(),
@@ -43,93 +129,35 @@ pub fn get_jwks() -> JwkSet {
             kid: KEY_ID.to_string(),
             use_key: "sig".to_string(),
         }],
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-struct KeyPairData {
-    #[serde(rename = "privateKey")]
-    pub private_key: String,
-    #[serde(rename = "publicKey")]
-    pub public_key: String,
-    #[serde(rename = "createdAt")]
-    pub created_at: String,
-}
-
-pub static KEY_PAIR: Lazy<Mutex<SigningKey>> = Lazy::new(|| {
-    let path = crate::config::get_identity_dir().join("jwt_keys.json");
-    Mutex::new(load_or_generate_keys(&path))
-});
-
-fn load_or_generate_keys(path: &PathBuf) -> SigningKey {
-    if path.exists() {
-        if let Ok(content) = fs::read_to_string(path) {
-            // Intentar formato Node.js (camelCase)
-            if let Ok(data) = serde_json::from_str::<KeyPairData>(&content) {
-                if let Ok(key) = parse_private_key(&data.private_key) {
-                    println!("[Crypto] Claves cargadas (Formato Node.js)");
-                    return key;
-                }
-            }
-        }
-        println!("[Crypto] Claves corruptas o ilegibles. Generando nuevas.");
-    }
-
-    // SOLUCION AL ERROR: Generar bytes manualmente para evitar conflicto de versiones de rand
-    let mut bytes = [0u8; 32];
-    rand::rng().fill(&mut bytes);
-    let signing_key = SigningKey::from_bytes(&bytes);
-
-    save_keys(path, &signing_key);
-    signing_key
-}
-
-/// Parsea una clave privada Ed25519 desde Base64.
-/// Soporta tanto formato RAW (32 bytes) como PKCS8 DER (generado por Node crypto).
-fn parse_private_key(base64_str: &str) -> Result<SigningKey, ()> {
-    let bytes = STANDARD.decode(base64_str).map_err(|_| ())?;
-
-    // Caso 1: Raw Bytes (32 bytes)
-    if bytes.len() == 32 {
-        let array: [u8; 32] = bytes.try_into().map_err(|_| ())?;
-        return Ok(SigningKey::from_bytes(&array));
-    }
-
-    // Caso 2: PKCS8 DER (~48 bytes).
-    // Node.js crypto.generateKeyPairSync('ed25519') envuelve la clave en una estructura ASN.1.
-    // Para Ed25519, la clave privada son los ultimos 32 bytes de la estructura Octet String.
-    if bytes.len() > 32 {
-        if let Some(raw_key) = bytes.get(bytes.len() - 32..) {
-            let array: [u8; 32] = raw_key.try_into().map_err(|_| ())?;
-            return Ok(SigningKey::from_bytes(&array));
-        }
-    }
-
-    Err(())
-}
-
-fn save_keys(path: &PathBuf, key: &SigningKey) {
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-
-    let verifying_key = key.verifying_key();
-
-    // Guardamos en formato compatible con Node.js (JSON + Base64 Standard)
-    let data = KeyPairData {
-        private_key: STANDARD.encode(key.to_bytes()), // Guardamos RAW para facilitar lectura futura
-        public_key: STANDARD.encode(verifying_key.to_bytes()),
-        created_at: chrono::Utc::now().to_rfc3339(),
     };
 
-    if let Ok(json) = serde_json::to_string_pretty(&data) {
-        let _ = fs::write(path, json);
-        println!("[Crypto] Nuevas claves guardadas en {:?}", path);
+    *key_lock = Some(signing_key);
+    *jwks_lock = Some(jwks);
+
+    println!("[Crypto] Fresh JWT keys generated and active in RAM.");
+}
+
+/// Actualiza el JWKS desde una fuente remota (usado al unirse a servidores dedicados)
+pub fn update_jwks_from_remote(jwks: JwkSet) {
+    let mut jwks_lock = SESSION_JWKS.lock().unwrap();
+    let mut key_lock = SESSION_KEYS.lock().unwrap();
+
+    *jwks_lock = Some(jwks);
+    *key_lock = None; // Importante: invalidar llaves privadas locales si somos clientes
+
+    println!("[Crypto] JWKS updated from remote server (Cloned)");
+}
+
+/// Inicializa claves si no existen
+pub fn initialize_constant_keys() {
+    let mut key_lock = SESSION_KEYS.lock().unwrap();
+    if key_lock.is_none() {
+        drop(key_lock);
+        force_regenerate_keys();
     }
 }
 
-pub fn sign_message(message: &str) -> String {
-    let lock = KEY_PAIR.lock().unwrap();
-    let signature = lock.sign(message.as_bytes());
-    URL_SAFE_NO_PAD.encode(signature.to_bytes())
+/// Mantenido por compatibilidad
+pub fn initialize_server_keys_if_local() {
+    initialize_constant_keys();
 }

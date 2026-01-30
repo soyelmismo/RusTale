@@ -197,25 +197,6 @@ unsafe fn raw_search_and_replace(mem: &mut [u8], target: &[u8], replacement: &[u
 }
 
 #[cfg(target_os = "windows")]
-unsafe fn patch_server_args(addr: *mut u8, len: usize) {
-    // Windows specific raw patch (Legacy Rust logic maintained)
-    let slice = unsafe { slice::from_raw_parts_mut(addr, len) };
-    let target_utf8 = b"authenticated";
-    let replace_utf8 = b"insecure";
-    let target_wide: Vec<u8> = "authenticated"
-        .encode_utf16()
-        .flat_map(|c| c.to_le_bytes())
-        .collect();
-    let replace_wide: Vec<u8> = "insecure"
-        .encode_utf16()
-        .flat_map(|c| c.to_le_bytes())
-        .collect();
-
-    unsafe { raw_search_and_replace(slice, target_utf8, replace_utf8) };
-    unsafe { raw_search_and_replace(slice, &target_wide, &replace_wide) };
-}
-
-#[cfg(target_os = "windows")]
 fn get_swaps(mode: &str) -> Vec<SwapEntry> {
     let mut swaps = Vec::new();
 
@@ -246,11 +227,6 @@ fn get_swaps(mode: &str) -> Vec<SwapEntry> {
             let new = CsString::from_str(&format!("http://127.0.0.{}", filler));
             swaps.push(SwapEntry { old, new });
         }
-
-        swaps.push(SwapEntry {
-            old: CsString::from_str("authenticated"),
-            new: CsString::from_str("insecure"),
-        });
 
         swaps.push(SwapEntry {
             old: CsString::from_str("hytale.com"),
@@ -309,22 +285,6 @@ fn get_swaps(mode: &str) -> Vec<SwapEntry> {
             new: CsString::from_str(&format!("0001:{}", port_str)),
         });
     }
-
-    // C: {.old = make_csstr(L"authenticated"),         .new = make_csstr(L"insecure")},
-    swaps.push(SwapEntry {
-        old: CsString::from_str("authenticated"),
-        new: CsString::from_str("insecure"),
-    });
-
-    // C: {.old = make_csstr(L"--session-token=\""),    .new = make_csstr(L"--singleplayer=\"")},
-    swaps.push(SwapEntry {
-        old: CsString::from_str("--session-token=\""),
-        new: CsString::from_str("--singleplayer=\""),
-    });
-    swaps.push(SwapEntry {
-        old: CsString::from_str("--identity-token=\""),
-        new: CsString::from_str("--singleplayer=\""),
-    });
 
     swaps
 }
@@ -678,11 +638,6 @@ unsafe fn main_logic() {
 
         unsafe { allow_offline_in_online(&region) };
         unsafe { swap_strings(&region) };
-
-        #[cfg(target_os = "windows")]
-        unsafe {
-            patch_server_args(region.start, region.size)
-        };
     }
 }
 

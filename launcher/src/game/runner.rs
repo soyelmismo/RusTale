@@ -221,12 +221,15 @@ impl Recipe for Runner {
 
                 let mut _cleanup_guard: Option<FileCleanupGuard> = None;
 
-                let server_port = crate::util::find_free_port();
+                let mut server_port = crate::util::get_saved_port();
+                if !crate::game::server::is_server_alive(server_port).await {
+                    server_port = crate::util::find_free_port();
+                }
 
                 if settings.enable_online_fix {
                     auth_mode = "authenticated".to_string();
 
-                    // --- [CORRECCIÓN INICIO] --- 
+                    // --- [CORRECCIÓN INICIO] ---
                     // Configuramos los modos y URLs ANTES de verificar archivos físicos.
                     match settings.online_fix_mode {
                         crate::config::OnlineFixMode::Local => {
@@ -273,6 +276,9 @@ impl Recipe for Runner {
                     if server_jar_path.exists() {
                         let server_jar_path_clone = server_jar_path.clone();
                         let mode_fix = settings.online_fix_mode.clone();
+                        let aurora_env_value_clone = aurora_env_value.clone();
+                        let channel_clone = settings.channel.clone();
+                        let version_clone = version_str.clone();
                         let port_clone = server_port;
 
                         // Authentication & Server Logic
@@ -284,8 +290,12 @@ impl Recipe for Runner {
                                 let server_game_dir = game_working_dir.clone();
                                 let port_clone = server_port;
 
-                                tokio::spawn(async move {
-                                    if !crate::game::server::is_server_alive(port_clone).await {
+                                if !crate::game::server::is_server_alive(port_clone).await {
+                                    println!(
+                                        "[Runner] Starting Auth Server on port {}",
+                                        port_clone
+                                    );
+                                    tokio::spawn(async move {
                                         let _ = crate::game::server::start_server(
                                             server_username,
                                             server_uuid,
@@ -294,54 +304,43 @@ impl Recipe for Runner {
                                             port_clone,
                                         )
                                         .await;
-                                    } else {
-                                        println!(
-                                            "[Runner] Connected to existing Auth Server. Updating state..."
-                                        );
+                                    });
+                                    // Give it a moment to bind
+                                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                                } else {
+                                    println!(
+                                        "[Runner] Connected to existing Auth Server. Updating state..."
+                                    );
 
-                                        let client = reqwest::Client::new();
-                                        let base_url = format!("http://127.0.0.1:{}", port_clone);
+                                    let client_sync = reqwest::Client::new();
+                                    let base_url = format!("http://127.0.0.000001:{}", port_clone);
 
-                                        // 1. Actualizar Path
-                                        let update_path_url =
-                                            format!("{}/internal/update-path", base_url);
-                                        let body_path = serde_json::json!({
-                                            "game_dir": server_game_dir.to_string_lossy().to_string()
-                                        });
-                                        if let Err(e) = client
-                                            .post(update_path_url)
-                                            .json(&body_path)
-                                            .send()
-                                            .await
-                                        {
-                                            eprintln!(
-                                                "[Runner] Failed to update Auth Server path: {}",
-                                                e
-                                            );
-                                        }
+                                    // 1. Actualizar Path
+                                    let update_path_url =
+                                        format!("{}/internal/update-path", base_url);
+                                    let body_path = serde_json::json!({
+                                        "game_dir": server_game_dir.to_string_lossy().to_string()
+                                    });
+                                    let _ = client_sync
+                                        .post(update_path_url)
+                                        .json(&body_path)
+                                        .send()
+                                        .await;
 
-                                        // 2. Actualizar Identidad (NUEVO)
-                                        let update_id_url =
-                                            format!("{}/internal/update-identity", base_url);
-                                        let body_id = serde_json::json!({
-                                            "username": server_username,
-                                            "uuid": server_uuid
-                                        });
-                                        if let Err(e) =
-                                            client.post(update_id_url).json(&body_id).send().await
-                                        {
-                                            eprintln!(
-                                                "[Runner] Failed to update Auth Server identity: {}",
-                                                e
-                                            );
-                                        }
-                                    }
-                                });
+                                    // 2. Actualizar Identidad
+                                    let update_id_url =
+                                        format!("{}/internal/update-identity", base_url);
+                                    let body_id = serde_json::json!({
+                                        "username": server_username,
+                                        "uuid": server_uuid
+                                    });
+                                    let _ =
+                                        client_sync.post(update_id_url).json(&body_id).send().await;
+                                }
                                 server_started = true;
                             }
                             crate::config::OnlineFixMode::Sanasol => {
                                 // Sanasol configuration (aurora_env_value y auth_url ya configurados arriba)
-                                // Aquí podríamos añadir lógica específica de Sanasol si fuera necesario
                             }
                         }
 
@@ -364,29 +363,56 @@ impl Recipe for Runner {
                                 }
                             }
 
-                            // 2. Asegurar PARCHE: Si existe .original, usamos ese para generar HytaleServer.jar
-                            // Sobrescribimos siempre HytaleServer.jar para garantizar que el puerto/modo sea correcto
+                            // 2. Asegurar PARCHE: Si existe .original, usamos ese para generar el JAR persistente
                             if original_jar_path.exists() {
-                                println!(
-                                    "[Runner] Generating HytaleServer.jar from HytaleServer.original (Persistent Mode)..."
-                                );
-
-                                let progress_cb = move |p: f32| {
-                                    let mut tx = output_clone.clone();
-                                    let _ = tx.try_send(Message::ServerPatchProgress(p));
-                                };
-
-                                match crate::game::patcher::patch_server_jar(
-                                    &original_jar_path,
-                                    &server_jar_path_clone,
-                                    mode_fix,
+                                let patched_jar_name = format!(
+                                    "HytaleServer.{}.{}.{}.{}.jar",
                                     port_clone,
-                                    Some(Box::new(progress_cb)),
-                                ) {
-                                    Ok(_) => println!(
-                                        "[Runner] Patch applied successfully to HytaleServer.jar"
-                                    ),
-                                    Err(e) => eprintln!("[Runner] Failed to patch jar: {}", e),
+                                    aurora_env_value_clone,
+                                    channel_clone,
+                                    version_clone
+                                );
+                                let patched_jar_full_path =
+                                    server_jar_path_clone.with_file_name(&patched_jar_name);
+
+                                if !patched_jar_full_path.exists() {
+                                    println!(
+                                        "[Runner] Generating persistent JAR: {}",
+                                        patched_jar_name
+                                    );
+
+                                    let progress_cb = move |p: f32| {
+                                        let mut tx = output_clone.clone();
+                                        let _ = tx.try_send(Message::ServerPatchProgress(p));
+                                    };
+
+                                    if let Err(e) = crate::game::patcher::patch_server_jar(
+                                        &original_jar_path,
+                                        &patched_jar_full_path,
+                                        mode_fix,
+                                        port_clone,
+                                        Some(Box::new(progress_cb)),
+                                    ) {
+                                        eprintln!("[Runner] Failed to patch jar: {}", e);
+                                        return;
+                                    }
+                                } else {
+                                    println!(
+                                        "[Runner] Using existing persistent JAR: {}",
+                                        patched_jar_name
+                                    );
+                                }
+
+                                // 3. Copiar al destino final (HytaleServer.jar) que el juego espera
+                                if let Err(e) =
+                                    std::fs::copy(&patched_jar_full_path, &server_jar_path_clone)
+                                {
+                                    eprintln!(
+                                        "[Runner] Failed to copy patched jar to final destination: {}",
+                                        e
+                                    );
+                                } else {
+                                    println!("[Runner] Patched JAR ready at HytaleServer.jar");
                                 }
                             }
                         });
@@ -447,20 +473,60 @@ impl Recipe for Runner {
                 auth_args.push(auth_mode.clone());
 
                 if auth_mode == "authenticated" {
-                    let tokens = match crate::game::auth::fetch_remote_tokens(
-                        &client,
-                        &auth_url,
-                        &player_name,
-                        &player_uuid,
-                    )
-                    .await
-                    {
-                        Ok(t) => t,
-                        Err(_) => crate::game::auth::generate_fake_tokens(
+                    // --- Sincronizar JWKS Remotos (BLOQUEANTE AQUÍ PARA EVITAR RACE CONDITIONS) ---
+                    match crate::game::auth::fetch_remote_jwks(&client, &auth_url).await {
+                        Ok(jwks) => {
+                            crate::game::crypto::update_jwks_from_remote(jwks);
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "[Runner] Warning: Could not sync remote JWKS: {}. If the server just started, this is critical.",
+                                e
+                            );
+                        }
+                    }
+
+                    // Retry loop for fetching tokens from the dedicated server/emulator
+                    let mut tokens_res = Err(anyhow::anyhow!("Initial state"));
+                    for i in 0..5 {
+                        match crate::game::auth::fetch_remote_tokens(
+                            &client,
+                            &auth_url,
                             &player_name,
                             &player_uuid,
-                            &auth_url,
-                        ),
+                        )
+                        .await
+                        {
+                            Ok(t) => {
+                                tokens_res = Ok(t);
+                                break;
+                            }
+                            Err(e) => {
+                                println!(
+                                    "[Runner] Auth fetch attempt {} failed: {}. Retrying...",
+                                    i + 1,
+                                    e
+                                );
+                                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                            }
+                        }
+                    }
+
+                    let tokens = match tokens_res {
+                        Ok(t) => t,
+                        Err(e) => {
+                            println!(
+                                "[Runner] CRITICAL: Failed to fetch remote tokens after retries: {}",
+                                e
+                            );
+                            // If it fails, generating fake tokens is a "last resort" but
+                            // it will likely fail on the server if keys mismatch.
+                            crate::game::auth::generate_fake_tokens(
+                                &player_name,
+                                &player_uuid,
+                                &auth_url,
+                            )
+                        }
                     };
                     auth_args.extend(vec![
                         "--identity-token".to_string(),

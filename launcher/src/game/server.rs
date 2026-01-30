@@ -2,6 +2,7 @@ use crate::game::crypto;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::Read;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -73,6 +74,20 @@ struct ExchangeRequest {
     extra: HashMap<String, serde_json::Value>,
 }
 
+#[derive(Deserialize, Debug)]
+struct ServerAutoAuthRequest {
+    #[serde(alias = "server_id")]
+    server_id: Option<String>,
+    #[serde(alias = "serverId")]
+    server_id_alt: Option<String>,
+    #[serde(alias = "server_name")]
+    server_name: Option<String>,
+    #[serde(alias = "serverName")]
+    server_name_alt: Option<String>,
+    #[serde(flatten)]
+    extra: HashMap<String, serde_json::Value>,
+}
+
 #[derive(Serialize)]
 struct ExchangeResponse {
     #[serde(rename = "accessToken")]
@@ -89,6 +104,26 @@ struct ExchangeResponse {
 }
 
 #[derive(Serialize)]
+struct ServerAutoAuthResponse {
+    #[serde(rename = "identityToken")]
+    identity_token: String,
+    #[serde(rename = "sessionToken")]
+    session_token: String,
+    #[serde(rename = "expiresIn")]
+    expires_in: i64,
+    #[serde(rename = "expiresAt")]
+    expires_at: DateTime<Utc>,
+    #[serde(rename = "tokenType")]
+    token_type: String,
+    #[serde(rename = "serverId")]
+    server_id: String,
+    #[serde(rename = "serverUuid")]
+    server_uuid: String,
+    #[serde(rename = "serverName")]
+    server_name: String,
+}
+
+#[derive(Serialize)]
 struct ProfileLookupResponse {
     uuid: String,
     username: String,
@@ -100,8 +135,14 @@ struct HealthResponse {
     server: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct Confirmation {
+    #[serde(rename = "x5t#S256")]
+    pub x5t_s256: String,
+}
+
 // Payload especifico para JWT de Auth Grant y Access Token
-#[derive(Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct AuthTokenPayload {
     exp: i64,
     iat: i64,
@@ -110,11 +151,15 @@ struct AuthTokenPayload {
     scope: String,
     sub: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    aud: Option<String>, // Audience es vital para Auth Grants
+    aud: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    username: Option<String>, // <--- NUEVO
+    #[serde(skip_serializing_if = "Option::is_none")]
     entitlements: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cnf: Option<Confirmation>, // <--- NUEVO: Certificate Binding
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -173,6 +218,8 @@ struct JwtHeader {
     alg: String,
     kid: String,
     typ: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    jwk: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -210,11 +257,41 @@ const ENTITLEMENTS: &[&str] = &["game.base", "game.deluxe", "game.founder", "gam
 // Default skin JSON (Fallback)
 const DEFAULT_SKIN: &str = r#"{"bodyCharacteristic":"Muscular.09","underwear":"Boxer.Purple","face":"Face_Neutral","ears":"Default","mouth":"Mouth_Long","haircut":"SuperSlickback.PitchBlack","facialHair":null,"eyebrows":"Thin.PitchBlack","eyes":"Large_Eyes.GreenLight","pants":"Bermuda_Rolled.GreyBlue","overpants":null,"undertop":null,"overtop":"Winter_Jacket.Red","shoes":"BasicShoes_Sandals.Black","headAccessory":"StrawHat.Red","faceAccessory":"Plaster.Brown","earAccessory":null,"skinFeature":null,"gloves":null,"cape":null}"#;
 
+/// Generate a deterministic server UUID based on server_id (SHA-256 hash)
+fn generate_server_uuid(server_id: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(server_id.as_bytes());
+    let hash = hasher.finalize();
+
+    // Take first 16 bytes and format as UUID
+    let bytes = &hash[..16];
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bytes[0],
+        bytes[1],
+        bytes[2],
+        bytes[3],
+        bytes[4],
+        bytes[5],
+        bytes[6],
+        bytes[7],
+        bytes[8],
+        bytes[9],
+        bytes[10],
+        bytes[11],
+        bytes[12],
+        bytes[13],
+        bytes[14],
+        bytes[15]
+    )
+}
+
 struct ServerState {
     username: String,
     uuid: String,
     skins: HashMap<String, String>,
     game_dir: PathBuf,
+    last_server_uuid: Option<String>, // <--- NUEVO
 }
 
 pub async fn is_server_alive(port: u16) -> bool {
@@ -239,6 +316,10 @@ pub async fn start_server(
     shutdown_rx: oneshot::Receiver<()>,
     port: u16,
 ) -> anyhow::Result<()> {
+    // 0. Inicializar claves constantes para la API (consistencia total)
+    println!("Initializing constant JWKS (RAM-Only)...");
+    crypto::initialize_constant_keys();
+
     // 1. Load saved skin (Multi-user support)
     // 1. Load saved skin (Multi-user support)
     // Usar RusTale/server/identity/skins.json
@@ -246,6 +327,7 @@ pub async fn start_server(
     let skin_file = identity_dir.join("skins.json");
 
     let auth_header = warp::header::optional::<String>("authorization");
+    let host_header = warp::header::optional::<String>("host");
 
     let skins: HashMap<String, String> = if skin_file.exists() {
         let content = tokio::fs::read_to_string(&skin_file)
@@ -271,6 +353,7 @@ pub async fn start_server(
         uuid,
         skins,
         game_dir: game_folder_path,
+        last_server_uuid: None,
     }));
 
     // --- WARP FILTERS ---
@@ -319,9 +402,10 @@ pub async fn start_server(
     // 5. POST /game-session/child (Auth)
     let session_child = warp::path!("game-session" / "child")
         .and(warp::post())
-        .and(warp::body::json()) // Extraer el JSON
+        .and(warp::body::json())
+        .and(host_header.clone())
         .and(state_filter.clone())
-        .then(move |body, state| handle_session_child(port, body, state));
+        .then(move |body, host, state| handle_session_child(port, body, host, state));
 
     // 6. Stubs (Bugs, Feedback)
     let stubs = warp::path!("bugs" / "create")
@@ -359,15 +443,19 @@ pub async fn start_server(
     let session_new = warp::path!("game-session" / "new")
         .and(warp::post())
         .and(warp::body::json())
+        .and(host_header.clone())
         .and(state_filter.clone())
-        .then(move |body: SessionRequest, state| handle_session_new(port, body, state));
+        .then(move |body: SessionRequest, host, state| handle_session_new(port, body, host, state));
 
     // 9. POST /game-session/refresh (Mantener sesion viva)
     let session_refresh = warp::path!("game-session" / "refresh")
         .and(warp::post())
         .and(warp::body::json())
+        .and(host_header.clone())
         .and(state_filter.clone())
-        .then(move |body: RefreshRequest, state| handle_session_refresh(port, body, state));
+        .then(move |body: RefreshRequest, host, state| {
+            handle_session_refresh(port, body, host, state)
+        });
 
     // 10. DELETE /game-session (Logout)
     let session_delete = warp::path!("game-session")
@@ -381,8 +469,11 @@ pub async fn start_server(
         .unify()
         .and(warp::post())
         .and(warp::body::json())
+        .and(host_header.clone())
         .and(state_filter.clone())
-        .then(move |body: AuthorizeRequest, state| handle_session_authorize(port, body, state));
+        .then(move |body: AuthorizeRequest, host, state| {
+            handle_session_authorize(port, body, host, state)
+        });
 
     // 12. POST /game-session/exchange (Paso 2 del Join Server: Servidor valida permiso)
     // Tambien mapea /server-join/auth-token
@@ -391,8 +482,11 @@ pub async fn start_server(
         .unify()
         .and(warp::post())
         .and(warp::body::json())
+        .and(host_header.clone())
         .and(state_filter.clone())
-        .then(move |body: ExchangeRequest, state| handle_session_exchange(port, body, state));
+        .then(move |body: ExchangeRequest, host, state| {
+            handle_session_exchange(port, body, host, state)
+        });
 
     // 13. GET /profile/uuid/{uuid} (Lookup usado por servidores)
     let profile_by_uuid = warp::path!("profile" / "uuid" / String)
@@ -406,9 +500,21 @@ pub async fn start_server(
         .and(state_filter.clone())
         .then(handle_profile_lookup_username);
 
-    // 15. ANY /telemetry/{path}
-    // 16. ANY /analytics/{path}
-    // 17. ANY /event/{path}
+    // 15. POST /server/auto-auth (Server auto-auth for F2P servers)
+    let server_auto_auth = warp::path!("server" / "auto-auth")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(host_header.clone())
+        .and(state_filter.clone())
+        .then(
+            move |body: ServerAutoAuthRequest, host: Option<String>, state| {
+                handle_server_auto_auth(port, body, host, state)
+            },
+        );
+
+    // 16. ANY /telemetry/{path}
+    // 17. ANY /analytics/{path}
+    // 18. ANY /event/{path}
 
     fn ok_response() -> impl warp::Reply {
         warp::reply::json(&json!({ "success": true, "received": true }))
@@ -467,6 +573,7 @@ pub async fn start_server(
     let misc_routes = telemetry
         .or(analytics)
         .or(event)
+        .or(server_auto_auth)
         .or(internal_update_path)
         .or(internal_update_identity)
         .or(catch_unknown)
@@ -609,10 +716,12 @@ async fn handle_launcher_data(state: Arc<tokio::sync::Mutex<ServerState>>) -> im
 async fn handle_session_child(
     port: u16,
     body: SessionRequest, // Ahora recibe el body
-
+    host: Option<String>,
     state: Arc<tokio::sync::Mutex<ServerState>>,
 ) -> impl warp::Reply {
     let state = state.lock().await;
+    let actual_port = extract_port(host).unwrap_or(port);
+
     println!("Session child endpoint requested.");
     println!("Body: {:?}", body);
     let requested_uuid = body.uuid.clone().unwrap_or_else(|| state.uuid.clone());
@@ -631,7 +740,7 @@ async fn handle_session_child(
         &skin,
         "hytale:server hytale:client",
         true,
-        port,
+        actual_port,
     );
     let session_token = generate_jwt(
         &requested_name,
@@ -639,7 +748,7 @@ async fn handle_session_child(
         &skin,
         "hytale:server",
         false,
-        port,
+        actual_port,
     );
 
     let resp = SessionNewResponse {
@@ -767,9 +876,11 @@ fn get_exact_field_name(cat: &str) -> String {
 async fn handle_session_new(
     port: u16,
     body: SessionRequest,
+    host: Option<String>,
     state: Arc<tokio::sync::Mutex<ServerState>>,
 ) -> impl warp::Reply {
     let state = state.lock().await;
+    let actual_port = extract_port(host).unwrap_or(port);
 
     // USAMOS la variable 'body' imprimiendola. Rust ya no se quejara.
     println!(">>> [SESSION NEW] Solicitud recibida");
@@ -794,7 +905,7 @@ async fn handle_session_new(
         skin,
         &format!("{} hytale:server", scope_str),
         true,
-        port,
+        actual_port,
     );
     let session_token = generate_jwt(
         &state.username,
@@ -802,7 +913,7 @@ async fn handle_session_new(
         skin,
         "hytale:server",
         false,
-        port,
+        actual_port,
     );
 
     let resp = SessionNewResponse {
@@ -817,9 +928,11 @@ async fn handle_session_new(
 async fn handle_session_refresh(
     port: u16,
     body: RefreshRequest,
+    host: Option<String>,
     state: Arc<tokio::sync::Mutex<ServerState>>,
 ) -> impl warp::Reply {
     let state = state.lock().await;
+    let actual_port = extract_port(host).unwrap_or(port);
 
     // Logueamos el token viejo para "usar" la variable
     println!(">>> [SESSION REFRESH] Solicitud recibida");
@@ -839,7 +952,7 @@ async fn handle_session_refresh(
         skin,
         "hytale:server hytale:client",
         true,
-        port,
+        actual_port,
     );
     let session_token = generate_jwt(
         &state.username,
@@ -847,7 +960,7 @@ async fn handle_session_refresh(
         skin,
         "hytale:server",
         false,
-        port,
+        actual_port,
     );
 
     let resp = SessionNewResponse {
@@ -862,36 +975,74 @@ async fn handle_session_refresh(
 async fn handle_session_authorize(
     port: u16,
     body: AuthorizeRequest,
+    host: Option<String>,
     state: Arc<tokio::sync::Mutex<ServerState>>,
 ) -> impl warp::Reply {
     let state = state.lock().await;
+    println!(">>> [SESSION AUTHORIZE] Solicitud recibida");
+    println!("    Body: {:?}", body);
+    let actual_port = extract_port(host).unwrap_or(port);
 
-    // Aqui vemos que servidor esta intentando conectarse
-    println!(">>> [SESSION AUTHORIZE] Un servidor pide permiso");
-    println!("    Server Audience ID: {:?}", body.audience);
-    println!("    Scopes: {:?}", body.scopes);
-    println!("    Extra fields: {:?}", body.extra);
+    println!(">>> [SESSION AUTHORIZE] El cliente solicita unirse a un servidor");
+    println!("    Extra fields recibidos: {:?}", body.extra);
 
-    // Simulamos validacion del token de identidad (en prod habria que verificar firma)
-    if body.identity_token.is_empty() {
-        println!("    ! Advertencia: Identity Token vacio");
-    }
-
-    let audience = body
+    // Intentar encontrar el audience en varios lugares
+    let detected_audience = body
         .audience
-        .unwrap_or_else(|| "unknown-server".to_string());
+        .clone()
+        .or_else(|| {
+            body.extra
+                .get("aud")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        })
+        .or_else(|| {
+            body.extra
+                .get("server_id")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        })
+        .or_else(|| {
+            body.extra
+                .get("serverId")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        });
+
+    let audience = match detected_audience {
+        Some(a) if a != "hytale-client" => a, // Evitar usar el client ID como server ID
+        _ => {
+            // FALLBACK CRITICO: Si no hay audience o es el del cliente, usar el ultimo servidor registrado
+            if let Some(last_uuid) = &state.last_server_uuid {
+                println!(
+                    "    ! Usando fallback al último servidor registrado: {}",
+                    last_uuid
+                );
+                last_uuid.clone()
+            } else {
+                println!(
+                    "    ! Advertencia: No se detectó audience y no hay servidor registrado, usando fallback genérico"
+                );
+                "hytale-server".to_string()
+            }
+        }
+    };
+
+    println!("    Audience final (Server UUID): {}", audience);
+
     let scope_str = body
         .scopes
         .map(|s| s.join(" "))
         .unwrap_or_else(|| "hytale:server hytale:client".to_string());
 
-    // Generamos un "Authorization Grant"
+    // Generamos un "Authorization Grant" que contiene el AUD del servidor de destino
     let auth_grant = generate_advanced_jwt(
         &state.username,
         &state.uuid,
         Some(audience),
         &scope_str,
-        port,
+        actual_port,
+        None, // No hay fingerprint en el Grant inicial
     );
 
     let resp = AuthorizeResponse {
@@ -905,29 +1056,46 @@ async fn handle_session_authorize(
 async fn handle_session_exchange(
     port: u16,
     body: ExchangeRequest,
+    host: Option<String>,
     state: Arc<tokio::sync::Mutex<ServerState>>,
 ) -> impl warp::Reply {
     let state = state.lock().await;
+    let actual_port = extract_port(host).unwrap_or(port);
 
-    println!(">>> [SESSION EXCHANGE] Intercambio de token final");
-    println!(
-        "    Grant recibido (longitud): {}",
-        body.authorization_grant.len()
-    );
-    println!("    Extra fields: {:?}", body.extra);
+    println!(">>> [SESSION EXCHANGE] Generando Access Token final");
+    println!("    Body recibido: {:?}", body);
+
+    // Extraer el audience del authorizationGrant
+    let granted_audience = extract_claim_from_jwt(&body.authorization_grant, "aud");
+    println!("    Audience recuperado del Grant: {:?}", granted_audience);
+
+    // CRITICO: Extraer el fingerprint del certificado x509 para el mTLS binding (cnf claim)
+    let fingerprint = body
+        .extra
+        .get("x509Fingerprint")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    if fingerprint.is_some() {
+        println!(
+            "    Fingerprint detectado para mTLS binding: {:?}",
+            fingerprint
+        );
+    }
 
     let scope_str = body
         .scopes
         .map(|s| s.join(" "))
         .unwrap_or_else(|| "hytale:server hytale:client".to_string());
 
-    // Generamos el Access Token final que permite jugar
+    // Generamos el Access Token final incluyendo el fingerprint si existe
     let access_token = generate_advanced_jwt(
         &state.username,
         &state.uuid,
-        Some("hytale-server".to_string()),
+        granted_audience,
         &scope_str,
-        port,
+        actual_port,
+        fingerprint, // <--- Pasamos el fingerprint
     );
 
     let refresh_token = generate_jwt(
@@ -936,7 +1104,7 @@ async fn handle_session_exchange(
         "",
         "hytale:server",
         false,
-        port,
+        actual_port,
     );
 
     let resp = ExchangeResponse {
@@ -996,6 +1164,79 @@ async fn handle_profile_lookup_uuid(
     )
 }
 
+// POST /server/auto-auth (Server auto-auth for F2P servers)
+async fn handle_server_auto_auth(
+    port: u16,
+    body: ServerAutoAuthRequest,
+    host: Option<String>,
+    state: Arc<tokio::sync::Mutex<ServerState>>,
+) -> impl warp::Reply {
+    let actual_port = extract_port(host).unwrap_or(port);
+    println!(">>> [SERVER AUTO-AUTH] El servidor de juego se está identificando");
+    println!("    Body: {:?}", body);
+
+    // Server can provide its own ID or we generate one
+    let server_id = body
+        .server_id
+        .or(body.server_id_alt)
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+
+    // Generate a server-specific UUID
+    let server_uuid = generate_server_uuid(&server_id);
+
+    // GUARDAR EL UUID PARA FUTUROS JOINS
+    {
+        let mut state_lock = state.lock().await;
+        state_lock.last_server_uuid = Some(server_uuid.clone());
+        println!("    ! Guardado server_uuid fallback: {}", server_uuid);
+    }
+
+    // Server name for logging/identification (optional)
+    let server_name = body
+        .server_name
+        .or(body.server_name_alt)
+        .unwrap_or_else(|| format!("Server-{}", &server_id[..8]));
+
+    // Generate tokens with server scope
+    let identity_token = generate_jwt(
+        &server_name,
+        &server_uuid,
+        "",              // No skin for servers
+        "hytale:server", // Server scope only
+        true,            // Include profile info
+        actual_port,
+    );
+
+    let session_token = generate_jwt(
+        &server_name,
+        &server_uuid,
+        "", // No skin for servers
+        "hytale:server",
+        false, // No profile needed for session token
+        actual_port,
+    );
+
+    let expires_at = Utc::now() + chrono::Duration::hours(10); // 10 hours TTL
+
+    println!(
+        ">>> [SERVER AUTO-AUTH] Success: {} ({})",
+        server_uuid, server_name
+    );
+
+    let resp = ServerAutoAuthResponse {
+        identity_token,
+        session_token,
+        expires_in: 36000, // 10 hours in seconds
+        expires_at,
+        token_type: "Bearer".to_string(),
+        server_id: server_id.clone(),
+        server_uuid,
+        server_name,
+    };
+
+    warp::reply::json(&resp)
+}
+
 fn generate_jwt(
     username: &str,
     uuid: &str,
@@ -1004,13 +1245,14 @@ fn generate_jwt(
     include_profile: bool,
     port: u16,
 ) -> String {
-    println!("JWT generation requested.");
+    println!("JWT generation requested with fresh server keys.");
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 
     let header = JwtHeader {
         alg: "EdDSA".to_string(),
         kid: crypto::KEY_ID.to_string(),
         typ: "JWT".to_string(),
+        jwk: Some(crypto::get_server_public_jwk_as_value()),
     };
 
     let now = Utc::now().timestamp();
@@ -1050,7 +1292,7 @@ fn generate_jwt(
     let payload_b64 = URL_SAFE_NO_PAD.encode(payload_str);
 
     let to_sign = format!("{}.{}", header_b64, payload_b64);
-    let signature = crypto::sign_message(&to_sign);
+    let signature = crypto::sign_message_with_server_keys(&to_sign);
 
     format!("{}.{}", to_sign, signature)
 }
@@ -1061,6 +1303,7 @@ fn generate_advanced_jwt(
     audience: Option<String>,
     scope: &str,
     port: u16,
+    fingerprint: Option<String>, // <--- NUEVO
 ) -> String {
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 
@@ -1068,6 +1311,7 @@ fn generate_advanced_jwt(
         alg: "EdDSA".to_string(),
         kid: crypto::KEY_ID.to_string(),
         typ: "JWT".to_string(),
+        jwk: Some(crypto::get_server_public_jwk_as_value()),
     };
 
     let now = Utc::now().timestamp();
@@ -1084,7 +1328,9 @@ fn generate_advanced_jwt(
         sub: uuid.to_string(),
         aud: audience,
         name: Some(username.to_string()),
+        username: Some(username.to_string()), // <--- Replicar para compatibilidad
         entitlements: Some(vec!["game.base".to_string()]),
+        cnf: fingerprint.map(|f| Confirmation { x5t_s256: f }), // <--- NUEVO
     };
 
     let payload_json = serde_json::to_string(&payload).unwrap();
@@ -1093,9 +1339,27 @@ fn generate_advanced_jwt(
     let payload_b64 = URL_SAFE_NO_PAD.encode(payload_json);
 
     let to_sign = format!("{}.{}", header_b64, payload_b64);
-    let signature = crypto::sign_message(&to_sign);
+    let signature = crypto::sign_message_with_server_keys(&to_sign);
 
     format!("{}.{}", to_sign, signature)
+}
+
+fn extract_claim_from_jwt(token: &str, claim: &str) -> Option<String> {
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() < 2 {
+        return None;
+    }
+
+    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+    if let Ok(payload_bytes) = URL_SAFE_NO_PAD.decode(parts[1]) {
+        if let Ok(payload_json) = serde_json::from_slice::<serde_json::Value>(&payload_bytes) {
+            return payload_json
+                .get(claim)
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+        }
+    }
+    None
 }
 
 fn extract_uuid_from_auth(auth_header: Option<String>, default_uuid: &str) -> String {
@@ -1104,25 +1368,8 @@ fn extract_uuid_from_auth(auth_header: Option<String>, default_uuid: &str) -> St
         None => return default_uuid.to_string(),
     };
 
-    // Formato: "Bearer header.payload.signature"
     let token = header.trim_start_matches("Bearer ").trim();
-    let parts: Vec<&str> = token.split('.').collect();
-
-    if parts.len() < 2 {
-        return default_uuid.to_string();
-    }
-
-    // El payload es la segunda parte
-    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-    if let Ok(payload_bytes) = URL_SAFE_NO_PAD.decode(parts[1]) {
-        if let Ok(payload_json) = serde_json::from_slice::<serde_json::Value>(&payload_bytes) {
-            if let Some(sub) = payload_json.get("sub").and_then(|s| s.as_str()) {
-                return sub.to_string();
-            }
-        }
-    }
-
-    default_uuid.to_string()
+    extract_claim_from_jwt(token, "sub").unwrap_or_else(|| default_uuid.to_string())
 }
 
 async fn handle_update_path(
@@ -1155,4 +1402,8 @@ async fn handle_update_identity(
     state.uuid = body.uuid;
 
     warp::reply::with_status("Identity updated", warp::http::StatusCode::OK)
+}
+
+fn extract_port(host: Option<String>) -> Option<u16> {
+    host.and_then(|h| h.split(':').nth(1).and_then(|p| p.parse::<u16>().ok()))
 }

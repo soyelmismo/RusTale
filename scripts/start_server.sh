@@ -3,7 +3,7 @@
 SCRIPTPATH=$(readlink -f "$0")
 DIR=$(dirname "$SCRIPTPATH")
 EXE="./rustale"
-ARGS="--dedicated-server --online-mode=local
+ARGS="--dedicated-server --online-mode=local"
 
 FINAL_CMD="cd '$DIR' && $EXE $ARGS"
 

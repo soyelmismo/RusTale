@@ -10,6 +10,7 @@ pub struct ServerConfig {
     pub java_exec_args: String,
     pub tunnel_provider: Option<String>,
     pub use_direct_assets: bool, // Use assets directly from client without copying
+    pub auth_domain: Option<String>, // Custom F2P auth domain (e.g., "auth.sanasol.ws")
 }
 
 impl Default for ServerConfig {
@@ -22,6 +23,7 @@ impl Default for ServerConfig {
             server_args: "--auth-mode insecure --assets Assets.zip".to_string(),
             tunnel_provider: None,
             use_direct_assets: true, // Enable direct asset access by default
+            auth_domain: Some("127.0.0.000001".to_string()), // Local embedded server
         }
     }
 }

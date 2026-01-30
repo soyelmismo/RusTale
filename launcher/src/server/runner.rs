@@ -1,6 +1,8 @@
 use crate::config::OnlineFixMode;
+use crate::server::assets::{
+    find_best_client_version, generate_server_args_with_direct_assets, validate_client_version,
+};
 use crate::server::config::ServerConfig;
-use crate::server::assets::{find_best_client_version, validate_client_version, generate_server_args_with_direct_assets};
 use anyhow::{Context, Result};
 use rand::Rng;
 use std::path::PathBuf;
@@ -19,33 +21,36 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     let _ = tokio::fs::create_dir_all(&root_dir).await;
     let port_file = root_dir.join("server.port");
 
-    let auth_port: u16 = if port_file.exists() {
-        // Si ya existe un puerto guardado, lo usamos para no tener que reparchear el JAR
-        let content = tokio::fs::read_to_string(&port_file)
-            .await
-            .unwrap_or_default();
-        content.trim().parse().unwrap_or_else(|_| {
-            println!("Corrupt port file, generating new one...");
-            0
-        })
-    } else {
-        0
-    };
+    let mut auth_port = crate::util::get_saved_port();
 
-    let auth_port = if auth_port > 0 {
-        auth_port
-    } else {
-        // Buscar puerto libre aleatorio (10000 - 60000)
-        let mut rng = rand::rng();
-        let new_port = rng.random_range(10000..60000);
+    // Check if a server is already alive on the saved port.
+    // If not alive, check if it's free. If not free, find a new one.
+    if !crate::game::server::is_server_alive(auth_port).await {
+        if std::net::TcpListener::bind(("127.0.0.1", auth_port)).is_err() {
+            println!(
+                "Port {} is taken by another app or zombie, finding new one...",
+                auth_port
+            );
+            auth_port = crate::util::find_free_port();
 
-        // Guardarlo para el futuro
-        if let Err(e) = tokio::fs::write(&port_file, new_port.to_string()).await {
-            eprintln!("Warning: Could not save auth port to file: {}", e);
+            // Save for future use
+            if let Err(e) = tokio::fs::write(&port_file, auth_port.to_string()).await {
+                eprintln!("Warning: Could not save auth port to file: {}", e);
+            }
+        } else {
+            // Port is free, use it (and it was already in the file or is the default)
+            println!("Using Auth Port: {}", auth_port);
+            // Ensure the file exists if it was the default
+            if !port_file.exists() {
+                let _ = tokio::fs::write(&port_file, auth_port.to_string()).await;
+            }
         }
-        println!("Allocated new Auth Port: {}", new_port);
-        new_port
-    };
+    } else {
+        println!(
+            "Existing Auth Server detected on port {}. Attaching naturally.",
+            auth_port
+        );
+    }
 
     // -----------------------------------------------------------------------
     // INICIAR SERVIDOR WEB LOCAL (Si es necesario)
@@ -59,6 +64,22 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
                 "Local Auth Server already running on port {}. Attaching...",
                 auth_port
             );
+
+            // Sincronizar llaves para que el proceso actual reconozca los tokens del emulador activo
+            let client = reqwest::Client::new();
+            let auth_url = format!("http://127.0.0.000001:{}", auth_port);
+            match crate::game::auth::fetch_remote_jwks(&client, &auth_url).await {
+                Ok(jwks) => {
+                    crate::game::crypto::update_jwks_from_remote(jwks);
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[Server] Warning: Could not sync JWKS from existing emulator: {}",
+                        e
+                    );
+                }
+            }
+
             let _ = auth_result_tx.send(Ok(()));
         } else {
             println!(
@@ -178,7 +199,11 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         let mut source_candidate = None;
 
         // Find the best matching client version
-        let best_version = match find_best_client_version(&main_app_dir, &config.branch, &config.game_version.to_string()) {
+        let best_version = match find_best_client_version(
+            &main_app_dir,
+            &config.branch,
+            &config.game_version.to_string(),
+        ) {
             Ok(version) => {
                 println!("Found matching client version: {}", version);
                 version
@@ -199,9 +224,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         };
 
         // Candidate 1: Specific version folder
-        let specific = main_app_dir
-            .join(&config.branch)
-            .join(&best_version);
+        let specific = main_app_dir.join(&config.branch).join(&best_version);
         if specific.exists() && specific.join("Server").exists() {
             source_candidate = Some(specific);
         }
@@ -231,7 +254,9 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
             let src_assets = src.join("Assets.zip");
             if config.use_direct_assets {
                 // Validate client version has required files
-                if let Err(e) = validate_client_version(&main_app_dir, &config.branch, &best_version) {
+                if let Err(e) =
+                    validate_client_version(&main_app_dir, &config.branch, &best_version)
+                {
                     eprintln!("Client validation failed: {}", e);
                     eprintln!("Falling back to copying Assets.zip...");
                     // Fallback to copying if validation fails
@@ -243,18 +268,14 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
                         }
                     }
                     // Add --assets argument for local copy
-                    config.server_args = generate_server_args_with_direct_assets(
-                        &config.server_args,
-                        &dst_assets
-                    );
+                    config.server_args =
+                        generate_server_args_with_direct_assets(&config.server_args, &dst_assets);
                 } else {
                     println!("Using assets directly from client installation (no copying)");
                     println!("Assets path: {:?}", src_assets);
                     // Add --assets argument with absolute path to client assets
-                    config.server_args = generate_server_args_with_direct_assets(
-                        &config.server_args,
-                        &src_assets
-                    );
+                    config.server_args =
+                        generate_server_args_with_direct_assets(&config.server_args, &src_assets);
                 }
             } else {
                 // Original behavior: copy Assets.zip
@@ -269,10 +290,8 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
                     eprintln!("This may cause Exit Code 7 - server will fail without assets!");
                 }
                 // Add --assets argument for local copy
-                config.server_args = generate_server_args_with_direct_assets(
-                    &config.server_args,
-                    &dst_assets
-                );
+                config.server_args =
+                    generate_server_args_with_direct_assets(&config.server_args, &dst_assets);
             }
 
             // Copy Server folder (always needed)
@@ -312,9 +331,13 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     // Handle assets regardless of whether JAR exists or not
     println!("Setting up assets configuration...");
     let main_app_dir = crate::config::get_app_dir();
-    
+
     // Find the best matching client version for assets
-    let best_version = match find_best_client_version(&main_app_dir, &config.branch, &config.game_version.to_string()) {
+    let best_version = match find_best_client_version(
+        &main_app_dir,
+        &config.branch,
+        &config.game_version.to_string(),
+    ) {
         Ok(version) => {
             println!("Found matching client version for assets: {}", version);
             version
@@ -327,11 +350,9 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
 
     // Try to find client installation
     let mut source_candidate = None;
-    
+
     // Candidate 1: Specific version folder
-    let specific = main_app_dir
-        .join(&config.branch)
-        .join(&best_version);
+    let specific = main_app_dir.join(&config.branch).join(&best_version);
     if specific.exists() && specific.join("Assets.zip").exists() {
         source_candidate = Some(specific);
     }
@@ -348,7 +369,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     if let Some(src) = source_candidate {
         let src_assets = src.join("Assets.zip");
         println!("Found client assets at: {:?}", src_assets);
-        
+
         if config.use_direct_assets {
             // Validate client version has required files
             if let Err(e) = validate_client_version(&main_app_dir, &config.branch, &best_version) {
@@ -363,18 +384,14 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
                     }
                 }
                 // Add --assets argument for local copy
-                config.server_args = generate_server_args_with_direct_assets(
-                    &config.server_args,
-                    &dst_assets
-                );
+                config.server_args =
+                    generate_server_args_with_direct_assets(&config.server_args, &dst_assets);
             } else {
                 println!("Using assets directly from client installation (no copying)");
                 println!("Assets path: {:?}", src_assets);
                 // Add --assets argument with absolute path to client assets
-                config.server_args = generate_server_args_with_direct_assets(
-                    &config.server_args,
-                    &src_assets
-                );
+                config.server_args =
+                    generate_server_args_with_direct_assets(&config.server_args, &src_assets);
             }
         } else {
             // Original behavior: copy Assets.zip
@@ -389,23 +406,25 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
                 eprintln!("This may cause Exit Code 7 - server will fail without assets!");
             }
             // Add --assets argument for local copy
-            config.server_args = generate_server_args_with_direct_assets(
-                &config.server_args,
-                &dst_assets
-            );
+            config.server_args =
+                generate_server_args_with_direct_assets(&config.server_args, &dst_assets);
         }
     } else {
         eprintln!("WARNING: No client assets found! Server may fail to start.");
-        eprintln!("Looking for assets in: {:?}", main_app_dir.join(&config.branch).join(&best_version).join("Assets.zip"));
-        
+        eprintln!(
+            "Looking for assets in: {:?}",
+            main_app_dir
+                .join(&config.branch)
+                .join(&best_version)
+                .join("Assets.zip")
+        );
+
         // Try to use local assets if they exist
         let local_assets = install_dir.join("Assets.zip");
         if local_assets.exists() {
             println!("Using local Assets.zip");
-            config.server_args = generate_server_args_with_direct_assets(
-                &config.server_args,
-                &local_assets
-            );
+            config.server_args =
+                generate_server_args_with_direct_assets(&config.server_args, &local_assets);
         }
     }
 
@@ -443,8 +462,15 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         .await?;
     }
 
-    // 4. Parchear el JAR para Online Mode
+    // 4. Parchear el JAR para Online Mode con Embedded Dual Auth
     println!("[3/5] Patching JAR for {} mode...", config.online_mode);
+
+    // Crear backup del JAR original si no existe
+    let original_jar = server_jar_raw.with_extension("original");
+    if !original_jar.exists() {
+        println!("Creating backup of original JAR...");
+        std::fs::copy(&server_jar_raw, &original_jar)?;
+    }
 
     let mode_enum = match config.online_mode.as_str() {
         "sanasol" => OnlineFixMode::Sanasol,
@@ -452,13 +478,13 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     };
 
     let patched_jar_name = format!(
-        "HytaleServer.{}.{}.{}.jar",
-        config.online_mode, config.branch, target_ver_num
+        "HytaleServer.{}.{}.{}.{}.jar",
+        auth_port, config.online_mode, config.branch, target_ver_num
     );
     let patched_jar_path = install_dir.join("Server").join(&patched_jar_name);
 
     if !patched_jar_path.exists() {
-        println!("Generating patched JAR: {}", patched_jar_name);
+        println!("Patch required. Generating JAR: {}", patched_jar_name);
         crate::game::patcher::patch_server_jar(
             &server_jar_raw,
             &patched_jar_path,
@@ -482,7 +508,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         Ok(p) => {
             println!("[Runner] (Server) Java Proxy updated and active.");
             p.to_string_lossy().to_string()
-        },
+        }
         Err(e) => {
             eprintln!("[Runner] (Server) Failed to setup Java Proxy: {}", e);
             java_exec.clone()
@@ -539,19 +565,21 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     println!("Final pre-launch validation:");
     println!("  - Working directory: {:?}", install_dir);
     println!("  - Patched JAR: {:?}", patched_jar_path);
-    
+
     if !patched_jar_path.exists() {
         eprintln!("FATAL: Patched JAR not found at {:?}", patched_jar_path);
-        return Err(anyhow::anyhow!("Patched JAR missing - this will cause Exit Code 7"));
+        return Err(anyhow::anyhow!(
+            "Patched JAR missing - this will cause Exit Code 7"
+        ));
     }
-    
+
     let assets_in_install_dir = install_dir.join("Assets.zip");
     if assets_in_install_dir.exists() {
         println!("  - Assets.zip: {:?} (local copy)", assets_in_install_dir);
     } else {
         println!("  - Assets.zip: Using direct assets path");
     }
-    
+
     let server_dir = install_dir.join("Server");
     if !server_dir.exists() {
         eprintln!("WARNING: Server directory not found at {:?}", server_dir);
@@ -561,20 +589,20 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     println!("  - Final server args: {}", config.server_args);
 
     let mut cmd = Command::new(final_java);
-    
+
     // Inject AURORA_MODE so the Proxy knows what to do
     cmd.env("AURORA_MODE", &config.online_mode);
 
     cmd.current_dir(&install_dir);
 
     // Filter out AOT args explicitly to avoid errors
-    let java_args: Vec<&str> = config.java_exec_args.split_whitespace()
+    let java_args: Vec<&str> = config
+        .java_exec_args
+        .split_whitespace()
         .filter(|a| !a.starts_with("-XX:AOTCache"))
         .collect();
-    
-    cmd.args(java_args)
-        .arg("-jar")
-        .arg(&patched_jar_path);
+
+    cmd.args(java_args).arg("-jar").arg(&patched_jar_path);
     cmd.args(config.server_args.split_whitespace());
 
     cmd.stdout(std::process::Stdio::piped())
@@ -582,7 +610,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         .stdin(std::process::Stdio::inherit());
 
     cmd.env("RUSTALE_IS_SERVER", "1");
-    
+
     // Ensure no console window appears even for server (as we capture logs)
     #[cfg(windows)]
     {

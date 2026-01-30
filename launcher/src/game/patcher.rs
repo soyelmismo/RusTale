@@ -537,15 +537,18 @@ pub fn setup_java_proxy(java_real: &PathBuf) -> anyhow::Result<PathBuf> {
     if !java_original.exists() {
         std::fs::rename(java_real, &java_original)?;
     }
-    
+
     // Always overwrite the proxy binary to ensure it matches the current launcher version
     let current_exe = std::env::current_exe()?;
     if let Err(e) = std::fs::copy(&current_exe, &java_proxy) {
         // If we can't copy (e.g. file busy), and it exists, we might warn but proceed.
         // However, for development/updates, this is critical.
-        eprintln!("[Patcher] Warning: Failed to update java proxy binary: {}", e);
+        eprintln!(
+            "[Patcher] Warning: Failed to update java proxy binary: {}",
+            e
+        );
         if !java_proxy.exists() {
-             return Err(e.into());
+            return Err(e.into());
         }
     }
 
@@ -575,8 +578,7 @@ pub fn remove_java_proxy(java_real: &PathBuf) -> anyhow::Result<()> {
     Ok(())
 }
 
-
-/// Generates the AOT Cache for a specific JAR.
+/* /// Generates the AOT Cache for a specific JAR.
 /// Warning: This operation might time out or hang if the server doesn't exit automatically.
 /// Ideally interact with the process or wait for a specific log line then kill it.
 pub fn generate_server_aot(
@@ -698,13 +700,13 @@ pub fn generate_server_aot(
         Err(anyhow::anyhow!("Failed to generate AOT cache"))
     }
 }
-
-/// Helper to swap AOT files similar to the JARs, to avoid crashes.
+ */
+/* /// Helper to swap AOT files similar to the JARs, to avoid crashes.
 /// Returns true if it performed a swap (disabled original AOT).
 pub fn handle_aot_backups(server_dir: &std::path::Path) -> anyhow::Result<bool> {
     let original_aot = server_dir.join("HytaleServer.aot");
     let backup_aot = server_dir.join("HytaleServer.aot.original");
-    
+
     if original_aot.exists() && !backup_aot.exists() {
         println!("[Patcher] Backing up original AOT cache to avoid mismatch.");
         std::fs::rename(&original_aot, &backup_aot)?;
@@ -712,3 +714,4 @@ pub fn handle_aot_backups(server_dir: &std::path::Path) -> anyhow::Result<bool> 
     }
     Ok(false)
 }
+ */

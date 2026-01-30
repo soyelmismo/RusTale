@@ -1201,6 +1201,9 @@ impl RusTale {
 
                 self.cancellation_token.store(false, Ordering::Relaxed);
 
+                // El Runner se encargará de gestionar las llaves (sincronizar o generar)
+                // según detecte un servidor vivo o decida iniciar uno nuevo.
+
                 if self.status == LauncherStatus::Playing {
                     self.running_game = None;
                     self.status = LauncherStatus::Ready;
@@ -2152,7 +2155,7 @@ impl RusTale {
                         self.window_size = size; // Sincronizar con tu variable existente
                         self.settings.width = size.width as u32;
                         self.settings.height = size.height as u32;
-                        
+
                         // Verificar estado maximizado después de resize
                         // En Iced 0.14, las funciones de ventana devuelven Task
                         let size_clone = size;
@@ -2599,7 +2602,7 @@ impl RusTale {
                 .height(32), // Altura de la barra de título
             )
             .style(move |t| theme::title_bar_style(&palette, t, &self.settings.theme.base_mode))
-            .width(Length::Fill)
+            .width(Length::Fill),
         )
         .on_press(Message::WindowDrag)
         .interaction(Interaction::Grab); // Cursor de mano al arrastrar
