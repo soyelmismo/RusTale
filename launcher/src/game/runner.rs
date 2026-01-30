@@ -226,6 +226,20 @@ impl Recipe for Runner {
                 if settings.enable_online_fix {
                     auth_mode = "authenticated".to_string();
 
+                    // --- [CORRECCIÓN INICIO] --- 
+                    // Configuramos los modos y URLs ANTES de verificar archivos físicos.
+                    match settings.online_fix_mode {
+                        crate::config::OnlineFixMode::Local => {
+                            aurora_env_value = "local".to_string();
+                            auth_url = format!("http://127.0.0.000001:{}", server_port);
+                        }
+                        crate::config::OnlineFixMode::Sanasol => {
+                            aurora_env_value = "sanasol".to_string();
+                            auth_url = "https://sessions.sanasol.ws".to_string();
+                        }
+                    }
+                    // --- [CORRECCIÓN FIN] ---
+
                     let server_root_dir = crate::config::get_server_root_dir();
                     if !server_root_dir.exists() {
                         let _ = std::fs::create_dir_all(&server_root_dir);
@@ -264,11 +278,7 @@ impl Recipe for Runner {
                         // Authentication & Server Logic
                         match settings.online_fix_mode {
                             crate::config::OnlineFixMode::Local => {
-                                // Local configuration
-                                aurora_env_value = "local".to_string();
-                                auth_url = format!("http://127.0.0.000001:{}", server_port);
-
-                                // Start local server
+                                // Start local server (aurora_env_value y auth_url ya configurados arriba)
                                 let server_username = player_name.clone();
                                 let server_uuid = player_uuid.clone();
                                 let server_game_dir = game_working_dir.clone();
@@ -330,9 +340,8 @@ impl Recipe for Runner {
                                 server_started = true;
                             }
                             crate::config::OnlineFixMode::Sanasol => {
-                                // Sanasol configuration
-                                auth_url = "https://sessions.sanasol.ws".to_string();
-                                aurora_env_value = "sanasol".to_string();
+                                // Sanasol configuration (aurora_env_value y auth_url ya configurados arriba)
+                                // Aquí podríamos añadir lógica específica de Sanasol si fuera necesario
                             }
                         }
 

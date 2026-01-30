@@ -264,42 +264,51 @@ fn get_swaps(mode: &str) -> Vec<SwapEntry> {
     swaps
 }
 #[cfg(target_os = "linux")]
-fn get_swaps(_mode: &str) -> Vec<SwapEntry> {
+fn get_swaps(mode: &str) -> Vec<SwapEntry> {
     let mut swaps = Vec::new();
     let port_str = std::env::var("AURORA_PORT").unwrap_or_else(|_| "59313".to_string());
 
-    // C: {.old = make_csstr(L"https://account-data."), .new = make_csstr(L"http://127.0.0")},
-    swaps.push(SwapEntry {
-        old: CsString::from_str("https://account-data."),
-        new: CsString::from_str("http://127.0.0.000000"),
-    });
+    if mode == "sanasol" {
+        swaps.push(SwapEntry {
+            old: CsString::from_str("hytale.com"),
+            new: CsString::from_str("sanasol.ws"),
+        });
+        // Agregar aquí los mismos dominios que Windows si sanasol.ws usa subdominios estándar
+    } else {
+        // --- LOGICA ORIGINAL DE LOCALHOST (EXISTENTE) ---
+        // C: {.old = make_csstr(L"https://account-data."), .new = make_csstr(L"http://127.0.0")},
+        swaps.push(SwapEntry {
+            old: CsString::from_str("https://account-data."),
+            new: CsString::from_str("http://127.0.0.000000"),
+        });
 
-    // C: {.old = make_csstr(L"https://sessions."),     .new = make_csstr(L"http://127.0.0")},
-    swaps.push(SwapEntry {
-        old: CsString::from_str("https://sessions."),
-        new: CsString::from_str("http://127.0.0.00"),
-    });
+        // C: {.old = make_csstr(L"https://sessions."),     .new = make_csstr(L"http://127.0.0")},
+        swaps.push(SwapEntry {
+            old: CsString::from_str("https://sessions."),
+            new: CsString::from_str("http://127.0.0.00"),
+        });
 
-    // C: {.old = make_csstr(L"https://telemetry."),    .new = make_csstr(L"http://127.0.0")},
-    swaps.push(SwapEntry {
-        old: CsString::from_str("https://telemetry."),
-        new: CsString::from_str("http://127.0.0.000"),
-    });
+        // C: {.old = make_csstr(L"https://telemetry."),    .new = make_csstr(L"http://127.0.0")},
+        swaps.push(SwapEntry {
+            old: CsString::from_str("https://telemetry."),
+            new: CsString::from_str("http://127.0.0.000"),
+        });
 
-    // C: {.old = make_csstr(L"https://tools."),        .new = make_csstr(L"http://127.0.0")},
-    // FIX: The previous Rust code generated "http://127.0.0.00" (17 chars) for "https://tools." (14 chars)
-    // This caused new.len > old.len, corrupting memory or failing the comparison in C.
-    // We use the strict C version:
-    swaps.push(SwapEntry {
-        old: CsString::from_str("https://tools."),
-        new: CsString::from_str("http://127.000"),
-    });
+        // C: {.old = make_csstr(L"https://tools."),        .new = make_csstr(L"http://127.0.0")},
+        // FIX: The previous Rust code generated "http://127.0.0.00" (17 chars) for "https://tools." (14 chars)
+        // This caused new.len > old.len, corrupting memory or failing the comparison in C.
+        // We use the strict C version:
+        swaps.push(SwapEntry {
+            old: CsString::from_str("https://tools."),
+            new: CsString::from_str("http://127.000"),
+        });
 
-    // C: {.old = make_csstr(L"hytale.com"),            .new = make_csstr(L"1:59313")},
-    swaps.push(SwapEntry {
-        old: CsString::from_str("hytale.com"),
-        new: CsString::from_str(&format!("0001:{}", port_str)),
-    });
+        // C: {.old = make_csstr(L"hytale.com"),            .new = make_csstr(L"1:59313")},
+        swaps.push(SwapEntry {
+            old: CsString::from_str("hytale.com"),
+            new: CsString::from_str(&format!("0001:{}", port_str)),
+        });
+    }
 
     // C: {.old = make_csstr(L"authenticated"),         .new = make_csstr(L"insecure")},
     swaps.push(SwapEntry {
