@@ -106,7 +106,7 @@ impl std::fmt::Display for OnlineFixMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Local => write!(f, "Local Patch"),
-            Self::Sanasol => write!(f, "Sanasol Patch (broken)"),
+            Self::Sanasol => write!(f, "Sanasol Patch"),
         }
     }
 }

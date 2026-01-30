@@ -64,13 +64,13 @@ pub async fn fetch_remote_tokens(
         .context("Failed to parse auth tokens")?;
 
     // --- NUEVO: Reemplazar ISS y re-firmar tokens ---
-    tokens.identity_token = re_sign_jwt(&tokens.identity_token, auth_server_url)?;
-    tokens.session_token = re_sign_jwt(&tokens.session_token, auth_server_url)?;
+    //tokens.identity_token = re_sign_jwt(&tokens.identity_token, auth_server_url)?;
+    //tokens.session_token = re_sign_jwt(&tokens.session_token, auth_server_url)?;
 
-    println!(
-        "[Auth] Tokens received and re-signed with issuer: {}",
-        auth_server_url
-    );
+    //println!(
+    //    "[Auth] Tokens received and re-signed with issuer: {}",
+    //    auth_server_url
+    //);
     Ok(tokens)
 }
 
