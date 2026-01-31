@@ -20,6 +20,8 @@ struct Uniforms {
     intensity: f32,
     alpha: f32,
     shader_id: u32,
+    next_shader_id: u32,
+    transition: f32,
 }
 @group(0) @binding(0) var<uniform> u: Uniforms;
 
@@ -115,16 +117,31 @@ pub fn build_uber_shader() -> String {
     // 1. HEADER (Structs, Uniforms)
     // 2. GLOBAL HELPERS (Funciones extraidas de forest.wgsl)
     // 3. SHADER FUNCTIONS (Los cuerpos principales envueltos en fn shader_N)
-    // 4. FS_MAIN (Switch gigante)
-    let result = format!("{}\n{}\n{}\n@fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {{
-    var col = vec4<f32>(0.0);
-    switch (u.shader_id) {{
+    // 4. FS_MAIN (Cross-fading logic)
+    let result = format!("{}\n{}\n{}\n
+// Helper para obtener el color de cualquier shader mediante ID
+fn get_shader_color(id: u32, in: VertexOutput) -> vec4<f32> {{
+    switch (id) {{
 {}
-        default: {{ col = shader_0(in); }}
+        default: {{ return shader_0(in); }}
     }}
-    // Aplicar mezcla de alpha global aqui (pre-multiplicado)
-    return vec4<f32>(col.rgb, col.a * u.alpha);
+}}
+
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {{
+    let col_a = get_shader_color(u.shader_id, in);
+    
+    // Si no hay transicion, devolvemos col_a directamente para ahorrar recursos
+    if (u.transition <= 0.0) {{
+        return vec4<f32>(col_a.rgb, col_a.a * u.alpha);
+    }}
+    
+    let col_b = get_shader_color(u.next_shader_id, in);
+    
+    // MEZCLA LINEAL (Cross-fade)
+    let final_col = mix(col_a, col_b, u.transition);
+    
+    return vec4<f32>(final_col.rgb, final_col.a * u.alpha);
 }}
 ", HEADER, global_helpers, shader_functions, switch_cases);
 

@@ -841,12 +841,6 @@ async fn handle_session_child(
     let requested_uuid = body.uuid.clone().unwrap_or_else(|| state.uuid.clone());
     let requested_name = body.name.clone().unwrap_or_else(|| state.username.clone());
 
-    let skin = state
-        .skins
-        .get(&requested_uuid)
-        .cloned()
-        .unwrap_or_else(|| serde_json::from_str(DEFAULT_SKIN).unwrap_or_default());
-
     let identity_token = generate_jwt(
         &requested_name,
         &requested_uuid,

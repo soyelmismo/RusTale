@@ -1,5 +1,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use mimalloc::MiMalloc;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
+
+
 use clap::Parser;
 use futures::SinkExt;
 use iced::widget::{Space, column, container, image, mouse_area, row, stack};
@@ -188,7 +195,7 @@ pub fn main() -> iced::Result {
         eprintln!("===================================================");
         eprintln!("ERROR: There's already an instance of RusTale running.");
         eprintln!("If you don't see the window, check Task Manager");
-        eprintln!("and close 'rustale.exe' or 'java.exe'.");
+        eprintln!("and close 'rustale' or 'java'.");
         eprintln!("===================================================");
         std::process::exit(1);
     }
@@ -228,7 +235,7 @@ pub fn main() -> iced::Result {
         size: iced::Size::new(width, height),
         min_size: Some(iced::Size::new(480.0, 390.0)),
         resizable: true,
-        icon: iced::window::icon::from_file_data(include_bytes!("../assets/logo.png"), None).ok(),
+        icon: iced::window::icon::from_file_data(include_bytes!("../assets/icon.png"), None).ok(),
 
         // --- CAMBIOS PARA CUSTOM TITLEBAR ---
         visible: !is_quickplay,
@@ -418,6 +425,11 @@ struct RusTale {
     shader_change_timer: f32, // Acumulador para cambio automatico
     ui_opacity_accumulator: f32, // Nuevo campo: valor real de 0.0 a 1.0
                               // ------------------------------------- // Anadir esto
+    
+    // --- CAMPOS PARA OPTIMIZACIÓN DE TICKING ---
+    is_minimized: bool,         // Estado de minimización de la ventana
+    is_focused: bool,           // Estado de foco de la ventana
+    // -------------------------------------
 }
 
 impl RusTale {
@@ -606,6 +618,11 @@ impl RusTale {
                 shader_change_timer: 0.0,
                 ui_opacity_accumulator: 1.0, // Inicializar con opacidad total
                 // -------------------------------------
+                
+                // --- CAMPOS PARA OPTIMIZACIÓN DE TICKING ---
+                is_minimized: false,        // Inicialmente no minimizado
+                is_focused: true,          // Inicialmente con foco (ventana principal)
+                // -------------------------------------
             },
             Task::batch(vec![
                 Task::done(Message::Initialize),
@@ -673,7 +690,7 @@ impl RusTale {
         // 1. Efectos LSD (si estan activos)
         // 2. Redimensionamiento de ventana (siempre activo)
         // 3. Mantener self.cursor_position actualizado para el calculo del arrastre inicial
-        let mouse_sub = if self.is_window_visible {
+        let mouse_sub = if self.is_window_visible && self.is_focused {
             iced::event::listen_with(|event, _status, _window_id| {
                 if let iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) = event {
                     Some(Message::CursorMoved(position))
@@ -690,7 +707,7 @@ impl RusTale {
             Subscription::none()
         };
 
-        let tick_sub = if self.is_window_visible {
+        let tick_sub = if self.is_window_visible && !self.is_minimized && self.is_focused {
             if self.settings.theme.lsd_mode {
                 iced::time::every(std::time::Duration::from_millis(33)).map(Message::Tick)
             } else if self.settings_state.is_open {
@@ -2334,6 +2351,8 @@ impl RusTale {
                 }
             }
             Message::MinimizeWindow => {
+                self.is_minimized = true;
+                println!("[Window] Window minimized - Disabling ticks");
                 window::oldest().and_then(|id| {
                     // El segundo argumento es 'minimized' (true para minimizar)
                     window::minimize(id, true)
@@ -2341,6 +2360,10 @@ impl RusTale {
             }
             Message::MaximizeWindow => {
                 self.is_maximized = !self.is_maximized;
+                if self.is_minimized {
+                    self.is_minimized = false;
+                    println!("[Window] Window restored from minimized - Enabling ticks");
+                }
                 window::oldest().and_then(|id| window::toggle_maximize(id))
             }
 
@@ -2369,6 +2392,16 @@ impl RusTale {
                     window::Event::CloseRequested => {
                         return Task::done(Message::CloseRequested);
                     }
+                    // --- NUEVOS EVENTOS PARA OPTIMIZACIÓN ---
+                    window::Event::Focused => {
+                        self.is_focused = true;
+                        println!("[Window] Window gained focus - Enabling ticks");
+                    }
+                    window::Event::Unfocused => {
+                        self.is_focused = false;
+                        println!("[Window] Window lost focus - Disabling ticks");
+                    }
+                    // ----------------------------------------
                     _ => {}
                 }
                 Task::none()
@@ -2761,6 +2794,8 @@ impl RusTale {
                 shader.update_mouse_position(self.cursor_position);
                 // IMPORTANTE: Actualizar shader_id durante transiciones
                 shader.update_shader_id(self.active_shader_idx);
+                // IMPORTANTE: Actualizar estado de transición
+                shader.update_transition(self.next_shader_idx, self.shader_transition);
                 // IMPORTANTE: Actualizar color de acento en tiempo real
                 shader.update_accent(palette.accent);
                 shader
@@ -2794,62 +2829,69 @@ impl RusTale {
 
         // --- CONSTRUCCIoN DE LA BARRA DE TiTULO ---
         let title_bar_palette = ctx.palette.clone(); // Clonar completamente para evitar error de prestamo
-        let title_bar = mouse_area(
-            container(
-                row![
-                    // Icono PNG
-                    container(
-                        image(crate::util::icons::load_window_icon_handle())
-                            .width(20)
-                            .height(20)
-                            .content_fit(ContentFit::Contain)
-                            .opacity(ctx.palette.text_primary.a)
+        let title_bar_visual_inner = container(
+            row![
+                // Icono PNG
+                container(
+                    theme::magic_image(
+                    image(crate::util::icons::load_window_icon_handle())
+                        .width(20)
+                        .height(20)
+                        .content_fit(ContentFit::Contain)
+                        .opacity(ctx.palette.text_primary.a) // <--- Agrega esto para desvanecer imagenes
+                        .into(),
+                    ctx,
                     )
-                    .padding(Padding::new(0.0).left(10.0).right(10.0)), // Padding lateral
-                    // Titulo
-                    container(theme::text_small(self.title(), ctx))
-                        .width(Length::Fill)
-                        .align_y(Alignment::Center),
-                    // Botones de control
-                    row![
-                        // Minimizar
-                        theme::window_control_button(
-                            crate::util::icons::MINUS,
-                            Message::MinimizeWindow,
-                            false,
-                            title_bar_palette,
-                            ctx
-                        ),
-                        // Maximizar / Restaurar
-                        theme::window_control_button(
-                            if self.is_maximized {
-                                crate::util::icons::RESTORE
-                            } else {
-                                crate::util::icons::SQUARE
-                            },
-                            Message::MaximizeWindow,
-                            false,
-                            title_bar_palette,
-                            ctx
-                        ),
-                        // Cerrar (Rojo)
-                        theme::window_control_button(
-                            crate::util::icons::X,
-                            Message::CloseRequested,
-                            true, // is_close
-                            title_bar_palette,
-                            ctx
-                        ),
-                    ]
+                )
+                .padding(Padding::new(0.0).left(10.0).right(10.0)), // Padding lateral
+                // Titulo
+                container(theme::text_small(self.title(), ctx))
+                    .width(Length::Fill)
+                    .align_y(Alignment::Center),
+                // Botones de control
+                row![
+                    // Minimizar
+                    theme::window_control_button(
+                        crate::util::icons::MINUS,
+                        Message::MinimizeWindow,
+                        false,
+                        title_bar_palette,
+                        ctx
+                    ),
+                    // Maximizar / Restaurar
+                    theme::window_control_button(
+                        if self.is_maximized {
+                            crate::util::icons::RESTORE
+                        } else {
+                            crate::util::icons::SQUARE
+                        },
+                        Message::MaximizeWindow,
+                        false,
+                        title_bar_palette,
+                        ctx
+                    ),
+                    // Cerrar (Rojo)
+                    theme::window_control_button(
+                        crate::util::icons::X,
+                        Message::CloseRequested,
+                        true, // is_close
+                        title_bar_palette,
+                        ctx
+                    ),
                 ]
-                .align_y(Alignment::Center)
-                .height(32), // Altura de la barra de titulo
-            )
-            .style(move |t| theme::title_bar_style(&title_bar_palette, t, &self.settings.theme.base_mode))
-            .width(Length::Fill),
+            ]
+            .align_y(Alignment::Center)
+            .height(32), // Altura de la barra de titulo
         )
-        .on_press(Message::WindowDrag)
-        .interaction(Interaction::Grab); // Cursor de mano al arrastrar
+        .style(move |t| theme::title_bar_style(&title_bar_palette, t, &self.settings.theme.base_mode))
+        .width(Length::Fill);
+
+        let title_bar_magic = theme::magic_container(title_bar_visual_inner.into(), ctx);
+
+        let title_bar = mouse_area(title_bar_magic)
+            .on_press(Message::WindowDrag)
+            .interaction(Interaction::Grab);
+
 
         // Estructura principal visual (Fondo + Barra + Contenido)
         let visual_content = column![

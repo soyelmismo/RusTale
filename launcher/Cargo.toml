@@ -23,6 +23,8 @@ iced = { version = "0.14.0", features = [
 
 iced_renderer = "0.14.0"
 
+mimalloc = { version = "0.1.48", default-features = false }
+
 # Async Runtime
 tokio = { version = "1.49.0", features = ["full"] }
 async-trait = "0.1.89"

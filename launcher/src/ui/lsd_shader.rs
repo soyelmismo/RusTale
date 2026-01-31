@@ -27,8 +27,8 @@ struct Uniforms {
     // BLOQUE 3 (16b)
     alpha: f32,     // Opacidad para transiciones
     shader_id: u32, // Que algoritmo usar (0, 1, 2...)
-    dummy1: f32,    // Padding para alineacion
-    dummy2: f32,
+    next_shader_id: u32, // ID Siguiente para transicion
+    transition: f32,     // Progreso de transicion 0.0 a 1.0
 }
 
 // ==========================================================
@@ -44,6 +44,8 @@ pub struct LsdShader {
     intensity: f32,   // Intensidad dinamica basada en mouse_stillness
     click_intensity: f32, // Pico de intensidad para ondas de choque
     last_click_time: Instant, // Para controlar el decaimiento del pulso
+    next_shader_id: u32, // ID del shader siguiente para transiciones
+    transition: f32,     // Progreso de transicion (0.0 a 1.0)
 }
 
 impl LsdShader {
@@ -64,6 +66,8 @@ impl LsdShader {
             intensity,
             click_intensity: 0.0,
             last_click_time: Instant::now(),
+            next_shader_id: 0,
+            transition: 0.0,
         }
     }
 
@@ -82,6 +86,11 @@ impl LsdShader {
 
     pub fn update_accent(&mut self, accent: Color) {
         self.accent = accent;
+    }
+
+    pub fn update_transition(&mut self, next_id: u32, progress: f32) {
+        self.next_shader_id = next_id;
+        self.transition = progress;
     }
 }
 
@@ -118,8 +127,8 @@ impl<Message> shader::Program<Message> for LsdShader {
                 intensity: combined_intensity.min(10.0), // Limitar para evitar explosiones
                 alpha: self.alpha,
                 shader_id: self.shader_id,
-                dummy1: 0.0,
-                dummy2: 0.0,
+                next_shader_id: self.next_shader_id,
+                transition: self.transition,
             },
         }
     }
@@ -372,6 +381,8 @@ struct Uniforms {
     intensity: f32,
     alpha: f32,
     shader_id: u32,
+    next_shader_id: u32,
+    transition: f32,
 }
 @group(0) @binding(0) var<uniform> u: Uniforms;
 

@@ -698,32 +698,55 @@ pub fn play_button_style_active(
     _t: &Theme,
     status: button::Status,
 ) -> button::Style {
+    let ui_a = palette.background.a; // Para modo LSD/Transparencia
+    
+    // Base: Color de superficie pero con borde "peligro" sutil
     let base = button::Style {
-        background: Some(Background::Color(Color::from_rgba(0.5, 0.1, 0.1, 0.5))),
+        background: Some(Background::Color(Color { a: 0.4 * ui_a, ..palette.surface })),
         border: Border {
-            color: Color::from_rgb(0.8, 0.3, 0.3),
+            color: Color { a: 0.5 * ui_a, ..palette.danger },
             width: 1.0,
             radius: 8.0.into(),
         },
-        text_color: palette.text_primary,
+        text_color: Color { a: 0.9 * ui_a, ..palette.danger }, // Texto rojo suave
         ..button::Style::default()
     };
+
     match status {
         button::Status::Hovered | button::Status::Pressed => button::Style {
-            background: Some(Background::Color(Color::from_rgba(0.7, 0.2, 0.2, 0.6))),
+            background: Some(Background::Color(Color { a: 0.1 * ui_a, ..palette.danger })),
             border: Border {
-                color: Color::from_rgb(1.0, 0.4, 0.4),
+                color: palette.danger,
                 ..base.border
             },
-            text_color: palette.text_primary,
+            text_color: Color { a: 1.0 * ui_a, ..Color::WHITE },
             shadow: Shadow {
-                color: Color::from_rgba(0.8, 0.2, 0.2, 0.3),
+                color: Color { a: 0.2 * ui_a, ..palette.danger },
                 blur_radius: 10.0,
                 ..Default::default()
             },
             ..base
         },
         _ => base,
+    }
+}
+
+pub fn blocked_button_style(
+    palette: &Palette,
+    _t: &Theme,
+    _status: button::Status,
+) -> button::Style {
+    let ui_a = palette.background.a;
+    
+    button::Style {
+        background: Some(Background::Color(Color { a: 0.1 * ui_a, ..palette.text_primary })),
+        border: Border {
+            color: Color { a: 0.05 * ui_a, ..palette.text_primary },
+            width: 1.0,
+            radius: 8.0.into(),
+        },
+        text_color: palette.text_secondary,
+        ..button::Style::default()
     }
 }
 
@@ -1079,43 +1102,23 @@ pub fn sub_bar_style(_palette: &Palette, _t: &Theme) -> progress_bar::Style {
 }
 
 pub fn update_button_style(
-    &palette: &Palette,
+    palette: &Palette,
     _t: &Theme,
     status: button::Status,
 ) -> button::Style {
-    let base = button::Style {
-        background: Some(Background::Color(Color { a: 0.8 * palette.background.a, ..Color::from_rgb(0.035, 0.05, 0.1) })),
-        border: Border {
-            color: Color { a: 0.3 * palette.accent.a, ..Color::from_rgb(0.27, 0.65, 1.0) },
-            width: 1.0,
-            radius: 8.0.into(),
-        },
-        text_color: palette.text_primary, // Ya tiene alfa modificado
-        ..button::Style::default()
-    };
-    match status {
-        button::Status::Hovered => button::Style {
-            background: Some(Background::Color(Color { a: 0.9 * palette.surface.a, ..Color::from_rgb(0.05, 0.1, 0.2) })),
-            border: Border {
-                color: Color { a: palette.accent.a, ..Color::from_rgb(0.4, 0.7, 1.0) },
-                width: 1.0,
-                radius: 8.0.into(),
-            },
-            text_color: Color { a: palette.accent.a, ..Color::from_rgb(0.4, 0.7, 1.0) },
-            shadow: Shadow {
-                color: Color { a: 0.2 * palette.accent.a, ..Color::from_rgb(0.2, 0.5, 1.0) },
-                blur_radius: 10.0,
-                ..Default::default()
-            },
-            ..base
-        },
-        button::Status::Pressed => button::Style {
-            background: Some(Background::Color(Color { a: palette.accent.a, ..Color::from_rgb(0.27, 0.6, 1.0) })),
-            text_color: Color { a: palette.text_on_accent.a, ..Color::BLACK },
-            ..base
-        },
-        _ => base,
+    let ui_a = palette.background.a;
+    
+    // En lugar de azul, usamos el color del tema pero con un estilo "brillante"
+    let mut s = primary_button_style(palette, _t, status);
+    
+    if status != button::Status::Hovered {
+        // Hacemos que parpadee levemente o sea un poco más claro que el play normal
+        s.background = Some(Background::Color(Color { 
+            a: 0.8 * ui_a, 
+            ..palette.accent 
+        }));
     }
+    s
 }
 
 pub fn dropdown_trigger_style(
@@ -2220,7 +2223,7 @@ pub fn window_control_button<'a, Message: Clone + 'a>(
     .style(move |t, s| window_control_button_style(&palette, t, s, is_close));
 
     // Aplicar LSD sutil (solo movimiento, no "derretimiento" excesivo para que sean clickeables)
-    if ctx.lsd_enabled && !is_close {
+    if ctx.lsd_enabled {
         magic_button(btn.into(), ctx)
     } else {
         btn.into()

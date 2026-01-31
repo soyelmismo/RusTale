@@ -90,11 +90,23 @@ pub fn view<'a>(
     )
     .style(move |t, bs| match status {
         _ if is_disabled => theme::play_button_style(&palette, t, bs),
-        LauncherStatus::Playing => theme::play_button_style_active(&palette, t, bs),
+        
+        LauncherStatus::Checking | LauncherStatus::Busy => {
+            theme::blocked_button_style(&palette, t, bs) // Nuevo estilo para estados intermedios
+        },
+        
+        LauncherStatus::Playing => {
+            theme::play_button_style_active(&palette, t, bs) // Ahora es dinámico-danger
+        },
+        
         LauncherStatus::Downloading | LauncherStatus::Migrating => {
             theme::danger_button_style(&palette, t, bs)
-        }
-        LauncherStatus::NeedsUpdate => theme::update_button_style(&palette, t, bs),
+        },
+        
+        LauncherStatus::NeedsUpdate => {
+            theme::update_button_style(&palette, t, bs) // Ahora es dinámico-accent
+        },
+        
         _ => theme::play_button_style(&palette, t, bs),
     })
     .width(Length::Fill)

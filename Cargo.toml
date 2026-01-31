@@ -3,9 +3,9 @@ members = ["launcher", "aurora"]
 resolver = "2"
 
 [profile.release]
-opt-level = 3       # Maxima optimizacion (hace el flujo de control complejo)
-lto = "thin"          # Link Time Optimization (mezcla codigo entre crates, dificil de separar)
-codegen-units = 4  # Reduce paralelismo para mejorar la optimizacion LTO
+opt-level = "z"       # Maxima optimizacion (hace el flujo de control complejo)
+lto = true          # Link Time Optimization (mezcla codigo entre crates, dificil de separar)
+codegen-units = 1  # Reduce paralelismo para mejorar la optimizacion LTO
 panic = 'abort'     # Elimina la logica de "unwinding" (reduce tamano y pistas de flujo)
 strip = true        # ELIMINA LOS SIMBOLOS (hace que las funciones se llamen sub_401000)
 debug = false       # Asegura que no haya info de debug

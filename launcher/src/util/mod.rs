@@ -134,6 +134,7 @@ pub fn get_runtime_port_file() -> PathBuf {
         return fallback_path.join("auth.port");
     }
     // En Windows seguimos usando la carpeta del servidor para consistencia
+    #[cfg(target_os = "windows")]
     crate::config::get_server_root_dir().join("server.port")
 }
 

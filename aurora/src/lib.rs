@@ -67,13 +67,6 @@ macro_rules! log {
 
 // ==================== ESTRUCTURAS DE DATOS ====================
 
-// Estructura en memoria de las Strings de Hytale (Length-Prefixed UTF16)
-// Corresponde a 'csString' del código original en C.
-#[repr(C, packed)]
-struct CsStringHeader {
-    size: u32,
-    // data sigue inmediatamente después
-}
 
 struct SwapDefinition {
     pattern_bytes: Vec<u8>,

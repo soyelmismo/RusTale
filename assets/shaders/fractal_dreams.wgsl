@@ -2,9 +2,9 @@
 var uv = in.uv * 2.0 - 1.0;
 uv.x *= u.aspect;
 
-// Interactividad con el mouse para explorar el fractal
-let mouse_influence = vec2<f32>(u.mouse_x, u.mouse_y) * 0.3;
-var pos = uv * 1.2 + mouse_influence; // Reducido de 2.0 a 1.2 para objeto mas grande
+// Interactividad mejorada con el mouse para explorar el fractal
+let mouse_influence = vec2<f32>(u.mouse_x, u.mouse_y) * 2.5;
+var pos = uv * 1.2 + mouse_influence; // Movimiento mucho más sensible al mouse
 
 // Zoom dinamico basado en intensidad - aumentado para objeto mas grande
 let zoom = 0.8 + sin(u.time * 0.2) * 0.3 * u.intensity; // Reducido base de 1.5 a 0.8 para mas zoom
@@ -16,8 +16,9 @@ var col = vec3<f32>(0.0);
 
 // Iteracion del fractal Mandelbrot con colores psicodelicos
 for (var i: f32 = 0.0; i < 100.0; i = i + 1.0) {
-    // Formula del fractal con variacion temporal
-    let c = pos + vec2<f32>(sin(u.time * 0.1) * 0.3, cos(u.time * 0.15) * 0.2);
+    // Formula del fractal con variacion temporal y seguimiento del mouse
+    let mouse_center = vec2<f32>(u.mouse_x, u.mouse_y) * 0.8;
+    let c = pos + mouse_center + vec2<f32>(sin(u.time * 0.1) * 0.3, cos(u.time * 0.15) * 0.2);
     pos = vec2<f32>(
         pos.x * pos.x - pos.y * pos.y + c.x,
         pos.x * pos.y * 2.0 + c.y
