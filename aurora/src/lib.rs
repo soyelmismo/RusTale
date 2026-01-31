@@ -9,6 +9,26 @@ use libc;
 
 const DEFAULT_PORT: u16 = 59313;
 
+// ==================== PARCHES DE SEGURIDAD LINUX ====================
+
+// En x86_64 Linux, modificar el código requiere invalidar la caché de instrucciones 
+// o al menos asegurar la serialización. Rust no expone __builtin___clear_cache de GCC.
+#[inline(always)]
+unsafe fn flush_instruction_cache(addr: *mut c_void, len: usize) {
+    #[cfg(target_os = "linux")]
+    {
+        // Usamos clear_cache de gcc a través de un extern C básico o un truco.
+        // Dado que mprotect suele flashear TLBs, para JIT simple a veces basta.
+        // Pero para robustez, usamos __clear_cache via linking implícito de libc (compilador built-in).
+        // Si falla el linkeo, este bloque fallback ayuda.
+        unsafe extern "C" {
+            fn __clear_cache(beg: *mut c_void, end: *mut c_void);
+        }
+        unsafe { __clear_cache(addr, addr.add(len)); }
+    }
+    // En Windows FlushInstructionCache es llamado usualmente por el Kernel tras VirtualProtect
+}
+
 // ==================== LOGGING SYSTEM ====================
 
 static LOG_FILE: Mutex<Option<std::fs::File>> = Mutex::new(None);
@@ -135,23 +155,7 @@ fn get_swaps() -> Vec<SwapDefinition> {
     ));
     
     // 5. Argumentos CLI: Reemplazos directos
-    // Original: "--session-token" (15 chars) -> "--singleplayer " (15 chars)
-    // Nota: Padding con espacio al final para mantener length
-    // Nota C original reemplazaba --session-token por --singleplayer pero el resto se quedaba sucio.
-    // Aquí es más limpio padding con espacio o nulls (espacio es seguro en args).
-    // Usaremos un string filler seguro.
-    
-    // Para argumentos específicos, usamos la lógica de anulación.
-    // C code used: .new = make_csstr(L"--singleplayer=\"") (15 chars?? No)
-    // C: "--session-token=\"" (17 chars). New: "--singleplayer=\"" (16 chars + ??)
-    // Vamos a usar reemplazo estricto también.
-    swaps.push(SwapDefinition::new("authenticated", "insecure\0\0\0\0")); // 13 -> 8 + padding nulls (C# ignora después de null? No, depende, pero 'insecure' es válido)
-    
-    // Fix especial session token
-    // Original: --session-token
-    // Nuevo:    --singleplayer 
-    swaps.push(SwapDefinition::new("--session-token", "--singleplayer ")); 
-    swaps.push(SwapDefinition::new("--identity-token", "--singleplayer "));
+    // No hacemos reemplazo de argumentos de tokens o authenticated ya que nuestro 127.0.0.1:59313 firmará las llaves.
 
     swaps
 }
@@ -180,12 +184,12 @@ impl ScopedProtect {
     unsafe fn new(addr: *mut u8, len: usize, region_prot: i32) -> Self {
         use libc::{mprotect, PROT_READ, PROT_WRITE, PROT_EXEC, sysconf, _SC_PAGESIZE};
         
-        let page_size = sysconf(_SC_PAGESIZE) as usize;
+        let page_size = unsafe { sysconf(_SC_PAGESIZE) } as usize;
         let addr_usize = addr as usize;
         let page_start = addr_usize - (addr_usize % page_size);
         let protect_len = (addr_usize + len) - page_start + page_size; // Ensure covering logic
         
-        mprotect(page_start as *mut c_void, protect_len, PROT_READ | PROT_WRITE | PROT_EXEC);
+        unsafe { mprotect(page_start as *mut c_void, protect_len, PROT_READ | PROT_WRITE | PROT_EXEC); }
         
         Self { addr: page_start as *mut c_void, size: protect_len, orig_prot: region_prot }
     }
@@ -258,7 +262,7 @@ unsafe fn patch_offline_check(region: &MemoryRegion) {
             
             // Permitimos acceso RW
             #[cfg(target_os = "linux")]
-            let _guard = ScopedProtect::new(region.addr.add(i), 500, region.prot);
+            let _guard = unsafe { ScopedProtect::new(region.addr.add(i), 500, region.prot) };
             #[cfg(target_os = "windows")]
             let _guard = unsafe { ScopedProtect::new(region.addr.add(i), 500) };
 
@@ -266,14 +270,18 @@ unsafe fn patch_offline_check(region: &MemoryRegion) {
 
             while jz_found < 2 && cursor < region.size - 6 && cursor < i + 500 {
                  if writable_slice[cursor] == 0x0F && writable_slice[cursor+1] == 0x84 {
-                     // Rellenar con NOPs (0x90) los 6 bytes de la instrucción (JZ suele ser largo en x64 si salta lejos, pero verificamos opcode 0F 84 standard rel32)
-                     // Normalmente 0F 84 XX XX XX XX (6 bytes).
+                     // Rellenar con NOPs
                      for k in 0..6 {
                          writable_slice[cursor + k] = 0x90;
                      }
+                     
+                     // !!! NUEVO: FLUSH DE CACHÉ !!!
+                     // Crítico en Linux para que la CPU no ejecute los bytes viejos que tiene en caché
+                     unsafe { flush_instruction_cache(region.addr.add(cursor) as *mut c_void, 6); }
+                     
                      log!("[Aurora] JZ parcheado en offset +{:X}", cursor);
                      jz_found += 1;
-                     cursor += 6; // saltar
+                     cursor += 6; 
                  } else {
                      cursor += 1;
                  }
@@ -299,7 +307,7 @@ unsafe fn apply_swaps(region: &MemoryRegion) {
     
     if mode == "sanasol" {
         swaps.push(SwapDefinition::new(
-            "hytale.com.",
+            "hytale.com",
             "sanasol.ws"
         ));
         // Agregar aqui los mismos dominios que Windows si sanasol.ws usa subdominios estandar
@@ -355,26 +363,27 @@ unsafe fn apply_swaps(region: &MemoryRegion) {
 
                 // Abrir candado de memoria
                 #[cfg(target_os = "linux")]
-                let _guard = ScopedProtect::new(region.addr.add(i), swap.replacement_bytes.len(), region.prot);
+                let _guard = unsafe { ScopedProtect::new(region.addr.add(i), swap.replacement_bytes.len(), region.prot) };
                 #[cfg(target_os = "windows")]
                 let _guard = unsafe { ScopedProtect::new(region.addr.add(i), swap.replacement_bytes.len()) };
                 
                 let writable_mem = unsafe { slice::from_raw_parts_mut(region.addr, region.size) };
                 
-                // Sobrescribir exactamente la longitud del pattern
-                // Si la replacement es más corta, se ha hecho padding o se rellenan con 0 si así se definiera (en este caso usamos padding estricto)
-                let copy_len = swap.replacement_bytes.len().min(pattern.len()); // Seguridad
+                // !!! CORRECCIÓN CRÍTICA !!!
+                // Usamos length - 1 también para escritura. 
+                // Esto protege el byte límite del objeto siguiente en memoria compactada.
+                let safe_copy_len = compare_len; 
                 
-                // NOTA: Rust copy_from_slice es seguro, pero necesitamos escritura raw punteros en memoria protegida (aunque ScopedProtect ya la abrió)
-                writable_mem[i..i+copy_len].copy_from_slice(&swap.replacement_bytes[0..copy_len]);
+                // Sobrescribimos header + data pero sin tocar el último byte "peligroso"
+                writable_mem[i..i+safe_copy_len].copy_from_slice(&swap.replacement_bytes[0..safe_copy_len]);
                 
                 replacements_applied += 1;
-                log!("[Aurora] Reemplazo aplicado exitosamente");
+                log!("[Aurora] Replacement applied successfully");
             }
         }
     }
     
-    log!("[Aurora] Búsqueda completada: {} strings encontrados, {} reemplazos aplicados", replacements_found, replacements_applied);
+    log!("[Aurora] Search completed: {} strings found, {} replacements applied", replacements_found, replacements_applied);
 }
 
 
@@ -388,11 +397,13 @@ unsafe fn scan_and_patch() {
 
     // Obtener path del exe actual para filtrar regiones
     let mut exe_path = [0u8; 1024];
-    let len = libc::readlink(
-        "/proc/self/exe\0".as_ptr() as *const i8, 
-        exe_path.as_mut_ptr() as *mut i8, 
-        1023
-    );
+    let len = unsafe {
+        libc::readlink(
+            "/proc/self/exe\0".as_ptr() as *const i8,
+            exe_path.as_mut_ptr() as *mut i8,
+            1023
+        )
+    };
     if len <= 0 { return; }
     let exe_name = std::str::from_utf8(&exe_path[0..len as usize]).unwrap_or("");
 
@@ -420,8 +431,8 @@ unsafe fn scan_and_patch() {
 
                 if (prot & PROT_READ) != 0 {
                      let region = MemoryRegion { addr: start as *mut u8, size: end - start, prot };
-                     patch_offline_check(&region);
-                     apply_swaps(&region);
+                     //unsafe { patch_offline_check(&region) };
+                     unsafe { apply_swaps(&region) };
                 }
             }
         }
@@ -440,7 +451,7 @@ unsafe fn scan_and_patch() {
     unsafe { K32GetModuleInformation(GetCurrentProcess(), h_mod, &mut info, std::mem::size_of::<MODULEINFO>() as u32) };
     
     let region = MemoryRegion { addr: info.lpBaseOfDll as *mut u8, size: info.SizeOfImage as usize };
-    unsafe { patch_offline_check(&region) };
+    //unsafe { patch_offline_check(&region) };
     unsafe { apply_swaps(&region) };
 }
 
@@ -451,14 +462,14 @@ unsafe fn scan_and_patch() {
 #[ctor::ctor]
 unsafe fn aurora_init() {
     init_logging();
-    log!("[Aurora] Inicializando Aurora para Linux");
+    log!("[Aurora] Starting Aurora for Linux");
     
     // Eliminar LD_PRELOAD para no afectar subprocesos
-    std::env::remove_var("LD_PRELOAD");
-    log!("[Aurora] LD_PRELOAD eliminado");
+    unsafe { std::env::remove_var("LD_PRELOAD"); };
+    log!("[Aurora] LD_PRELOAD removed");
     
-    scan_and_patch();
-    log!("[Aurora] Inicialización completada");
+    unsafe { scan_and_patch(); };
+    log!("[Aurora] Initialization completed");
 }
 
 // Windows DllMain
@@ -471,10 +482,10 @@ pub unsafe extern "system" fn DllMain(
 ) -> i32 {
     if reason == 1 { // DLL_PROCESS_ATTACH
         init_logging();
-        log!("[Aurora] Inicializando Aurora para Windows");
+        log!("[Aurora] Starting Aurora for Windows");
         
         unsafe { scan_and_patch(); }
-        log!("[Aurora] Inicialización completada");
+        log!("[Aurora] Initialization completed");
     }
     1
 }

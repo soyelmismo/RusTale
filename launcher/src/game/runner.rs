@@ -605,12 +605,18 @@ impl Recipe for Runner {
                     {
                         let natives_dir = base_dir.join("cache").join("natives");
                         let so_path = natives_dir.join("Aurora.so");
-                        // El truco definitivo: Pre-cargar Aurora y borrar la evidencia
-                        // de la variable LD_PRELOAD apenas entre al binario para no ensuciar logs
-                        envs.insert(
-                            "LD_PRELOAD".to_string(),
-                            so_path.to_string_lossy().to_string(),
-                        );
+                        
+                        // En lugar de sobreescribir LD_PRELOAD, es mejor añadirla.
+                        // Algunos sistemas tienen sus propias precargas (fakeroot, steam overlay, etc).
+                        if let Ok(current_preload) = std::env::var("LD_PRELOAD") {
+                            let new_preload = format!("{}:{}", so_path.to_string_lossy(), current_preload);
+                            envs.insert("LD_PRELOAD".to_string(), new_preload);
+                        } else {
+                            envs.insert(
+                                "LD_PRELOAD".to_string(),
+                                so_path.to_string_lossy().to_string(),
+                            );
+                        }
                     }
                 }
 
