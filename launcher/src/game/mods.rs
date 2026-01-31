@@ -21,16 +21,16 @@ fn default_true() -> bool {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct InstalledModMetadata {
     pub file_name: String, // Clave primaria para relacionar con el disco
-    pub mod_name: String,  // Para UI rápida
+    pub mod_name: String,  // Para UI rapida
     pub provider: ModProvider,
     pub mod_id: String,  // ID Remoto (ej: "345123")
-    pub file_id: String, // ID de la versión instalada (ej: "888111")
+    pub file_id: String, // ID de la version instalada (ej: "888111")
     #[serde(default = "default_true")]
     pub enabled: bool, // Estado del mod
     pub summary: Option<String>,
     pub logo_url: Option<String>,
     pub install_date: chrono::DateTime<chrono::Utc>,
-    pub update_available: Option<String>, // None o ID de la nueva versión
+    pub update_available: Option<String>, // None o ID de la nueva version
 }
 
 pub async fn ensure_mod_dirs(base_dir: &Path, channel: &str, version: &str) -> (PathBuf, PathBuf) {
@@ -125,7 +125,7 @@ pub async fn delete_mod(mod_info: &ModInfo) -> Result<()> {
     Ok(())
 }
 
-// Función para guardar el manifiesto
+// Funcion para guardar el manifiesto
 pub async fn save_manifest(
     base_dir: &std::path::Path,
     channel: &str,
@@ -143,7 +143,7 @@ pub async fn save_manifest(
     Ok(())
 }
 
-// Función para leer manifiesto
+// Funcion para leer manifiesto
 pub async fn load_manifest(
     base_dir: &std::path::Path,
     channel: &str,

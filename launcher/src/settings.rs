@@ -7,7 +7,7 @@ use iced::widget::{
 };
 use iced::{Alignment, Element, Length, Size};
 
-// ID estático para el área de scroll
+// ID estatico para el area de scroll
 const SETTINGS_SCROLL_ID: &str = "settings_scroll_area";
 
 const CHANNELS: &[&str] = &["release", "pre-release"];
@@ -776,7 +776,7 @@ impl SettingsState {
                                     .style(move |t| theme::container_style_transparent(&palette, t))
                                 )
                                 .on_press(SettingsMessage::OpenVersionFolder(version_val))
-                                .width(40) // Ancho específico para el botón
+                                .width(40) // Ancho especifico para el boton
                                 .style(move |t, s| theme::secondary_button_style(&palette, t, s))
                                 .into(),
                                 Space::new().width(5).into(),
@@ -791,7 +791,7 @@ impl SettingsState {
                                     .style(move |t| theme::container_style_transparent(&palette, t))
                                 )
                                 .on_press(SettingsMessage::RepairVersion(version_val))
-                                .width(40) // Ancho específico para el botón
+                                .width(40) // Ancho especifico para el boton
                                 .style(move |t, s| theme::secondary_button_style(&palette, t, s))
                                 .into(),
                                 Space::new().width(5).into(),
@@ -806,7 +806,7 @@ impl SettingsState {
                                     .style(move |t| theme::container_style_transparent(&palette, t))
                                 )
                                 .on_press(SettingsMessage::DeleteVersion(version_val))
-                                .width(40) // Ancho específico para el botón
+                                .width(40) // Ancho especifico para el boton
                                 .style(move |t, s| theme::secondary_button_style(&palette, t, s))
                                 .into(),
                             ],

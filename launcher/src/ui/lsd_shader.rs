@@ -26,8 +26,8 @@ struct Uniforms {
 
     // BLOQUE 3 (16b)
     alpha: f32,     // Opacidad para transiciones
-    shader_id: u32, // Qué algoritmo usar (0, 1, 2...)
-    dummy1: f32,    // Padding para alineación
+    shader_id: u32, // Que algoritmo usar (0, 1, 2...)
+    dummy1: f32,    // Padding para alineacion
     dummy2: f32,
 }
 
@@ -41,7 +41,7 @@ pub struct LsdShader {
     accent: Color,
     shader_id: u32,   // ID del shader actual
     alpha: f32,       // Transparencia (0.0 a 1.0)
-    intensity: f32,   // Intensidad dinámica basada en mouse_stillness
+    intensity: f32,   // Intensidad dinamica basada en mouse_stillness
     click_intensity: f32, // Pico de intensidad para ondas de choque
     last_click_time: Instant, // Para controlar el decaimiento del pulso
 }
@@ -75,6 +75,14 @@ impl LsdShader {
     pub fn update_mouse_position(&mut self, pos: Point) {
         self.mouse_pos = pos;
     }
+
+    pub fn update_shader_id(&mut self, shader_id: u32) {
+        self.shader_id = shader_id;
+    }
+
+    pub fn update_accent(&mut self, accent: Color) {
+        self.accent = accent;
+    }
 }
 
 impl<Message> shader::Program<Message> for LsdShader {
@@ -87,7 +95,7 @@ impl<Message> shader::Program<Message> for LsdShader {
         _cursor: mouse::Cursor,
         bounds: Rectangle,
     ) -> Self::Primitive {
-        // Ralentizamos el tiempo para efectos más hipnóticos
+        // Ralentizamos el tiempo para efectos mas hipnoticos
         let time = self.start_time.elapsed().as_secs_f32() * 0.5;
         let aspect = bounds.width / bounds.height;
 
@@ -219,7 +227,7 @@ impl shader::Pipeline for LsdPipeline {
             })
         })).unwrap_or_else(|_| {
             eprintln!("[SHADER] Failed to create render pipeline! Creating minimal pipeline.");
-            // FIX: Envolver también este bloque en AssertUnwindSafe
+            // FIX: Envolver tambien este bloque en AssertUnwindSafe
             std::panic::catch_unwind(AssertUnwindSafe(|| {
                 device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                     label: Some("Minimal Fallback Pipeline"),
@@ -302,7 +310,7 @@ static GLOBAL_WGSL: OnceLock<String> = OnceLock::new();
 
 pub fn set_global_wgsl(code: String) {
     // Solo se permite configurar una vez al inicio del programa.
-    // Para recarga en caliente necesitaríamos recrear el Pipeline, lo cual Iced hace si cambia el ID.
+    // Para recarga en caliente necesitariamos recrear el Pipeline, lo cual Iced hace si cambia el ID.
     let _ = GLOBAL_WGSL.set(code);
 }
 
@@ -310,9 +318,9 @@ pub fn set_safe_mode_shader() {
     let _ = GLOBAL_WGSL.set(SAFE_MODE_SHADER.to_string());
 }
 
-/// Detecta si el hardware actual podría tener problemas con shaders complejos
+/// Detecta si el hardware actual podria tener problemas con shaders complejos
 pub fn should_use_safe_mode() -> bool {
-    // Verificar variables de entorno que podrían indicar problemas
+    // Verificar variables de entorno que podrian indicar problemas
     if std::env::var("RUSTALE_FORCE_SAFE_MODE").is_ok() {
         return true;
     }
@@ -351,7 +359,7 @@ const DEFAULT_FALLBACK: &str = r#"
 }
 "#;
 
-// Shader simple para modo seguro (cuadrado de color sólido)
+// Shader simple para modo seguro (cuadrado de color solido)
 const SAFE_MODE_SHADER: &str = r#"
 struct Uniforms {
     time: f32,
@@ -388,7 +396,7 @@ fn vs_main(@builtin(vertex_index) v_index: u32) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Simple color sólido con el accent color
+    // Simple color solido con el accent color
     return vec4<f32>(u.accent_r, u.accent_g, u.accent_b, u.alpha);
 }
 "#;

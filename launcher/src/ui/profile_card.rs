@@ -87,7 +87,7 @@ pub fn view<'a>(
                     .align_y(Alignment::Center),
                 )
                 .padding(5)
-                .style(move |t| theme::card_style(&palette, t)),
+                .style(move |t| theme::card_style(&ctx.palette, t)),
             );
         } else if is_being_edited_uuid {
             let (_, curr_uuid) = editing_uuid.as_ref().unwrap();
@@ -111,7 +111,8 @@ pub fn view<'a>(
                                         svg(util::icons::icon(util::icons::COPY))
                                             .width(12)
                                             .height(12)
-                                            .style(move |t, s| theme::svg_accent(&palette, t, s)),
+                                            .style(move |t, s| theme::svg_accent(&palette, t, s))
+                                            .opacity(ctx.palette.text_primary.a),
                                         ctx,
                                     ))
                                     .on_press(Message::CopyUUID(curr_uuid.clone()))
@@ -134,7 +135,8 @@ pub fn view<'a>(
                                         svg(util::icons::icon(util::icons::DICE))
                                             .width(12)
                                             .height(12)
-                                            .style(move |t, s| theme::svg_accent(&palette, t, s)),
+                                            .style(move |t, s| theme::svg_accent(&palette, t, s))
+                                            .opacity(ctx.palette.text_primary.a),
                                         ctx,
                                     ))
                                     .on_press(Message::GenerateRandomUUID)
@@ -194,10 +196,11 @@ pub fn view<'a>(
                         tooltip(
                             theme::magic_button(
                                 button(theme::svg(
-                                    svg(util::icons::icon(util::icons::PERSON))
+                                        svg(util::icons::icon(util::icons::PERSON))
                                         .width(12)
                                         .height(12)
-                                        .style(move |t, s| theme::svg_accent(&palette, t, s)),
+                                        .style(move |t, s| theme::svg_accent(&palette, t, s))
+                                        .opacity(ctx.palette.text_primary.a),
                                     ctx
                                 ))
                                 .on_press(Message::EditProfileUUID(profile.id.clone()))
@@ -215,7 +218,8 @@ pub fn view<'a>(
                                 svg(util::icons::icon(util::icons::EDIT))
                                     .width(12)
                                     .height(12)
-                                    .style(move |t, s| theme::svg_accent(&palette, t, s)),
+                                    .style(move |t, s| theme::svg_accent(&palette, t, s))
+                                    .opacity(ctx.palette.text_primary.a),
                                 ctx
                             ))
                             .on_press(Message::EditProfile(profile.id.clone()))
@@ -229,7 +233,8 @@ pub fn view<'a>(
                                 svg(util::icons::icon(util::icons::TRASH))
                                     .width(12)
                                     .height(12)
-                                    .style(move |t, s| theme::svg_accent(&palette, t, s)),
+                                    .style(move |t, s| theme::svg_accent(&palette, t, s))
+                                    .opacity(ctx.palette.text_primary.a),
                                 ctx
                             ))
                             .on_press(Message::DeleteProfile(profile.id.clone()))
@@ -277,7 +282,8 @@ pub fn view<'a>(
                             svg(util::icons::icon(util::icons::CHECK))
                                 .width(12)
                                 .height(12)
-                                .style(move |t, s| theme::svg_accent(&palette, t, s)),
+                                .style(move |t, s| theme::svg_accent(&palette, t, s))
+                                .opacity(ctx.palette.text_primary.a),
                             ctx
                         ))
                         .on_press(Message::SaveProfileName)
@@ -291,7 +297,8 @@ pub fn view<'a>(
                             svg(util::icons::icon(util::icons::X))
                                 .width(12)
                                 .height(12)
-                                .style(move |t, s| theme::svg_accent(&palette, t, s)),
+                                .style(move |t, s| theme::svg_accent(&palette, t, s))
+                                .opacity(ctx.palette.text_primary.a),
                             ctx
                         ))
                         .on_press(Message::CancelProfileEdit)
@@ -316,7 +323,8 @@ pub fn view<'a>(
         theme::svg(
             svg(util::icons::icon(util::icons::PLUS))
                 .width(14)
-                .height(14),
+                .height(14)
+                .opacity(ctx.palette.text_primary.a),
             ctx,
         ),
         theme::text_body(localization.t("profile.add"), ctx),
@@ -349,7 +357,8 @@ pub fn view<'a>(
                             }))
                             .width(12)
                             .height(12)
-                            .style(move |t, s| theme::svg_muted(&palette, t, s)),
+                            .style(move |t, s| theme::svg_muted(&palette, t, s))
+                            .opacity(ctx.palette.text_primary.a),
                             ctx
                         )
                     ]

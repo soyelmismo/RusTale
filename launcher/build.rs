@@ -22,7 +22,7 @@ fn main() {
                 if path.is_file() {
                     if let Some(ext) = path.extension() {
                         if ext == "wgsl" {
-                            // Esta línea le grita a Cargo: "¡Si este archivo se toca, recompila!"
+                            // Esta linea le grita a Cargo: "¡Si este archivo se toca, recompila!"
                             println!("cargo:rerun-if-changed={}", path.display());
                         }
                     }
@@ -44,7 +44,7 @@ fn main() {
     let profile = env::var("PROFILE").unwrap();
     let aurora_dir = root_dir.join("aurora");
 
-    // Detectar OS y extensión
+    // Detectar OS y extension
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
     let (lib_name, ext) = match target_os.as_str() {
         "windows" => ("aurora", "dll"),

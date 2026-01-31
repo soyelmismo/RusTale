@@ -248,7 +248,6 @@ pub fn main() -> iced::Result {
     .run()
 }
 
-// --- AÑADIR ESTE ENUM ---
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ResizeDirection {
     North,
@@ -334,9 +333,12 @@ pub enum Message {
     MinimizeWindow,
     MaximizeWindow,
 
-    // --- NUEVOS MENSAJES PARA REDIMENSIÓN MANUAL ---
+    // --- NUEVOS MENSAJES PARA REDIMENSIoN MANUAL ---
     ResizePressed(ResizeDirection),
     ResizeReleased,
+    
+    // --- MENSAJE PARA CONTROL DE MOUSE EN LSD MODE ---
+    MousePressed,
     WindowEvent(window::Event),
     // ---------------------------------------------
 
@@ -344,6 +346,7 @@ pub enum Message {
     NextShader,
 
     ServerPatchProgress(f32),
+    WatchdogCheck, // Nuevo mensaje para watchdog de estados
 }
 
 struct RusTale {
@@ -383,10 +386,14 @@ struct RusTale {
     cursor_position: iced::Point, // Rastrear raton para efectos
     last_mouse_move_time: std::time::Instant,
     lsd_enabled_time: Option<std::time::Instant>, // Para activacion progresiva
+    is_mouse_pressed: bool, // Para esconder contenedores al mantener click (solo LSD mode)
+    last_mouse_release_time: std::time::Instant, // Para transicion suave al soltar
     is_maximized: bool,
     last_title_click: std::time::Instant,
+    last_status_change: std::time::Instant, // Track state changes for timeout detection
+    last_download_progress: f32, // Track last download progress for stuck detection
 
-    // --- NUEVOS CAMPOS PARA REDIMENSIÓN ---
+    // --- NUEVOS CAMPOS PARA REDIMENSIoN ---
     resizing_direction: Option<ResizeDirection>,
     current_window_size: Size,
     current_window_pos: Point,
@@ -397,22 +404,48 @@ struct RusTale {
     drag_start_mouse_screen_pos: Point, // Mouse absoluto (WindowPos + MousePos)
     // -------------------------------------
 
-    // --- CAMPOS PARA EFECTOS TÁCTILES DEL SHADER ---
+    // --- CAMPOS PARA EFECTOS TaCTILES DEL SHADER ---
     shader_click_intensity: f32,           // Intensidad del pulso actual
-    shader_click_time: std::time::Instant, // Tiempo del último clic
-    lsd_shader_instance: std::cell::RefCell<Option<lsd_shader::LsdShader>>, // Instancia mutable para llamadas dinámicas
+    shader_click_time: std::time::Instant, // Tiempo del ultimo clic
+    lsd_shader_instance: std::cell::RefCell<Option<lsd_shader::LsdShader>>, // Instancia mutable para llamadas dinamicas
     // ---------------------------------------------
 
-    // NUEVOS CAMPOS PARA TRANSICIÓN DE SHADERS
+    // NUEVOS CAMPOS PARA TRANSICIoN DE SHADERS
     active_shader_idx: u32,
     next_shader_idx: u32,
     shader_transition: f32, // 0.0 a 1.0
     total_shaders_available: u32,
-    shader_change_timer: f32, // Acumulador para cambio automático
-                              // ------------------------------------- // Añadir esto
+    shader_change_timer: f32, // Acumulador para cambio automatico
+    ui_opacity_accumulator: f32, // Nuevo campo: valor real de 0.0 a 1.0
+                              // ------------------------------------- // Anadir esto
 }
 
 impl RusTale {
+    // Funcion para calcular opacidad de contenedores en LSD mode con transicion suave
+    fn containers_opacity(&self) -> f32 {
+        // Solo aplicar efecto si LSD mode esta activado
+        if self.settings.theme.lsd_mode {
+            if self.is_mouse_pressed {
+                // Transicion suave a 0.0 (invisible) cuando se presiona
+                0.0
+            } else {
+                // Transicion suave a 1.0 (totalmente visible) cuando se suelta
+                1.0
+            }
+        } else {
+            // Siempre visible si no esta en LSD mode
+            1.0
+        }
+    }
+
+    // Funcion para obtener opacidad actual usando el acumulador
+    fn ui_alpha_actual(&self) -> f32 {
+        if !self.settings.theme.lsd_mode {
+            return 1.0;
+        }
+        self.ui_opacity_accumulator // Usamos el valor que actualiza el Tick
+    }
+
     fn new(quickplay: bool) -> (Self, Task<Message>) {
         let initial_settings = GameSettings::default();
         let base_dir = config::get_app_dir();
@@ -442,7 +475,7 @@ impl RusTale {
         let client_for_bg = api_client.clone();
 
         // 1. CARGA INICIAL DE SHADERS CON SEGURIDAD
-        // Crea carpeta si no existe (la app.rs initialize es async, esto es pre-load rápido o hazlo en initialize)
+        // Crea carpeta si no existe (la app.rs initialize es async, esto es pre-load rapido o hazlo en initialize)
         // Recomendado: Llamar build_uber_shader() AQUI
 
         let total_shaders = std::panic::catch_unwind(|| {
@@ -456,7 +489,7 @@ impl RusTale {
             1 // Fallback: 1 shader (safe mode)
         });
 
-        // Si safe_mode está activado en la configuración, forzamos shader simple
+        // Si safe_mode esta activado en la configuracion, forzamos shader simple
         if initial_settings.safe_mode || crate::ui::lsd_shader::should_use_safe_mode() {
             println!("[SHADER] Safe mode enabled, using simple shader");
             lsd_shader::set_safe_mode_shader();
@@ -541,10 +574,14 @@ impl RusTale {
                 } else {
                     None
                 },
+                is_mouse_pressed: false, // Inicialmente no presionado
+                last_mouse_release_time: std::time::Instant::now(), // Para transicion suave
                 is_maximized: false,
                 last_title_click: std::time::Instant::now(),
+                last_status_change: std::time::Instant::now(), // Track state changes for timeout detection
+                last_download_progress: 0.0, // Track last download progress for stuck detection
 
-                // --- NUEVOS CAMPOS PARA REDIMENSIÓN ---
+                // --- NUEVOS CAMPOS PARA REDIMENSIoN ---
                 resizing_direction: None,
                 current_window_size: Size::new(width, height),
                 current_window_pos: Point::ORIGIN,
@@ -555,18 +592,19 @@ impl RusTale {
                 drag_start_mouse_screen_pos: Point::ORIGIN,
                 // -------------------------------------
 
-                // --- CAMPOS PARA EFECTOS TÁCTILES DEL SHADER ---
+                // --- CAMPOS PARA EFECTOS TaCTILES DEL SHADER ---
                 shader_click_intensity: 0.0,
                 shader_click_time: std::time::Instant::now(),
-                lsd_shader_instance: std::cell::RefCell::new(None), // Se inicializará dinámicamente
+                lsd_shader_instance: std::cell::RefCell::new(None), // Se inicializara dinamicamente
                 // ---------------------------------------------
 
-                // NUEVOS CAMPOS PARA TRANSICIÓN DE SHADERS
+                // NUEVOS CAMPOS PARA TRANSICIoN DE SHADERS
                 active_shader_idx: 0,
                 next_shader_idx: 0,
                 shader_transition: 0.0,
                 total_shaders_available: total_shaders as u32, // Usar el valor calculado
                 shader_change_timer: 0.0,
+                ui_opacity_accumulator: 1.0, // Inicializar con opacidad total
                 // -------------------------------------
             },
             Task::batch(vec![
@@ -617,20 +655,24 @@ impl RusTale {
 
         let window_sub = window::events().map(|(_id, event)| Message::WindowEvent(event));
 
-        // SUSCRIPCIÓN GLOBAL DE MOUSE
+        // SUSCRIPCIoN GLOBAL DE MOUSE
         // Siempre activa para que los cursores funcionen correctamente en todos los lados
         let global_mouse = event::listen_with(|event, _status, _id| match event {
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                Some(Message::MousePressed)
+            }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                // Usamos ResizeReleased que ya maneja both functionalities
                 Some(Message::ResizeReleased)
             }
             _ => None,
         });
 
-        // CAMBIO AQUÍ: Eliminamos "&& self.settings.theme.lsd_mode"
+        // CAMBIO AQUi: Eliminamos "&& self.settings.theme.lsd_mode"
         // Necesitamos rastrear el mouse siempre que la ventana sea visible para:
-        // 1. Efectos LSD (si están activos)
+        // 1. Efectos LSD (si estan activos)
         // 2. Redimensionamiento de ventana (siempre activo)
-        // 3. Mantener self.cursor_position actualizado para el cálculo del arrastre inicial
+        // 3. Mantener self.cursor_position actualizado para el calculo del arrastre inicial
         let mouse_sub = if self.is_window_visible {
             iced::event::listen_with(|event, _status, _window_id| {
                 if let iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) = event {
@@ -659,6 +701,9 @@ impl RusTale {
         } else {
             Subscription::none()
         };
+
+        // Watchdog subscription: Check every 30 seconds for stuck states
+        let watchdog_sub = iced::time::every(std::time::Duration::from_secs(30)).map(|_| Message::WatchdogCheck);
 
         // NUEVO: Escucha de teclado para cambiar shaders
         let keyboard_sub = if self.is_window_visible {
@@ -689,6 +734,7 @@ impl RusTale {
             menu_sub,
             window_sub,
             tick_sub,
+            watchdog_sub, // Agregar watchdog al batch
             mouse_sub,
             global_mouse,
             keyboard_sub, // <--- Agregar esto al batch final
@@ -742,17 +788,17 @@ impl RusTale {
                 self.last_mouse_move_time = std::time::Instant::now();
 
                 if let Some(dir) = self.resizing_direction {
-                    // 1. Calcular dónde está el mouse en la PANTALLA ahora mismo
+                    // 1. Calcular donde esta el mouse en la PANTALLA ahora mismo
                     // Nota: relative_position es inestable mientras movemos la ventana,
                     // pero current_window_pos + relative_position siempre da la pos absoluta correcta.
                     let current_mouse_screen_x = self.current_window_pos.x + relative_position.x;
                     let current_mouse_screen_y = self.current_window_pos.y + relative_position.y;
 
-                    // 2. Calcular cuánto se ha movido el mouse desde que hicimos click
+                    // 2. Calcular cuanto se ha movido el mouse desde que hicimos click
                     let delta_x = current_mouse_screen_x - self.drag_start_mouse_screen_pos.x;
                     let delta_y = current_mouse_screen_y - self.drag_start_mouse_screen_pos.y;
 
-                    // 3. Aplicar ese delta al tamaño/posición ORIGINAL (Snapshot)
+                    // 3. Aplicar ese delta al tamano/posicion ORIGINAL (Snapshot)
                     let start_w = self.drag_start_window_size.width;
                     let start_h = self.drag_start_window_size.height;
                     let start_x = self.drag_start_window_pos.x;
@@ -784,7 +830,7 @@ impl RusTale {
                                 new_w = proposed_width;
                                 new_x = start_x + delta_x;
                             } else {
-                                // Si llegamos al mínimo, fijamos posición y ancho
+                                // Si llegamos al minimo, fijamos posicion y ancho
                                 new_w = min_w;
                                 new_x = start_x + (start_w - min_w);
                             }
@@ -851,7 +897,7 @@ impl RusTale {
                     // 4. Aplicar cambios
                     let mut commands = Vec::new();
 
-                    // IMPORTANTE: NO actualizar self.current_window_pos/size manualmente aquí.
+                    // IMPORTANTE: NO actualizar self.current_window_pos/size manualmente aqui.
                     // Deja que el sistema operativo responda con un evento WindowEvent::Moved/Resized.
                     // Esto elimina el "jitter" o locura al redimensionar hacia la izquierda/arriba.
 
@@ -886,6 +932,32 @@ impl RusTale {
                     return Task::none();
                 }
 
+                // --- LoGICA DE OPACIDAD SUAVE ---
+                let dt = 0.033; // El tick ocurre cada 33ms (~30fps)
+                let fade_speed = 1.5; // Velocidad para desaparecer (mayor = mas rapido)
+                let reveal_speed = 2.5; // Velocidad para aparecer (el ojo humano prefiere UI que aparece rapido)
+                let hold_threshold = 0.25; // SEGUNDOS DE ESPERA para considerar que se esta "manteniendo"
+                
+                let elapsed_since_click = self.shader_click_time.elapsed().as_secs_f32();
+
+                // Detectamos si hay algun modal abierto
+                let is_modal_active = self.settings_state.is_open || self.mods_state.is_open;
+
+                // --- LoGICA DE PRIORIDAD DE INTERFAZ ---
+                if is_modal_active {
+                    // SIEMPRE FORZAR VISIBILIDAD si estamos en ajustes o mods
+                    self.ui_opacity_accumulator = (self.ui_opacity_accumulator + dt * reveal_speed).min(1.0);
+                } else {
+                    // Logica normal de transparencia por mantener click
+                    if self.is_mouse_pressed && elapsed_since_click > hold_threshold {
+                        // Disminuir opacidad gradualmente hacia 0.0
+                        self.ui_opacity_accumulator = (self.ui_opacity_accumulator - dt * fade_speed).max(0.0);
+                    } else if !self.is_mouse_pressed {
+                        // Aumentar opacidad gradualmente hacia 1.0
+                        self.ui_opacity_accumulator = (self.ui_opacity_accumulator + dt * reveal_speed).min(1.0);
+                    }
+                }
+
                 let t = self.start_time.elapsed().as_secs_f32();
                 // Mezclamos multiples frecuencias para crear un movimiento caotico y organico
                 // pero que se mantiene dentro de un rango razonable [-2, 2].
@@ -893,13 +965,13 @@ impl RusTale {
                 let oy = (t * 0.9).cos() * 1.0 + (t * 3.5).sin() * 0.5 + (t * 1.1).cos() * 0.3;
                 self.lsd_offset = (ox, oy);
 
-                // CAMBIO AUTOMÁTICO DE SHADER CADA 30 SEGUNDOS
+                // CAMBIO AUTOMaTICO DE SHADER CADA 30 SEGUNDOS
                 if self.shader_transition > 0.0 {
-                    // Avanzar transición (ajustar velocidad 0.01 -> más lento, 0.05 -> rápido)
+                    // Avanzar transicion (ajustar velocidad 0.01 -> mas lento, 0.05 -> rapido)
                     self.shader_transition += 0.02;
 
                     if self.shader_transition >= 1.0 {
-                        // Transición completada
+                        // Transicion completada
                         self.active_shader_idx = self.next_shader_idx;
                         self.shader_transition = 0.0;
                     }
@@ -912,7 +984,7 @@ impl RusTale {
                         // Siguiente shader ciclico
                         self.next_shader_idx =
                             (self.active_shader_idx + 1) % self.total_shaders_available;
-                        self.shader_transition = 0.01; // Iniciar transición
+                        self.shader_transition = 0.01; // Iniciar transicion
                     }
                 }
 
@@ -968,13 +1040,38 @@ impl RusTale {
                     .update(msg, client, base_dir, settings)
                     .map(Message::Mods)
             }
-            Message::OpenMods => Task::done(Message::Mods(ModsMessage::OpenMods)),
+            Message::OpenMods => {
+                // RESET del estado de transparencia al entrar a mods
+                self.is_mouse_pressed = false;
+                self.ui_opacity_accumulator = 1.0;
+                Task::done(Message::Mods(ModsMessage::OpenMods))
+            },
             Message::ModsLoaded(res) => Task::done(Message::Mods(ModsMessage::ModsLoaded(res))),
             Message::ModsLoadedComplex(res) => {
                 Task::done(Message::Mods(ModsMessage::ModsLoadedComplex(res)))
             }
-            Message::CursorMoved(pos) => {
-                self.cursor_position = pos;
+            Message::DownloadError(error) => {
+                println!("[Game] Download error occurred: {}", error);
+                
+                // CRITICAL: Clean up state on download error
+                self.status = LauncherStatus::Ready;
+                self.status_text = self.localization.t("launcher.status.ready").to_string();
+                self.error = Some(error.clone());
+                self.running_game = None; // Ensure cleanup
+                self.last_status_change = std::time::Instant::now();
+                
+                // If we fail in Quickplay, show the window so the user knows what happened
+                if self.is_quickplay_mode {
+                    self.is_quickplay_mode = false;
+                    self.is_window_visible = true;
+                    return window::oldest().and_then(|id| {
+                        Task::batch(vec![
+                            window::set_mode(id, window::Mode::Windowed),
+                            window::gain_focus(id),
+                        ])
+                    });
+                }
+                
                 Task::none()
             }
 
@@ -984,6 +1081,8 @@ impl RusTale {
                 self.shader_click_time = std::time::Instant::now();
                 Task::none()
             }
+
+            Message::CursorMoved(_) => Task::none(), // Caso faltante para CursorMoved
 
             Message::Initialize => Task::perform(
                 async {
@@ -1119,10 +1218,27 @@ impl RusTale {
                 Task::none()
             }
             Message::CheckStatus => {
-                if self.status == LauncherStatus::Playing || self.running_game.is_some() {
+                // Enhanced safety check: Allow status re-check if potentially stuck
+                let is_potentially_stuck = match self.status {
+                    LauncherStatus::Playing => {
+                        // If "playing" but no running_game, we're in inconsistent state
+                        self.running_game.is_none()
+                    }
+                    LauncherStatus::Busy => {
+                        // If "busy" for more than 30 seconds, allow re-check
+                        self.running_game.is_none() && 
+                        self.last_status_change.elapsed().as_secs() > 30
+                    }
+                    _ => false,
+                };
+                
+                if (self.status == LauncherStatus::Playing || self.running_game.is_some()) && !is_potentially_stuck {
+                    println!("[Status] Check skipped: status={:?}, running_game={:?}", self.status, self.running_game.is_some());
                     return Task::none();
                 }
 
+                println!("[Status] Starting status check...");
+                self.last_status_change = std::time::Instant::now();
                 self.status = LauncherStatus::Checking;
                 self.status_text = self.localization.t("launcher.status.checking").to_string();
 
@@ -1199,26 +1315,34 @@ impl RusTale {
             Message::StartGame => {
                 let mut tasks = Vec::new();
 
-                self.cancellation_token.store(false, Ordering::Relaxed);
-
-                // El Runner se encargará de gestionar las llaves (sincronizar o generar)
-                // según detecte un servidor vivo o decida iniciar uno nuevo.
-
+                println!("[Game] StartGame requested - Current status: {:?}", self.status);
+                
+                // Enhanced state validation
                 if self.status == LauncherStatus::Playing {
+                    println!("[Game] Already playing, stopping current game...");
                     self.running_game = None;
                     self.status = LauncherStatus::Ready;
+                    self.status_text = self.localization.t("launcher.status.ready").to_string();
+                    self.last_status_change = std::time::Instant::now();
                 } else {
+                    // Reset cancellation token for new launch
+                    self.cancellation_token.store(false, Ordering::Relaxed);
+                    self.error = None; // Clear any previous errors
+
                     let player_name = self.profiles.get_current_profile_name();
                     let player_uuid = self.profiles.current_profile.clone();
                     let settings = self.settings.clone();
                     let target_ver = self.latest_version;
 
                     let trigger_status = self.status.clone();
+                    
+                    println!("[Game] Launching with profile: {}", player_name);
 
                     self.status_text = self
                         .localization
                         .t("launcher.status.initializing")
                         .to_string();
+                    self.last_status_change = std::time::Instant::now();
 
                     if self.is_quickplay_mode {
                         self.is_window_visible = false;
@@ -1228,7 +1352,7 @@ impl RusTale {
                         );
                     }
 
-                    // Guardamos el trigger_status en la tupla
+                    // Store launch attempt with timestamp for timeout detection
                     self.running_game = Some((
                         settings,
                         player_name,
@@ -1237,6 +1361,8 @@ impl RusTale {
                         trigger_status,
                     ));
                     self.status = LauncherStatus::Busy;
+                    
+                    println!("[Game] Game launch initiated successfully");
                 }
                 Task::batch(tasks)
             }
@@ -1246,6 +1372,13 @@ impl RusTale {
                 sub_progress,
                 speed,
             } => {
+                // Track progress changes for stuck detection using GENERAL progress
+                let progress_changed = (progress - self.last_download_progress).abs() > 0.1;
+                if progress_changed {
+                    self.last_download_progress = progress;
+                    self.last_status_change = std::time::Instant::now(); // Reset timeout on progress
+                }
+                
                 if progress >= 100.0 || speed.contains("verified") {
                     self.status = LauncherStatus::Busy;
                 } else {
@@ -1254,15 +1387,22 @@ impl RusTale {
 
                 self.download_progress = progress;
                 self.sub_progress = sub_progress;
-                self.status_text = speed;
+                self.status_text = speed.clone();
+                
+                println!("[Progress] General: {:.1}% | Step: {:.1}% | Status: {}", progress, sub_progress, speed);
                 Task::none()
             }
             Message::GameLaunched(res) => {
+                println!("[Game] GameLaunched received: {:?}", res);
+                
                 match res {
                     Ok(_) => {
                         self.status = LauncherStatus::Playing;
                         self.status_text =
                             self.localization.t("launcher.status.playing").to_string();
+                        self.last_status_change = std::time::Instant::now();
+
+                        println!("[Game] Game launched successfully");
 
                         // Rebuild tray menu to show "Stop Game"
                         self.rebuild_tray_menu();
@@ -1275,9 +1415,14 @@ impl RusTale {
                         }
                     }
                     Err(e) => {
+                        println!("[Game] Game launch failed: {}", e);
+                        
+                        // CRITICAL: Clean up state properly on failure
                         self.status = LauncherStatus::Ready;
-                        self.error = Some(e);
-                        self.running_game = None;
+                        self.status_text = self.localization.t("launcher.status.ready").to_string();
+                        self.error = Some(e.clone());
+                        self.running_game = None; // Ensure cleanup
+                        self.last_status_change = std::time::Instant::now();
 
                         // If we fail in Quickplay, show the window so the user knows what happened
                         if self.is_quickplay_mode {
@@ -1295,10 +1440,68 @@ impl RusTale {
                 Task::none()
             }
 
+            Message::WatchdogCheck => {
+                // Watchdog: Check for stuck states and auto-recover
+                let elapsed = self.last_status_change.elapsed();
+                let is_stuck = match self.status {
+                    LauncherStatus::Busy => {
+                        // Check if busy for more than 2 minutes WITHOUT any progress updates
+                        elapsed.as_secs() > 120
+                    }
+                    LauncherStatus::Downloading => {
+                        // Only consider stuck if no progress changes for 15 minutes
+                        // This accommodates VERY slow internet connections (3GB+ downloads)
+                        // We only trigger if download hasn't progressed AT ALL
+                        elapsed.as_secs() > 900 && 
+                        (self.download_progress - self.last_download_progress).abs() < 0.1
+                    }
+                    LauncherStatus::Playing => {
+                        // If playing but no running_game, we're stuck
+                        self.running_game.is_none()
+                    }
+                    _ => false,
+                };
+
+                if is_stuck {
+                    println!("[Watchdog] Detected stuck state: {:?} for {} seconds - Auto-recovering", self.status, elapsed.as_secs());
+                    
+                    // Force state recovery
+                    self.status = LauncherStatus::Ready;
+                    self.status_text = self.localization.t("launcher.status.ready").to_string();
+                    self.running_game = None;
+                    self.error = Some(format!("Auto-recovered from stuck state: {:?}", self.status));
+                    self.last_status_change = std::time::Instant::now();
+                    self.last_download_progress = 0.0; // Reset download progress
+                    
+                    // Cancel any ongoing operations
+                    self.cancellation_token.store(true, Ordering::Relaxed);
+                    
+                    // If in quickplay, show window so user knows what happened
+                    if self.is_quickplay_mode {
+                        self.is_quickplay_mode = false;
+                        self.is_window_visible = true;
+                        return window::oldest().and_then(|id| {
+                            Task::batch(vec![
+                                window::set_mode(id, window::Mode::Windowed),
+                                window::gain_focus(id),
+                            ])
+                        });
+                    }
+                }
+                
+                Task::none()
+            }
             Message::GameStopped => {
+                println!("[Game] GameStopped received");
+                
+                // CRITICAL: Ensure complete state cleanup
                 self.status = LauncherStatus::Ready;
                 self.status_text = self.localization.t("launcher.status.ready").to_string();
                 self.running_game = None;
+                self.error = None; // Clear any errors
+                self.last_status_change = std::time::Instant::now();
+
+                println!("[Game] State reset to Ready");
 
                 // Rebuild tray menu to show "Start Game"
                 self.rebuild_tray_menu();
@@ -1488,6 +1691,10 @@ impl RusTale {
                 Task::none()
             }
             Message::OpenSettings => {
+                // RESET del estado de transparencia al entrar a un menu
+                self.is_mouse_pressed = false; 
+                self.ui_opacity_accumulator = 1.0; 
+                
                 self.settings_state.open(self.settings.clone());
 
                 self.settings_state.is_loading_versions = true;
@@ -2072,7 +2279,7 @@ impl RusTale {
                         // pero no se congela y el icono del tray sigue funcionando.
                         #[cfg(target_os = "linux")]
                         {
-                            self.is_window_visible = true; // Mantener lógica de visible para que Iced siga dibujando
+                            self.is_window_visible = true; // Mantener logica de visible para que Iced siga dibujando
                             window::oldest().and_then(|id| window::minimize(id, true))
                         }
 
@@ -2147,7 +2354,7 @@ impl RusTale {
                 window::oldest().and_then(|id| window::toggle_maximize(id))
             }
 
-            // --- NUEVA LÓGICA DE REDIMENSIONAMIENTO MANUAL ---
+            // --- NUEVA LoGICA DE REDIMENSIONAMIENTO MANUAL ---
             Message::WindowEvent(event) => {
                 match event {
                     window::Event::Resized(size) => {
@@ -2156,13 +2363,13 @@ impl RusTale {
                         self.settings.width = size.width as u32;
                         self.settings.height = size.height as u32;
 
-                        // Verificar estado maximizado después de resize
+                        // Verificar estado maximizado despues de resize
                         // En Iced 0.14, las funciones de ventana devuelven Task
                         let size_clone = size;
                         return window::oldest()
                             .and_then(|window_id| window::is_maximized(window_id))
                             .map(move |is_maximized| {
-                                // No podemos modificar self directamente aquí, necesitamos un mensaje
+                                // No podemos modificar self directamente aqui, necesitamos un mensaje
                                 Message::WindowResizedWithMaximized(size_clone, is_maximized)
                             });
                     }
@@ -2184,7 +2391,7 @@ impl RusTale {
                 self.drag_start_window_pos = self.current_window_pos;
                 self.drag_start_window_size = self.current_window_size;
 
-                // Calculamos Mouse Absoluto: Posición Ventana + Posición Mouse Relativa
+                // Calculamos Mouse Absoluto: Posicion Ventana + Posicion Mouse Relativa
                 // (Usamos self.cursor_position que ya se actualiza en CursorMoved)
                 self.drag_start_mouse_screen_pos = Point::new(
                     self.current_window_pos.x + self.cursor_position.x,
@@ -2196,22 +2403,30 @@ impl RusTale {
 
             Message::ResizeReleased => {
                 self.resizing_direction = None;
+                self.is_mouse_pressed = false; // Tambien liberar el estado del mouse
+                self.last_mouse_release_time = std::time::Instant::now(); // Registrar cuando se solto
+                Task::none()
+            }
+
+            Message::MousePressed => {
+                self.is_mouse_pressed = true;
+                self.shader_click_time = std::time::Instant::now(); // Registrar cuando se presiono
                 Task::none()
             }
 
             Message::NextShader => {
-                // Solo cambiar si el modo LSD está activo Y NO estamos ya en transición
+                // Solo cambiar si el modo LSD esta activo Y NO estamos ya en transicion
                 if self.settings.theme.lsd_mode && self.shader_transition <= 0.0 {
-                    // 1. Calcular índice siguiente (Ciclo circular)
+                    // 1. Calcular indice siguiente (Ciclo circular)
                     self.next_shader_idx =
                         (self.active_shader_idx + 1) % self.total_shaders_available;
 
-                    // 2. Iniciar la transición visual
-                    // Establecer en un valor pequeño pero > 0.0 arranca el fade-in en view()
+                    // 2. Iniciar la transicion visual
+                    // Establecer en un valor pequeno pero > 0.0 arranca el fade-in en view()
                     self.shader_transition = 0.01;
 
-                    // 3. Resetear el temporizador automático
-                    // Para que no vuelva a cambiar automáticamente a los 2 segundos de que tú lo cambiaste
+                    // 3. Resetear el temporizador automatico
+                    // Para que no vuelva a cambiar automaticamente a los 2 segundos de que tu lo cambiaste
                     self.shader_change_timer = 0.0;
 
                     println!(
@@ -2335,41 +2550,60 @@ impl RusTale {
         // 3.0 seg -> 1.0 (quietud total)
         let stillness = (elapsed_idle / 3.0).clamp(0.0, 1.0);
 
-        // 1. CALCULAR PROGRESO DE TRANSICIÓN (Time Ramp)
+        // 1. CALCULAR PROGRESO DE TRANSICIoN (Time Ramp)
         // ramp_alpha va de 0.0 (Invisible) a 1.0 (Totalmente Visible/Opaco)
-        // Se basa únicamente en el tiempo transcurrido desde que se activó el LSD.
+        // Se basa unicamente en el tiempo transcurrido desde que se activo el LSD.
         let ramp_alpha = if let Some(t) = self.lsd_enabled_time {
             let elapsed = t.elapsed().as_secs_f32();
-            // Transición suave basada en la constante configurada (3 segundos)
+            // Transicion suave basada en la constante configurada (3 segundos)
             (elapsed / theme::LSD_RAMP_UP_SECONDS).clamp(0.0, 1.0)
         } else {
             0.0
         };
 
-        // 2. CALCULAR INTENSIDAD DEL EFECTO VISUAL (Matemáticas del Shader)
-        // Esto controla qué tan fuerte brillan los fractales o cuánto se deforma el texto.
-        // Si es Preview: Intensidad máxima.
-        // Si no: Respiración (1.0 -> 0.3 al estar quieto)
+        // 2. CALCULAR INTENSIDAD DEL EFECTO VISUAL (Matematicas del Shader)
+        // Esto controla que tan fuerte brillan los fractales o cuanto se deforma el texto.
+        // Si es Preview: Intensidad maxima.
+        // Si no: Respiracion (1.0 -> 0.3 al estar quieto)
         let click_decay = (self.shader_click_time.elapsed().as_secs_f32() * 8.0).exp();
         let click_pulse = self.shader_click_intensity / click_decay;
 
         let effect_intensity = if self.lsd_preview {
-            1.0 + click_pulse
+            1.5 + click_pulse * 0.5
         } else {
-            // Formula de "respiración":
-            // Cuando está quieto (stillness 1.0), baja al 30% (0.3).
-            // Cuando mueve el mouse, sube al 100% (1.0).
-            // NOTA: Multiplicamos por ramp_alpha aquí para que la *distorsión*
-            // empiece suave, pero esto NO afecta a la transparencia de la capa.
-            (ramp_alpha * (1.0 - (stillness * 0.7))) + click_pulse
+            // Formula corregida: ramp_alpha AHORA controla toda la intensidad visible
+            // ramp_alpha = 0.0 -> 0.3 (minimo visible)
+            // ramp_alpha = 1.0 -> 1.5 (maximo brillante)
+            let base_intensity = 0.3 + (ramp_alpha * 1.2); // 0.3 a 1.5
+            let stillness_variation = (1.0 - stillness) * 0.2; // Mouse activo = +0.2
+            base_intensity + stillness_variation + click_pulse * 0.5
         }
-        .min(10.0); // Tope de seguridad
+        .min(3.0);
+
+        // Si hay modal, forzamos ui_alpha a 1.0 sin importar el acumulador
+        let is_modal_active = self.settings_state.is_open || self.mods_state.is_open;
+        let ui_alpha = if is_modal_active { 1.0 } else { self.ui_alpha_actual() };
+
+        // Clonamos y modificamos la paleta basandonos en la presion del mouse
+        let mut faded_palette = *palette;
+        let color_adjust = |mut c: Color| { c.a *= ui_alpha; c };
+
+        faded_palette.accent = color_adjust(faded_palette.accent);
+        faded_palette.background = color_adjust(faded_palette.background);
+        faded_palette.surface = color_adjust(faded_palette.surface);
+        faded_palette.text_primary = color_adjust(faded_palette.text_primary);
+        faded_palette.text_secondary = color_adjust(faded_palette.text_secondary);
+        
+        // --- CLAVE: Tambien ajustar estos campos para evitar hovers fantasmales ---
+        faded_palette.surface_hover = color_adjust(faded_palette.surface_hover);
+        faded_palette.danger = color_adjust(faded_palette.danger);
+        faded_palette.success = color_adjust(faded_palette.success);
 
         let ctx = theme::UIContext {
-            palette: *palette,
+            palette: faded_palette, // Pasamos la paleta con alfa variable
             lsd_offset: self.lsd_offset,
             lsd_enabled: self.settings.theme.lsd_mode || self.lsd_preview,
-            lsd_intensity: effect_intensity, // Para los widgets usamos la calculada con respiración
+            lsd_intensity: effect_intensity, // Para los widgets usamos la calculada con respiracion
             time: self.start_time.elapsed().as_secs_f32(),
             mouse_pos: self.cursor_position,
             mouse_stillness: stillness,
@@ -2383,7 +2617,8 @@ impl RusTale {
             .width(Length::Fill)
             .height(Length::Fill)
             .style(move |_| container::Style {
-                background: Some(tint_color.into()),
+                // Multiplica el tinte por la opacidad para que el fondo sea 100% puro al final
+                background: Some(Color { a: tint_color.a * ui_alpha, ..tint_color }.into()),
                 ..Default::default()
             });
 
@@ -2423,7 +2658,7 @@ impl RusTale {
                     .width(Length::FillPortion(1))
                     .height(Length::Fill)
                     .padding(30)
-                    .style(move |t| theme::glass_container(&palette, t))
+                    .style(move |t| theme::glass_container(&ctx.palette, t))
                     .into(),
                 ctx,
             );
@@ -2437,21 +2672,27 @@ impl RusTale {
                 .width(Length::FillPortion(2))
                 .height(Length::Fill)
                 .padding(30)
-                .style(move |t| theme::container_style_transparent(&palette, t))
+                .style(move |t| theme::container_style_transparent(&ctx.palette, t))
                 .into(),
                 ctx,
             );
 
-            row![left_column, right_column]
+            // Renderizar siempre los contenedores con paleta con alfa variable
+            Into::<Element<'_, Message>>::into(
+                container(
+                    row![left_column, right_column]
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .padding(20)
+                        .spacing(20)
+                )
                 .width(Length::Fill)
                 .height(Length::Fill)
-                .padding(20)
-                .spacing(20)
-                .into()
+            )
         } else {
             // MODO COMPACTO
             // Usamos Length::Fill para que ocupe todo el ancho disponible
-            // Reducimos el padding para aprovechar espacio en ventanas muy pequeñas (480px)
+            // Reducimos el padding para aprovechar espacio en ventanas muy pequenas (480px)
             let padding = if self.window_size.width < 500.0 {
                 10
             } else {
@@ -2463,35 +2704,43 @@ impl RusTale {
                     .width(Length::Fill)
                     .height(Length::Fill)
                     .padding(padding) // Padding dinamico
-                    .style(move |t| theme::glass_container(&palette, t))
+                    .style(move |t| theme::glass_container(&ctx.palette, t))
                     .into(),
                 ctx,
             );
 
             if self.window_size.width > 500.0 {
-                row![
-                    Space::new().width(Length::Fill),
-                    container(left_column)
-                        .width(400.0)
-                        .style(move |t| theme::container_style_transparent(&palette, t)), // Max width visual
-                    Space::new().width(Length::Fill)
-                ]
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .padding(20)
-                .into()
-            } else {
-                container(left_column)
+                // Renderizar siempre los contenedores con paleta con alfa variable
+                Into::<Element<'_, Message>>::into(
+                    container(
+                        row![
+                            Space::new().width(Length::Fill),
+                            container(left_column)
+                                .width(400.0)
+                                .style(move |t| theme::container_style_transparent(&ctx.palette, t)), // Max width visual
+                            Space::new().width(Length::Fill)
+                        ]
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .padding(20)
+                    )
                     .width(Length::Fill)
                     .height(Length::Fill)
-                    .padding(10) // Margen externo pequeño
-                    .style(move |t| theme::container_style_transparent(&palette, t))
-                    .into()
+                )
+            } else {
+                // Renderizar siempre los contenedores con paleta con alfa variable
+                Into::<Element<'_, Message>>::into(
+                    container(left_column)
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .padding(10) // Margen externo pequeno
+                        .style(move |t| theme::container_style_transparent(&ctx.palette, t))
+                )
             }
         };
 
         // --- LOGICA DE FONDO (STACK COMPUESTO) ---
-        // 1. Capa Base: Imagen Estática o Color
+        // 1. Capa Base: Imagen Estatica o Color
         let base_layer: Element<'_, Message> = if let Some(handle) = &self.bg_handle {
             image(handle.clone())
                 .width(Length::Fill)
@@ -2511,16 +2760,19 @@ impl RusTale {
 
         // 2. Capa Shader: Se superpone con Alpha variable
         let bg: Element<'_, Message> = if self.settings.theme.lsd_mode {
-            // [FIX] Usamos ramp_alpha directamente.
-            // Esto asegura que la capa del shader vaya de 0% opacidad a 100% opacidad
-            // de forma lineal, independiente de si el shader "respira" o se distorsiona.
-            let shader_opacity = ramp_alpha;
+            // [FIX] La capa siempre es visible (alpha = 1.0)
+            // La intensidad del shader se controla internamente con effect_intensity
+            let shader_opacity = 1.0; // Capa siempre visible
 
-            // Crear o actualizar instancia del shader dinámicamente
+            // Crear o actualizar instancia del shader dinamicamente
             let mut shader_opt = self.lsd_shader_instance.borrow_mut();
             let shader_instance = if let Some(ref mut shader) = *shader_opt {
-                // Actualizar posición del mouse
+                // Actualizar posicion del mouse, shader_id y color de acento
                 shader.update_mouse_position(self.cursor_position);
+                // IMPORTANTE: Actualizar shader_id durante transiciones
+                shader.update_shader_id(self.active_shader_idx);
+                // IMPORTANTE: Actualizar color de acento en tiempo real
+                shader.update_accent(palette.accent);
                 shader
             } else {
                 // Crear nueva instancia
@@ -2530,7 +2782,7 @@ impl RusTale {
                     palette.accent,
                     self.active_shader_idx,
                     shader_opacity, // <--- CORREGIDO: Controla opacidad pura (fade in)
-                    effect_intensity, // <--- CORREGIDO: Controla violencia matemática del fractal
+                    effect_intensity, // <--- CORREGIDO: Controla violencia matematica del fractal
                 ));
                 shader_opt.as_mut().unwrap()
             };
@@ -2544,13 +2796,14 @@ impl RusTale {
                 .width(Length::Fill)
                 .height(Length::Fill);
 
-            // Apilamos: Imagen estática abajo, Shader arriba (transicionando transparencia)
+            // Apilamos: Imagen estatica abajo, Shader arriba (transicionando transparencia)
             iced::widget::stack![base_layer, shader_layer].into()
         } else {
             base_layer
         };
 
-        // --- CONSTRUCCIÓN DE LA BARRA DE TÍTULO ---
+        // --- CONSTRUCCIoN DE LA BARRA DE TiTULO ---
+        let title_bar_palette = ctx.palette.clone(); // Clonar completamente para evitar error de prestamo
         let title_bar = mouse_area(
             container(
                 row![
@@ -2560,9 +2813,10 @@ impl RusTale {
                             .width(20)
                             .height(20)
                             .content_fit(ContentFit::Contain)
+                            .opacity(ctx.palette.text_primary.a)
                     )
                     .padding(Padding::new(0.0).left(10.0).right(10.0)), // Padding lateral
-                    // Título
+                    // Titulo
                     container(theme::text_small(self.title(), ctx))
                         .width(Length::Fill)
                         .align_y(Alignment::Center),
@@ -2573,7 +2827,7 @@ impl RusTale {
                             crate::util::icons::MINUS,
                             Message::MinimizeWindow,
                             false,
-                            &palette,
+                            title_bar_palette,
                             ctx
                         ),
                         // Maximizar / Restaurar
@@ -2585,7 +2839,7 @@ impl RusTale {
                             },
                             Message::MaximizeWindow,
                             false,
-                            &palette,
+                            title_bar_palette,
                             ctx
                         ),
                         // Cerrar (Rojo)
@@ -2593,15 +2847,15 @@ impl RusTale {
                             crate::util::icons::X,
                             Message::CloseRequested,
                             true, // is_close
-                            &palette,
+                            title_bar_palette,
                             ctx
                         ),
                     ]
                 ]
                 .align_y(Alignment::Center)
-                .height(32), // Altura de la barra de título
+                .height(32), // Altura de la barra de titulo
             )
-            .style(move |t| theme::title_bar_style(&palette, t, &self.settings.theme.base_mode))
+            .style(move |t| theme::title_bar_style(&title_bar_palette, t, &self.settings.theme.base_mode))
             .width(Length::Fill),
         )
         .on_press(Message::WindowDrag)
@@ -2682,9 +2936,9 @@ impl RusTale {
             window_frame.into()
         } else {
             let b = 10.0; // Grosor del borde para arrastrar
-            let c = 20.0; // Tamaño de la zona de las esquinas
+            let c = 20.0; // Tamano de la zona de las esquinas
 
-            // Helper para crear una capa de redimensión alineada
+            // Helper para crear una capa de redimension alineada
             // Envuelve la zona sensible en un contenedor de pantalla completa para posicionarla
             let handle = |dir: ResizeDirection,
                           interaction: Interaction,
@@ -2743,7 +2997,7 @@ impl RusTale {
                     Alignment::End,
                     Alignment::Center
                 ),
-                // 2. Esquinas - Prioridad sobre los bordes (por estar después en el stack)
+                // 2. Esquinas - Prioridad sobre los bordes (por estar despues en el stack)
                 // NW (Arriba-Izquierda) -> Cursor \
                 handle(
                     ResizeDirection::NorthWest,
@@ -2782,7 +3036,7 @@ impl RusTale {
                 ),
             ];
 
-            // STACK FINAL: resize_handles DEBE ser el último elemento para capturar eventos
+            // STACK FINAL: resize_handles DEBE ser el ultimo elemento para capturar eventos
             stack![
                 window_frame,   // Contenido visual abajo
                 resize_handles  // Capa invisible de control arriba
@@ -2809,7 +3063,7 @@ impl RusTale {
 
         let icon = util::icons::load_tray_icon();
 
-        // --- CAMBIO AQUÍ: Capturar error en lugar de .ok() ---
+        // --- CAMBIO AQUi: Capturar error en lugar de .ok() ---
         let builder_result = TrayIconBuilder::new()
             .with_menu(Box::new(tray_menu))
             .with_tooltip("RusTale Launcher")
@@ -2819,7 +3073,7 @@ impl RusTale {
         match builder_result {
             Ok(icon) => {
                 println!("Tray icon created OK.");
-                // Escribir log de éxito (temporal para debug)
+                // Escribir log de exito (temporal para debug)
                 Some(icon)
             }
             Err(e) => {

@@ -297,16 +297,34 @@ struct ServerState {
 }
 
 pub async fn is_server_alive(port: u16) -> bool {
+    // 1. First check if port is actually bound by any process
+    if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+        // Port is free, no server running
+        return false;
+    }
+    
+    // 2. Port is bound, now verify it's actually our server
     let client = reqwest::Client::new();
     let url = format!("http://127.0.0.1:{}/health", port);
 
     match client
         .get(&url)
-        .timeout(std::time::Duration::from_millis(500))
+        .timeout(std::time::Duration::from_millis(2000)) // Increased timeout for Linux
         .send()
         .await
     {
-        Ok(resp) => resp.status().is_success(),
+        Ok(resp) => {
+            // Additional verification: check if it's actually our server
+            if resp.status().is_success() {
+                // Try to parse response to ensure it's our health endpoint
+                match resp.text().await {
+                    Ok(text) => text.contains("hytale-rust-emulator"),
+                    Err(_) => false,
+                }
+            } else {
+                false
+            }
+        },
         Err(_) => false,
     }
 }
@@ -1064,13 +1082,13 @@ async fn handle_session_authorize(
             // FALLBACK CRITICO: Si no hay audience o es el del cliente, usar el ultimo servidor registrado
             if let Some(last_uuid) = &state.last_server_uuid {
                 println!(
-                    "    ! Usando fallback al último servidor registrado: {}",
+                    "    ! Usando fallback al ultimo servidor registrado: {}",
                     last_uuid
                 );
                 last_uuid.clone()
             } else {
                 println!(
-                    "    ! Advertencia: No se detectó audience y no hay servidor registrado, usando fallback genérico"
+                    "    ! Advertencia: No se detecto audience y no hay servidor registrado, usando fallback generico"
                 );
                 "hytale-server".to_string()
             }
@@ -1221,7 +1239,7 @@ async fn handle_server_auto_auth(
     state: Arc<tokio::sync::Mutex<ServerState>>,
 ) -> impl warp::Reply {
     let actual_port = extract_port(host).unwrap_or(port);
-    println!(">>> [SERVER AUTO-AUTH] El servidor de juego se está identificando");
+    println!(">>> [SERVER AUTO-AUTH] El servidor de juego se esta identificando");
     println!("    Body: {:?}", body);
 
     // Server can provide its own ID or we generate one

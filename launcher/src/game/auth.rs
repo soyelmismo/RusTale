@@ -2,7 +2,6 @@ use crate::game::crypto;
 use anyhow::{Context, Result};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
@@ -58,7 +57,7 @@ pub async fn fetch_remote_tokens(
         anyhow::bail!("Auth server returned error {}: {}", status, text);
     }
 
-    let mut tokens: AuthTokens = response
+    let tokens: AuthTokens = response
         .json()
         .await
         .context("Failed to parse auth tokens")?;

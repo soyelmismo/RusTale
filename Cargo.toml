@@ -6,7 +6,7 @@ resolver = "2"
 opt-level = 3       # Maxima optimizacion (hace el flujo de control complejo)
 lto = "thin"          # Link Time Optimization (mezcla codigo entre crates, dificil de separar)
 codegen-units = 4  # Reduce paralelismo para mejorar la optimizacion LTO
-panic = 'abort'     # Elimina la logica de "unwinding" (reduce tamaño y pistas de flujo)
+panic = 'abort'     # Elimina la logica de "unwinding" (reduce tamano y pistas de flujo)
 strip = true        # ELIMINA LOS SIMBOLOS (hace que las funciones se llamen sub_401000)
 debug = false       # Asegura que no haya info de debug
 
@@ -15,7 +15,7 @@ inherits = "release" # Hereda defaults de release para no olvidar detalles
 opt-level = 0        # Sin optimizacion (Compila rapido, corre lento)
 lto = "off"          # Apaga LTO explicitamente (Linkeo rapido)
 codegen-units = 256  # CLAVE: Paraleliza la compilacion al maximo
-panic = 'abort'      # Sin unwinding (menor tamaño, linkeo mas simple)
+panic = 'abort'      # Sin unwinding (menor tamano, linkeo mas simple)
 strip = false        # Saltar el paso de stripping ahorra tiempo de build
 debug = false        # Sin info de debug
 incremental = true   # Opcional: Habilita compilacion incremental (cache)

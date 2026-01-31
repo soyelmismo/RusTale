@@ -132,7 +132,7 @@ struct FilesResponse {
     data: Vec<CfFile>,
 }
 
-// Implementación de conversión de CfMod a GenericMod
+// Implementacion de conversion de CfMod a GenericMod
 impl From<CfMod> for GenericMod {
     fn from(cf_mod: CfMod) -> Self {
         GenericMod {
@@ -149,7 +149,7 @@ impl From<CfMod> for GenericMod {
     }
 }
 
-// Implementación de conversión de CfFile a GenericFile
+// Implementacion de conversion de CfFile a GenericFile
 impl From<CfFile> for GenericFile {
     fn from(cf_file: CfFile) -> Self {
         // Parsear fecha si es necesario, o usar now() como fallback temporal

@@ -1,5 +1,5 @@
 // =========================================================
-// Forest Shader - Siluetas Geométricas (Style: Firewatch/Limbo)
+// Forest Shader - Siluetas Geometricas (Style: Firewatch/Limbo)
 // =========================================================
 
 // --- HERRAMIENTAS DE MATEMATICAS Y RUIDO ---
@@ -19,7 +19,7 @@ fn noise(x: f32) -> f32 {
 }
 
 
-// SDF de un Triangulo Isosceles (para los árboles)
+// SDF de un Triangulo Isosceles (para los arboles)
 fn sdTriangleIsosceles(p: vec2<f32>, q: vec2<f32>) -> f32 {
     var pp = p;
     pp.x = abs(pp.x);
@@ -33,13 +33,13 @@ fn sdTriangleIsosceles(p: vec2<f32>, q: vec2<f32>) -> f32 {
 
 // --- DIBUJO DE OBJETOS ---
 
-// Dibuja un solo árbol procedural
-// uv: coordenadas locales centras en la base del árbol
-// scale: altura del árbol
-// seed: semilla aleatoria para que cada árbol sea unico
+// Dibuja un solo arbol procedural
+// uv: coordenadas locales centras en la base del arbol
+// scale: altura del arbol
+// seed: semilla aleatoria para que cada arbol sea unico
 fn draw_tree(uv: vec2<f32>, scale: f32, seed: f32, wind: f32) -> f32 {
     var p = uv;
-    // Viento: dobla la coordenada X cuanto más alto es Y
+    // Viento: dobla la coordenada X cuanto mas alto es Y
     p.x -= (p.y / scale) * (p.y / scale) * wind * 0.2;
 
     // 1. Tronco
@@ -72,15 +72,15 @@ fn draw_tree(uv: vec2<f32>, scale: f32, seed: f32, wind: f32) -> f32 {
         let progress = i / levels;
         let y_pos = mix(start_y, top_y * 0.9, progress);
         let branch_scale = scale * (1.0 - progress * 0.8) * 0.5;
-        let branch_w = branch_scale * 0.7; // Ancho del triángulo
+        let branch_w = branch_scale * 0.7; // Ancho del triangulo
         
-        // Distancia local para este triángulo
+        // Distancia local para este triangulo
         let tri_uv = vec2<f32>(p.x, p.y - y_pos);
         
-        // Perturbación de los bordes (dentado)
+        // Perturbacion de los bordes (dentado)
         let jaggy = sin(p.y * 60.0 + seed) * 0.01 * scale;
         
-        // SDF triángulo
+        // SDF triangulo
         let tri = sdTriangleIsosceles(vec2<f32>(tri_uv.x + jaggy, tri_uv.y), vec2<f32>(branch_w, branch_scale));
         
         current_foliage_dist = min(current_foliage_dist, tri);
@@ -91,12 +91,12 @@ fn draw_tree(uv: vec2<f32>, scale: f32, seed: f32, wind: f32) -> f32 {
     return max(trunk_mask * trunk_h_mask, foliage_mask);
 }
 
-// Genera una capa completa de terreno y árboles
-// layer_idx: 0 es el fondo, números altos son primer plano
+// Genera una capa completa de terreno y arboles
+// layer_idx: 0 es el fondo, numeros altos son primer plano
 fn render_layer(uv: vec2<f32>, layer_idx: f32, layer_color: vec3<f32>) -> vec4<f32> {
     var col = vec4<f32>(0.0);
     
-    // Ajustes de parálaje (horizontal y vertical)
+    // Ajustes de paralaje (horizontal y vertical)
     let scroll_x = u.mouse_x * (layer_idx + 1.0) * 0.2; 
     let scroll_y = u.mouse_y * (layer_idx + 1.0) * 0.1; // Menor movimiento vertical para naturalidad
     var p = uv;
@@ -109,11 +109,11 @@ fn render_layer(uv: vec2<f32>, layer_idx: f32, layer_color: vec3<f32>) -> vec4<f
     // Frecuencia baja (forma general) + frecuencia alta (detalle)
     let ground_h = -0.5 + sin(p.x * terrain_freq + layer_idx) * 0.2 + noise(p.x * 2.0 + layer_idx) * 0.05;
     
-    // Offset Y: capas lejanas más arriba visualmente
+    // Offset Y: capas lejanas mas arriba visualmente
     let y_offset = (layer_idx * 0.15) - 0.4;
     let ground_y = ground_h + y_offset;
     
-    // Máscara del suelo
+    // Mascara del suelo
     let in_ground = 1.0 - smoothstep(ground_y, ground_y + 0.01, p.y);
     
     if (in_ground > 0.0) {
@@ -121,7 +121,7 @@ fn render_layer(uv: vec2<f32>, layer_idx: f32, layer_color: vec3<f32>) -> vec4<f
     }
     
     // --- ARBOLES ---
-    // Dividimos el eje X en celdas (Grilla 1D) para posicionar árboles
+    // Dividimos el eje X en celdas (Grilla 1D) para posicionar arboles
     // Escala de la grilla depende de la profundidad de la capa
     let grid_size = 1.0 / (0.5 + layer_idx * 0.3); 
     let cell_id = floor(p.x / grid_size);
@@ -129,37 +129,37 @@ fn render_layer(uv: vec2<f32>, layer_idx: f32, layer_color: vec3<f32>) -> vec4<f
     
     // Randoms por celda
     let h1 = hash1(cell_id + layer_idx * 33.0); // Random base
-    let h2 = hash1(cell_id * 12.34);            // Posición
-    let h3 = hash1(cell_id * 5.5 + u.time * 0.001); // Variedad más lenta
+    let h2 = hash1(cell_id * 12.34);            // Posicion
+    let h3 = hash1(cell_id * 5.5 + u.time * 0.001); // Variedad mas lenta
     
     var tree_acc = 0.0;
     
-    // Probabilidad de que haya un árbol en esta celda
+    // Probabilidad de que haya un arbol en esta celda
     if (h1 > 0.4) {
-        // Posición X aleatoria dentro de la celda
+        // Posicion X aleatoria dentro de la celda
         // Centro (0.5) +- jitter
         let tree_center_x = 0.5 + (h2 - 0.5) * 0.6;
         let dist_x = (cell_x - tree_center_x) * grid_size; // Distancia real en pantalla X
         
-        // Calculamos la Y del suelo exactamente en el punto donde nace el árbol
+        // Calculamos la Y del suelo exactamente en el punto donde nace el arbol
         // para "plantarlo" correctamente
         let tree_world_x = (cell_id + tree_center_x) * grid_size;
         let ground_h_at_tree = -0.5 + sin(tree_world_x * terrain_freq + layer_idx) * 0.2 + noise(tree_world_x * 2.0 + layer_idx) * 0.05 + y_offset;
         
         let dist_y = p.y - ground_h_at_tree;
         
-        // Propiedades del árbol
+        // Propiedades del arbol
         let t_height = 0.6 + h2 * 0.6 + layer_idx * 0.1; // Altura variable
         let smooth_wind = smooth_time(u.time + cell_id, 0.8) * 2.0 - 1.0;
         let t_wind = smooth_wind * u.intensity * 1.5;
         
-        // Coordenadas locales relativas a la base del árbol
+        // Coordenadas locales relativas a la base del arbol
         let t_uv = vec2<f32>(dist_x, dist_y);
         
         tree_acc = draw_tree(t_uv, t_height, h1 * 100.0, t_wind);
     }
     
-    // Comprobar solapamiento de vecino (opcional, simplificado aquí cortando ancho de celda)
+    // Comprobar solapamiento de vecino (opcional, simplificado aqui cortando ancho de celda)
     // El 'tree_acc' es 0 o 1
     
     return vec4<f32>(layer_color, tree_acc);
@@ -183,7 +183,7 @@ fn draw_birds_flock(uv_in: vec2<f32>) -> f32 {
     let fly_speed = 0.05; // Reducido para menos flickering
     uv.x -= u.time * fly_speed;
     
-    // Añadir interacción con mouse vertical para las aves
+    // Anadir interaccion con mouse vertical para las aves
     uv.y += u.mouse_y * 0.3;
     
     // Bucle para dibujar 3 aves diferentes con distintos offsets
@@ -199,13 +199,13 @@ fn draw_birds_flock(uv_in: vec2<f32>) -> f32 {
         // Usamos un bloque grande de espacio
         let loop_space = vec2<f32>(3.0, 1.0); 
         
-        // Posicion actual de este pájaro especifico en el mundo infinito
+        // Posicion actual de este pajaro especifico en el mundo infinito
         // Offset Y le damos movimiento sinusoidal suave
         var pos = offset;
         let smooth_bob = smooth_time(u.time + fi * 0.3, 0.2) * 2.0 - 1.0;
-        pos.y += smooth_bob * 0.03; // Más lento y sutil
+        pos.y += smooth_bob * 0.03; // Mas lento y sutil
         
-        // Espacio local del pájaro con wrap
+        // Espacio local del pajaro con wrap
         // (uv.x + offset) % loop_width
         let loop_width = 2.5;
         let wrapped_x = uv.x + offset.x;
@@ -218,7 +218,7 @@ fn draw_birds_flock(uv_in: vec2<f32>) -> f32 {
         let wing_speed = 6.0 + fi * 1.0; // Reducido para menos flickering
         let smooth_flap = smooth_time(u.time + fi * 0.5, wing_speed) * 2.0 - 1.0; 
         
-        // Escalarlo pequeño
+        // Escalarlo pequeno
         b_uv *= 25.0; // Zoom in
         
         // Deformar Y basado en X y flap para hacer el " aleteo"
@@ -230,7 +230,7 @@ fn draw_birds_flock(uv_in: vec2<f32>) -> f32 {
         let thickness = 0.2 - abs(b_uv.x) * 0.1;
         let d = length(vec2<f32>(b_uv.x, max(0.0, abs(b_uv.y) - thickness))) - 0.05;
         
-        // Máscara
+        // Mascara
         let mask = 1.0 - smoothstep(0.0, 0.1, d);
         // Cortar lejanos en X para que no se vean infinitos bugs
         let clip = 1.0 - smoothstep(0.8, 1.0, abs(b_uv.x));
@@ -256,7 +256,7 @@ uv.x *= u.aspect;
 let accent = vec3<f32>(u.accent_r, u.accent_g, u.accent_b);
 // Cielo base: Morado oscuro arriba, Naranja/Rojo abajo
 let sky_top = vec3<f32>(0.05, 0.02, 0.1) + accent * 0.1;
-let sky_bot = mix(vec3<f32>(0.4, 0.2, 0.1), accent, 0.4); // Más influencia del tema abajo
+let sky_bot = mix(vec3<f32>(0.4, 0.2, 0.1), accent, 0.4); // Mas influencia del tema abajo
 var col = mix(sky_bot, sky_top, uv.y * 0.5 + 0.5);
 
 // Sol/Luna detras
@@ -270,7 +270,7 @@ col += vec3<f32>(1.0, 0.9, 0.6) * sun_disk * 0.5;
 col += accent * sun_glow * 0.4;
 
 // 2. CAPAS DE BOSQUE
-// Dibujamos de atrás hacia adelante (algoritmo del pintor)
+// Dibujamos de atras hacia adelante (algoritmo del pintor)
 let num_layers = 5.0;
 
 for (var i: f32 = 0.0; i < num_layers; i = i + 1.0) {
@@ -281,20 +281,20 @@ for (var i: f32 = 0.0; i < num_layers; i = i + 1.0) {
     // Frente: Muy oscuro (Contraluz) y con toque de Accent
     var layer_color = mix(sky_bot * 0.5, vec3<f32>(0.02, 0.02, 0.02), t * t);
     
-    // Añadimos un poco de 'fog' del acento a las capas intermedias
+    // Anadimos un poco de 'fog' del acento a las capas intermedias
     if (t < 0.8 && t > 0.2) {
         layer_color += accent * 0.05;
     }
     
     let layer_data = render_layer(uv, i, layer_color);
-    // data.rgb = color, data.a = alpha (máscara de árboles/suelo)
+    // data.rgb = color, data.a = alpha (mascara de arboles/suelo)
     
     // Blend normal (Alpha over)
     col = mix(col, layer_data.rgb, layer_data.a);
     
-    // Niebla volumétrica ligera entre capas
+    // Niebla volumetrica ligera entre capas
     if (i < num_layers - 1.0) {
-        // Cuanto más abajo en Y, más niebla acumulada
+        // Cuanto mas abajo en Y, mas niebla acumulada
         let ground_fog = smoothstep(-0.5, -1.0, uv.y); 
         col = mix(col, layer_color, ground_fog * 0.15);
     }
@@ -305,7 +305,7 @@ let birds = draw_birds_flock(uv);
 col = mix(col, vec3<f32>(0.0, 0.0, 0.0), birds);
 
 // 4. POST PROCESO Y FADE
-// Viñeta
+// Vineta
 col *= 1.1 - length(uv * 0.6);
 
 // IMPORTANTE: Intensidad del sistema (Fade in/out controlado por tu Rustale)

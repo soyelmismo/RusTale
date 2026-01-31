@@ -83,16 +83,19 @@ pub struct ModsState {
     pub loading: bool,
     pub error: Option<String>,
     pub patch_mods: Vec<PatchManifest>,
-    pub installed_mods: Vec<ModInfo>,
+    pub installed_mods: Vec<crate::game::mods::ModInfo>,
     pub temp_settings: GameSettings,
     pub installing_ids: HashSet<String>,
     pub installed_ids: HashSet<String>,
     pub installing_mods: HashMap<String, GenericMod>,
     pub checking_updates: bool,
-    pub mods_with_updates: HashSet<String>,
-    // Mapa para recordar qué versión seleccionó el usuario en la UI para cada mod (Browse tab)
+    pub mods_with_updates: HashSet<String>, // Ahora contiene remote_ids
+    // Cache para evitar recálculos en view()
+    pub update_status_cache: HashMap<String, bool>, // file_name/mod_id -> has_update
+    pub cache_dirty: bool, // Marcar cuando se necesita recalcular
+    // Mapa para recordar que version selecciono el usuario en la UI para cada mod (Browse tab)
     pub selected_versions: HashMap<String, String>,
-    // Set de mods que están cargando versiones actualmente
+    // Set de mods que estan cargando versiones actualmente
     pub loading_versions: HashSet<String>,
     // Cache de versiones cargadas bajo demanda para cada mod
     pub cached_versions: HashMap<String, Vec<crate::game::mods_api::GenericFile>>,
@@ -154,7 +157,7 @@ impl ModsState {
                 self.mods_with_updates.clear();
 
                 let load_task = self.load_mods_task(base_dir.clone(), settings.clone());
-                // También verificar actualizaciones automáticamente al abrir
+                // Tambien verificar actualizaciones automaticamente al abrir
                 let update_task = Task::perform(async move { Ok::<(), String>(()) }, |_| {
                     ModsMessage::CheckForUpdates
                 });
@@ -291,10 +294,10 @@ impl ModsState {
                 let s = settings.clone();
                 Task::perform(
                     async move {
-                        // Eliminar el archivo físico
+                        // Eliminar el archivo fisico
                         let _ = crate::game::mods::delete_mod(&mod_info).await;
 
-                        // También eliminar del manifest si tiene metadatos
+                        // Tambien eliminar del manifest si tiene metadatos
                         if let Some(meta) = &mod_info.metadata {
                             let version_str = if s.game_version == 0 {
                                 "latest".to_string()
@@ -428,7 +431,7 @@ impl ModsState {
                 Task::none()
             }
             ModsMessage::VersionSelected { mod_id, file_id } => {
-                // Para la pestaña Browse
+                // Para la pestana Browse
                 self.selected_versions.insert(mod_id, file_id);
                 Task::none()
             }
@@ -528,7 +531,7 @@ impl ModsState {
                 match res {
                     Ok(fnm) => {
                         self.installed_ids.insert(id.clone());
-                        // Guardar metadatos si tenemos información del mod
+                        // Guardar metadatos si tenemos informacion del mod
                         let meta = if let Some(gen_mod) = installing_mod {
                             let file_id_to_save =
                                 if let Some(fid) = self.selected_versions.get(&gen_mod.id) {
@@ -750,6 +753,9 @@ impl ModsState {
                         // 1. Verificar JAR Mods
                         for installed in manifest {
                             if installed.provider == ModProvider::CurseForge {
+                                println!("[Mods] DEBUG: Checking JAR mod - mod_id: {}, file_name: {}, current_file_id: {}", 
+                                    installed.mod_id, installed.file_name, installed.file_id);
+                                
                                 if let Ok(versions) = repo.get_versions(&installed.mod_id).await {
                                     let compatible_file = versions.iter().find(|f| {
                                         current_game_ver == "latest"
@@ -757,11 +763,23 @@ impl ModsState {
                                     });
 
                                     if let Some(latest) = compatible_file {
+                                        println!("[Mods] DEBUG: Found latest version - file_id: {}, name: {}", 
+                                            latest.file_id, latest.name);
+                                        
                                         if latest.file_id != installed.file_id {
-                                            updates.push(installed.file_name.clone());
+                                            println!("[Mods] DEBUG: UPDATE NEEDED - latest.file_id ({}) != installed.file_id ({})", 
+                                                latest.file_id, installed.file_id);
+                                            // REGISTRAMOS POR EL ID DEL MOD EN CURSEFORGE (remote_id = mod_id para JARs)
+                                            updates.push(installed.mod_id.clone());
+                                        } else {
+                                            println!("[Mods] DEBUG: UP TO DATE - file_ids match");
                                         }
                                         cached_map.insert(installed.mod_id.clone(), versions);
+                                    } else {
+                                        println!("[Mods] DEBUG: No compatible version found for mod_id: {}", installed.mod_id);
                                     }
+                                } else {
+                                    println!("[Mods] ERROR: Failed to get versions for mod_id: {}", installed.mod_id);
                                 }
                             }
                         }
@@ -774,8 +792,14 @@ impl ModsState {
                         .unwrap_or_default();
 
                         for p in patches {
-                            if let (Some(rid), Some(prov)) = (p.remote_id, p.provider) {
+                            let remote_id = p.remote_id.clone();
+                            let provider = p.provider.clone();
+                            
+                            if let (Some(rid), Some(prov)) = (remote_id, provider) {
                                 if prov == ModProvider::CurseForge {
+                                    println!("[Mods] DEBUG: Checking ZIP patch - mod_id: {}, remote_id: {}, current_file_id: {:?}", 
+                                        p.mod_id, rid, p.file_id);
+                                    
                                     if let Ok(versions) = repo.get_versions(&rid).await {
                                         let compatible_file = versions.iter().find(|f| {
                                             current_game_ver == "latest"
@@ -783,15 +807,30 @@ impl ModsState {
                                         });
 
                                         if let Some(latest) = compatible_file {
+                                            println!("[Mods] DEBUG: Found latest version for patch - file_id: {}, name: {}", 
+                                                latest.file_id, latest.name);
+                                            
                                             // En patches, file_id es Option<String>
                                             if Some(latest.file_id.clone()) != p.file_id {
-                                                // Usamos mod_id local del patch para marcarlo con update
-                                                updates.push(p.mod_id.clone());
+                                                println!("[Mods] DEBUG: PATCH UPDATE NEEDED - latest.file_id ({}) != patch.file_id ({:?})", 
+                                                    latest.file_id, p.file_id);
+                                                // REGISTRAMOS POR EL ID DEL MOD EN CURSEFORGE (remote_id)
+                                                updates.push(rid.clone());
+                                            } else {
+                                                println!("[Mods] DEBUG: PATCH UP TO DATE - file_ids match");
                                             }
                                             cached_map.insert(rid.clone(), versions);
+                                        } else {
+                                            println!("[Mods] DEBUG: No compatible version found for patch remote_id: {}", rid);
                                         }
+                                    } else {
+                                        println!("[Mods] ERROR: Failed to get versions for patch remote_id: {}", rid);
                                     }
+                                } else {
+                                    println!("[Mods] DEBUG: Skipping patch - provider is not CurseForge: {:?}", prov);
                                 }
+                            } else {
+                                println!("[Mods] DEBUG: Skipping patch - missing remote_id or provider. remote_id: {:?}, provider: {:?}", p.remote_id, p.provider);
                             }
                         }
 
@@ -804,23 +843,33 @@ impl ModsState {
                 self.checking_updates = false;
                 match res {
                     Ok((updates, versions)) => {
+                        println!("[Mods] DEBUG: Updates check completed - found {} updates", updates.len());
+                        for update_id in &updates {
+                            println!("[Mods] DEBUG: Update available for remote_id: {}", update_id);
+                        }
+                        
+                        // Log del estado final de los mods (solo una vez)
+                        println!("[Mods] DEBUG: Final update status:");
+                        
                         self.mods_with_updates = updates.into_iter().collect();
                         // Poblar el cache con lo que encontramos al buscar actualizaciones
                         for (mod_id, files) in versions {
+                            println!("[Mods] DEBUG: Cached {} versions for mod_id: {}", files.len(), mod_id);
                             self.cached_versions.insert(mod_id, files);
                         }
                     }
                     Err(e) => {
+                        println!("[Mods] ERROR: Updates check failed: {}", e);
                         self.error = Some(format!("Error checking updates: {}", e));
                     }
                 }
                 Task::none()
             }
-            // Método antiguo (Actualizar a la última)
+            // Metodo antiguo (Actualizar a la ultima)
             ModsMessage::UpdateMod(mod_info) => {
                 // Redirige a UpdateModToVersion pasando "latest" logic implicitamente
                 // O mejor, implementamos una llamada a UpdateModToVersion con None file_id logic interna
-                // Para simplificar, este botón busca la última versión compatible automáticamente.
+                // Para simplificar, este boton busca la ultima version compatible automaticamente.
                 if let Some(meta) = &mod_info.metadata {
                     self.installing_ids.insert(meta.mod_id.clone()); // Spinner visual
                     let mod_info_clone = mod_info.clone();
@@ -833,7 +882,7 @@ impl ModsState {
                 }
                 Task::none()
             }
-            // NUEVO: Método para cambiar a una versión específica (Upgrade/Downgrade)
+            // NUEVO: Metodo para cambiar a una version especifica (Upgrade/Downgrade)
             ModsMessage::UpdateModToVersion(mod_info, target_file_id, is_patch) => {
                 if let Some(meta) = &mod_info.metadata {
                     let mod_id = meta.mod_id.clone();
@@ -862,7 +911,7 @@ impl ModsState {
 
                             // 2. Encontrar el archivo objetivo
                             let target_file = if file_id_request.is_empty() {
-                                // Si viene vacío (botón Update simple), buscar el último compatible
+                                // Si viene vacio (boton Update simple), buscar el ultimo compatible
                                 let current_game_ver = if settings_clone.game_version == 0 {
                                     "latest".to_string()
                                 } else {
@@ -878,7 +927,7 @@ impl ModsState {
                                     .or_else(|| versions.first())
                                     .ok_or("No compatible version found")?
                             } else {
-                                // Buscar el ID específico
+                                // Buscar el ID especifico
                                 versions
                                     .iter()
                                     .find(|f| f.file_id == file_id_request)
@@ -939,13 +988,13 @@ impl ModsState {
                             .map_err(|e| e.to_string())?;
 
                             // 5. Borrar el viejo (manejar tanto activos como desactivados)
-                            // Primero el desactivado (siempre, para evitar que quede huérfano)
+                            // Primero el desactivado (siempre, para evitar que quede huerfano)
                             let disabled_old_path = disabled_dir.join(&old_file_name);
                             if disabled_old_path.exists() {
                                 let _ = tokio::fs::remove_file(&disabled_old_path).await;
                             }
 
-                            // Luego el activo solo si el nombre cambió (si es igual, download_file ya lo pisó)
+                            // Luego el activo solo si el nombre cambio (si es igual, download_file ya lo piso)
                             if old_file_name != new_file_name {
                                 if old_path.exists() {
                                     let _ = tokio::fs::remove_file(&old_path).await;
@@ -1001,7 +1050,7 @@ impl ModsState {
 
                         if is_patch {
                             // Si era un parche, ahora que bajamos el nuevo ZIP, hay que instalarlo.
-                            // Construimos la ruta donde se bajó (mods_dir temporal)
+                            // Construimos la ruta donde se bajo (mods_dir temporal)
                             let (bdc, sc, sv) = (
                                 base_dir.clone(),
                                 settings.channel.clone(),
@@ -1070,7 +1119,7 @@ impl ModsState {
                     Ok((mod_id, versions)) => {
                         // Quitamos del set de carga
                         self.loading_versions.remove(&mod_id);
-                        // ¡IMPORTANTE! Guardamos en caché
+                        // ¡IMPORTANTE! Guardamos en cache
                         self.cached_versions.insert(mod_id, versions);
                     }
                     Err(e) => {
@@ -1262,7 +1311,12 @@ impl ModsState {
 
             let mut pl = column![Element::from(h)].spacing(10);
             for p in &self.patch_mods {
-                let has_update = self.mods_with_updates.contains(&p.mod_id);
+                // AHORA: usar el remote_id (el ID de CurseForge)
+                let has_update = if let Some(rid) = &p.remote_id {
+                    self.mods_with_updates.contains(rid)
+                } else {
+                    false
+                };
                 pl = pl.push(self.view_patch_row(p, has_update, localization, ctx));
             }
             content_items.push(theme::magic_container(pl.into(), ctx));
@@ -1300,8 +1354,13 @@ impl ModsState {
         let mut ml = column![Element::from(hj)].spacing(10);
         if !self.installed_mods.is_empty() {
             for m in &self.installed_mods {
-                let has_update = self.mods_with_updates.contains(&m.file_name);
-                // Pasamos `self` completo o las referencias necesarias para la lógica del dropdown
+                // AHORA: usar el mod_id del manifest (el ID de CurseForge)
+                let has_update = if let Some(meta) = &m.metadata {
+                    self.mods_with_updates.contains(&meta.mod_id)
+                } else {
+                    false
+                };
+                // Pasamos `self` completo o las referencias necesarias para la logica del dropdown
                 ml = ml.push(self.view_installed_row(m, has_update, localization, ctx));
             }
         } else if self.patch_mods.is_empty() {
@@ -1359,7 +1418,7 @@ impl ModsState {
         if let Some(meta) = &mi.metadata {
             let mod_id = &meta.mod_id;
 
-            // Check si las versiones están cargadas en memoria o cargando
+            // Check si las versiones estan cargadas en memoria o cargando
             let cached = self.cached_versions.get(mod_id);
             let is_loading_versions = self.loading_versions.contains(mod_id);
 
@@ -1386,7 +1445,7 @@ impl ModsState {
 
                 center_info = center_info.push(theme::magic_pick_list_with_menu(pick.into(), ctx));
             } else {
-                // NO TENEMOS VERSIONES: Botón Lazy "Check Versions"
+                // NO TENEMOS VERSIONES: Boton Lazy "Check Versions"
                 let load_btn = button(
                     row![
                         theme::svg(
@@ -1422,7 +1481,7 @@ impl ModsState {
             // Mientras instala no permitimos acciones
             actions.push(theme::text_micro("WAIT...", ctx).into());
         } else {
-            // Botón UPDATE funcional cuando hay actualización disponible
+            // Boton UPDATE funcional cuando hay actualizacion disponible
             if has_update {
                 let update_btn = theme::magic_button(
                     button(theme::text_micro("UPDATE", ctx))
@@ -1513,7 +1572,7 @@ impl ModsState {
                     }),
                     // Columna central con Nombre + Selector
                     center_info,
-                    // Estado visual pequeño (opcional)
+                    // Estado visual pequeno (opcional)
                     theme::text_micro(
                         if mi.enabled {
                             localization.t("mods.active")
@@ -1641,17 +1700,17 @@ impl ModsState {
         );
 
         // 1. Obtener archivos disponibles para este mod
-        // Usar cache si existe, sino los archivos iniciales de la búsqueda
+        // Usar cache si existe, sino los archivos iniciales de la busqueda
         let files = if let Some(cached) = self.cached_versions.get(&cf.id) {
             cached
         } else {
             &cf.latest_files
         };
 
-        // 2. Verificar si está cargando versiones
+        // 2. Verificar si esta cargando versiones
         let is_loading = self.loading_versions.contains(&cf.id);
 
-        // 3. Buscar cuál está seleccionado actualmente (o default) - PATRÓN DE SETTINGS
+        // 3. Buscar cual esta seleccionado actualmente (o default) - PATRoN DE SETTINGS
         let current_game_ver = if self.temp_settings.game_version == 0 {
             "latest".to_string()
         } else {
@@ -1667,7 +1726,7 @@ impl ModsState {
             // Si hay uno seleccionado manualmente
             files.iter().find(|f| &f.file_id == fid)
         } else {
-            // Default inteligente: El más nuevo compatible
+            // Default inteligente: El mas nuevo compatible
             files
                 .iter()
                 .find(|f| {
@@ -1676,7 +1735,7 @@ impl ModsState {
                 .or(files.first())
         };
 
-        // 4. Crear el Dropdown (PickList) con botón de carga adicional
+        // 4. Crear el Dropdown (PickList) con boton de carga adicional
         let is_full_list_loaded = self.cached_versions.contains_key(&cf.id);
         let needs_load = !is_full_list_loaded && !is_loading;
 
@@ -1704,7 +1763,7 @@ impl ModsState {
 
             let dropdown = theme::magic_pick_list_with_menu(pick.into(), ctx);
 
-            // Si necesita cargar más versiones, mostrar botón de refresh al lado
+            // Si necesita cargar mas versiones, mostrar boton de refresh al lado
             if needs_load {
                 row![
                     container(dropdown).width(Length::Fill),
@@ -1734,7 +1793,7 @@ impl ModsState {
             }
         };
 
-        // 4. Modificar el Botón de Instalar para usar la selección
+        // 4. Modificar el Boton de Instalar para usar la seleccion
         let install_action = if isi {
             button(theme::text_caption(
                 localization.t("launcher.status.downloading"),
@@ -1778,7 +1837,7 @@ impl ModsState {
                 th,
                 column![
                     theme::text_body(&cf.name, ctx),
-                    // Añadimos selector aquí debajo del título
+                    // Anadimos selector aqui debajo del titulo
                     version_selector,
                     theme::text_caption(&cf.summary, ctx),
                     theme::text_micro(
@@ -1796,7 +1855,7 @@ impl ModsState {
             ctx,
         );
 
-        // Hacer la card cliqueable para abrir la página del mod
+        // Hacer la card cliqueable para abrir la pagina del mod
         let clickable_card = button(card_content)
             .on_press(ModsMessage::OpenModPage(cf.website_url.clone()))
             .style(move |t: &Theme, s| theme::ghost_button_style(&ctx.palette, t, s))
@@ -1939,7 +1998,7 @@ impl ModsState {
         if is_installing {
             actions.push(theme::text_micro("WAIT...", ctx).into());
         } else {
-            // Botón UPDATE funcional cuando hay actualización disponible
+            // Boton UPDATE funcional cuando hay actualizacion disponible
             if has_update {
                 let update_btn = theme::magic_button(
                     button(theme::text_micro("UPDATE", ctx))

@@ -229,8 +229,8 @@ impl Recipe for Runner {
                 if settings.enable_online_fix {
                     auth_mode = "authenticated".to_string();
 
-                    // --- [CORRECCIÓN INICIO] ---
-                    // Configuramos los modos y URLs ANTES de verificar archivos físicos.
+                    // --- [CORRECCIoN INICIO] ---
+                    // Configuramos los modos y URLs ANTES de verificar archivos fisicos.
                     match settings.online_fix_mode {
                         crate::config::OnlineFixMode::Local => {
                             aurora_env_value = "local".to_string();
@@ -241,7 +241,7 @@ impl Recipe for Runner {
                             auth_url = "https://sessions.sanasol.ws".to_string();
                         }
                     }
-                    // --- [CORRECCIÓN FIN] ---
+                    // --- [CORRECCIoN FIN] ---
 
                     let server_root_dir = crate::config::get_server_root_dir();
                     if !server_root_dir.exists() {
@@ -473,7 +473,7 @@ impl Recipe for Runner {
                 auth_args.push(auth_mode.clone());
 
                 if auth_mode == "authenticated" {
-                    // --- Sincronizar JWKS Remotos (BLOQUEANTE AQUÍ PARA EVITAR RACE CONDITIONS) ---
+                    // --- Sincronizar JWKS Remotos (BLOQUEANTE AQUi PARA EVITAR RACE CONDITIONS) ---
                     match crate::game::auth::fetch_remote_jwks(&client, &auth_url).await {
                         Ok(jwks) => {
                             crate::game::crypto::update_jwks_from_remote(jwks);

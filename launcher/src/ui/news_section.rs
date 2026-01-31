@@ -181,7 +181,7 @@ impl NewsSection {
                     let mut btn = button(theme::text_body(loc.t("news.retry").to_string(), ctx))
                         .style(move |t: &Theme, s| theme::primary_button_style(&palette, t, s))
                         .padding(8);
-                    if !is_disabled {
+                    if !is_disabled && ctx.palette.text_primary.a > 0.05 {
                         btn = btn.on_press(NewsMessage::LoadNews);
                     }
                     theme::magic_button(btn.into(), ctx)
@@ -241,7 +241,7 @@ impl NewsSection {
                     let mut btn = button(theme::text_small(loc.t("news.retry"), ctx))
                         .style(move |t: &Theme, s| theme::secondary_button_style(&palette, t, s))
                         .padding(4);
-                    if !is_disabled {
+                    if !is_disabled && ctx.palette.text_primary.a > 0.05 {
                         btn = btn.on_press(NewsMessage::LoadNews);
                     }
                     theme::magic_button(btn.into(), ctx)
@@ -274,6 +274,7 @@ impl NewsSection {
                             .height(56)
                             .border_radius(8)
                             .content_fit(ContentFit::Cover)
+                            .opacity(ctx.palette.text_primary.a) // <--- Agrega esto para desvanecer imagenes
                             .into(),
                         ctx,
                     )
@@ -298,7 +299,8 @@ impl NewsSection {
                             svg(util::icons::icon(util::icons::CALENDAR))
                                 .width(10)
                                 .height(10)
-                                .style(move |t: &Theme, s| theme::svg_accent(&palette, t, s)),
+                                .style(move |t: &Theme, s| theme::svg_accent(&palette, t, s))
+                                .opacity(ctx.palette.text_primary.a),
                             ctx
                         ),
                         theme::text_micro(post.format_date(), ctx)
@@ -306,7 +308,7 @@ impl NewsSection {
                     .spacing(4),
                     theme::text_body(&post.title, ctx),
                     
-                    // --- CAMBIO AQUÍ ---
+                    // --- CAMBIO AQUi ---
                     // Antes usabas theme::text_caption, ahora usamos theme::text_paragraph
                     // Esto habilita el wrapping multilinea CON el efecto letra por letra
                     theme::text_paragraph(
@@ -323,7 +325,7 @@ impl NewsSection {
             .spacing(12)
             .align_y(Alignment::Center),
         );
-        if !is_disabled {
+        if !is_disabled && ctx.palette.text_primary.a > 0.05 {
             btn = btn.on_press(NewsMessage::OpenPost(post.get_post_url()));
         }
         theme::magic_button(
@@ -383,14 +385,15 @@ fn header_section<'a>(
                         svg(util::icons::icon(util::icons::CHEVRON_RIGHT))
                             .width(10)
                             .height(10)
-                            .style(move |t: &Theme, s| theme::svg_muted(&palette, t, s)),
+                            .style(move |t: &Theme, s| theme::svg_muted(&palette, t, s))
+                            .opacity(ctx.palette.text_primary.a),
                         ctx
                     )
                 ]
                 .spacing(2)
                 .align_y(Alignment::Center),
             );
-            if !is_disabled {
+            if !is_disabled && ctx.palette.text_primary.a > 0.05 {
                 btn = btn.on_press(NewsMessage::OpenAllNews);
             }
             theme::magic_button(

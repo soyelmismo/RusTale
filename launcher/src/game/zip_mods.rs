@@ -10,7 +10,7 @@ pub struct PatchManifest {
     pub mod_name: String,
     pub install_date: chrono::DateTime<chrono::Utc>,
     pub enabled: bool,
-    pub is_hybrid: bool, // Nueva bandera para indicar si es un mod híbrido
+    pub is_hybrid: bool, // Nueva bandera para indicar si es un mod hibrido
     pub backups: Vec<(String, String)>, // (game path, relative backup path)
     pub added_files: Vec<String>,       // New files added
     // Metadata for remote updates
@@ -36,7 +36,7 @@ pub fn install_new_patch(
     summary: Option<String>,
     logo_url: Option<String>,
 ) -> Result<()> {
-    // CORRECCIÓN: Usar el mod_id proporcionado en lugar de generar UUID
+    // CORRECCIoN: Usar el mod_id proporcionado en lugar de generar UUID
     let patch_dir = core_patches_root.join(&mod_id);
     let backup_dir = patch_dir.join("backup");
     let stored_zip_path = patch_dir.join("source.zip");
@@ -157,14 +157,14 @@ fn apply_patch_logic(
     fs::write(patch_dir.join("manifest.json"), json)?;
 
     // =========================================================
-    // LÓGICA DE SINCRONIZACIÓN DE MODS HÍBRIDOS (Gestión Mods/)
+    // LoGICA DE SINCRONIZACIoN DE MODS HiBRIDOS (Gestion Mods/)
     // =========================================================
     
     println!("[ZipMods] DEBUG: Starting hybrid sync logic");
     println!("[ZipMods] DEBUG: is_hybrid = {}", is_hybrid);
     println!("[ZipMods] DEBUG: channel = {}, version = {}", channel, version);
     
-    // CORRECCIÓN: GamePaths necesita el directorio base de RusTale, no game_root_dir
+    // CORRECCIoN: GamePaths necesita el directorio base de RusTale, no game_root_dir
     // game_root_dir es RusTale/release/latest
     // Necesitamos RusTale
     let rusale_base = game_root_dir.parent()
@@ -180,7 +180,7 @@ fn apply_patch_logic(
     println!("[ZipMods] DEBUG: mods_dir = {:?}", mods_dir);
     println!("[ZipMods] DEBUG: disabled_dir = {:?}", disabled_dir);
     
-    // Definimos el nombre estándar para el zip en Mods/.
+    // Definimos el nombre estandar para el zip en Mods/.
     // Usamos el mod_name limpio + .zip para consistencia.
     let zip_filename = format!("{}.zip", mod_name);
     let target_active = mods_dir.join(&zip_filename);
@@ -192,7 +192,7 @@ fn apply_patch_logic(
     println!("[ZipMods] DEBUG: source zip_path = {:?}", zip_path);
 
     if is_hybrid {
-        // CASO 1: Es híbrido. Debe existir en Mods/ (Activo)
+        // CASO 1: Es hibrido. Debe existir en Mods/ (Activo)
         println!("[ZipMods] Hybrid detected. Syncing to Mods folder: {:?}", target_active);
         
         // Crear carpeta Mods si no existe
@@ -203,7 +203,7 @@ fn apply_patch_logic(
             println!("[ZipMods] DEBUG: Mods directory already exists");
         }
 
-        // 1. Borrar de Disabled por si estaba ahí (para evitar duplicados)
+        // 1. Borrar de Disabled por si estaba ahi (para evitar duplicados)
         if target_disabled.exists() { 
             println!("[ZipMods] DEBUG: Removing from disabled mods");
             let _ = fs::remove_file(&target_disabled); 
@@ -224,16 +224,16 @@ fn apply_patch_logic(
             Ok(bytes) => {
                 println!("[ZipMods] DEBUG: Successfully copied {} bytes", bytes);
                 
-                // VERIFICACIÓN POST-COPIA
+                // VERIFICACIoN POST-COPIA
                 println!("[ZipMods] DEBUG: Verifying file exists after copy...");
                 if target_active.exists() {
-                    println!("[ZipMods] DEBUG: ✅ File exists at target location");
+                    println!("[ZipMods] DEBUG: File exists at target location");
                     if let Ok(metadata) = fs::metadata(&target_active) {
                         println!("[ZipMods] DEBUG: File size: {} bytes", metadata.len());
                         println!("[ZipMods] DEBUG: File permissions: {:?}", metadata.permissions());
                     }
                 } else {
-                    println!("[ZipMods] DEBUG: ❌ FILE DOES NOT EXIST AFTER COPY!");
+                    println!("[ZipMods] DEBUG: ERROR: FILE DOES NOT EXIST AFTER COPY!");
                     println!("[ZipMods] DEBUG: Listing Mods directory contents:");
                     if let Ok(entries) = fs::read_dir(&mods_dir) {
                         for entry in entries.flatten() {
@@ -249,8 +249,8 @@ fn apply_patch_logic(
         }
             
     } else {
-        // CASO 2: NO es híbrido (Cliente puro). Limpieza.
-        // Si el mod se actualizó y DEJÓ de ser híbrido, hay que borrar el archivo viejo de Mods/
+        // CASO 2: NO es hibrido (Cliente puro). Limpieza.
+        // Si el mod se actualizo y DEJo de ser hibrido, hay que borrar el archivo viejo de Mods/
         println!("[ZipMods] DEBUG: Not hybrid, cleaning up any leftovers");
 
         if target_active.exists() {
@@ -313,13 +313,13 @@ pub fn disable_patch(
     }
 
     // =========================================================
-    // LÓGICA HYBRID: Mover de Mods/ -> DisabledMods/
+    // LoGICA HYBRID: Mover de Mods/ -> DisabledMods/
     // =========================================================
     if manifest.is_hybrid {
         // Necesitamos reconstruir channel/version para paths
         let (channel, version) = extract_channel_version_from_paths(&core_patches_root);
         
-        // CORRECCIÓN: Usar directorio base de RusTale
+        // CORRECCIoN: Usar directorio base de RusTale
         let rusale_base = game_root_dir.parent()
             .and_then(|p| p.parent())
             .unwrap_or(&game_root_dir);
@@ -369,9 +369,9 @@ pub fn enable_patch(
         return Ok(());
     }
 
-    // Pre-check optimizado para híbridos
+    // Pre-check optimizado para hibridos
     if manifest.is_hybrid {
-        // CORRECCIÓN: Usar directorio base de RusTale
+        // CORRECCIoN: Usar directorio base de RusTale
         let rusale_base = game_root_dir.parent()
             .and_then(|p| p.parent())
             .unwrap_or(&game_root_dir);
@@ -402,7 +402,7 @@ pub fn enable_patch(
     }
     fs::create_dir_all(&backup_dir)?;
 
-    // Call internal logic (Esto validará archivos, regenerará backups y asegurará archivo en Mods)
+    // Call internal logic (Esto validara archivos, regenerara backups y asegurara archivo en Mods)
     apply_patch_logic(
         &source_zip,
         &game_root_dir,
@@ -431,7 +431,7 @@ pub fn uninstall_patch(
     // 1. Deshabilitar primero (Esto ya restaura backups)
     disable_patch(game_root_dir.clone(), core_patches_root.clone(), mod_id)?;
     
-    // 2. Limpieza Extra Híbrida (Eliminar de DisabledMods si quedó ahí tras disable)
+    // 2. Limpieza Extra Hibrida (Eliminar de DisabledMods si quedo ahi tras disable)
     // Para hacer esto bien, leemos el manifest una ultima vez antes de borrar la carpeta
     let patch_dir = core_patches_root.join(mod_id);
     let manifest_path = patch_dir.join("manifest.json");
@@ -441,7 +441,7 @@ pub fn uninstall_patch(
                 if manifest.is_hybrid {
                     let (c, v) = extract_channel_version_from_paths(&core_patches_root);
                     
-                    // CORRECCIÓN: Usar directorio base de RusTale
+                    // CORRECCIoN: Usar directorio base de RusTale
                     let rusale_base = game_root_dir.parent()
                         .and_then(|p| p.parent())
                         .unwrap_or(&game_root_dir);
@@ -552,7 +552,7 @@ pub fn is_patch_mod(zip_path: &Path) -> (bool, bool) {
     (false, false)
 }
 
-/// Extraer canal y versión desde las rutas de carpetas
+/// Extraer canal y version desde las rutas de carpetas
 fn extract_channel_version_from_paths(core_patches_root: &Path) -> (String, String) {
     // Intentar extraer desde core_patches_root que suele tener la estructura: .../channel/version/CorePatches
     if let Some(parent) = core_patches_root.parent() {
@@ -568,6 +568,6 @@ fn extract_channel_version_from_paths(core_patches_root: &Path) -> (String, Stri
         }
     }
     
-    // Último fallback
+    // ultimo fallback
     ("latest".to_string(), "latest".to_string())
 }

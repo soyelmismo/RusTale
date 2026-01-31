@@ -1,12 +1,12 @@
 use rust_embed::RustEmbed;
 
-// Definimos la ubicación de los assets relativa al Cargo.toml de 'launcher'
-// Como 'assets' está en la raíz del workspace (un nivel arriba de launcher), usamos "../"
+// Definimos la ubicacion de los assets relativa al Cargo.toml de 'launcher'
+// Como 'assets' esta en la raiz del workspace (un nivel arriba de launcher), usamos "../"
 #[derive(RustEmbed)]
 #[folder = "../assets/shaders"]
 struct ShaderAssets;
 
-/// Estructura común de Uniforms que se antepone a todos los shaders.
+/// Estructura comun de Uniforms que se antepone a todos los shaders.
 /// Garantiza que los shaders externos no necesiten definirla y evita errores.
 const HEADER: &str = r#"
 struct Uniforms {
@@ -23,7 +23,7 @@ struct Uniforms {
 }
 @group(0) @binding(0) var<uniform> u: Uniforms;
 
-// Función de ayuda: Rotar 2D
+// Funcion de ayuda: Rotar 2D
 fn rot(a: f32) -> mat2x2<f32> {
     let c = cos(a);
     let s = sin(a);
@@ -46,14 +46,14 @@ fn vs_main(@builtin(vertex_index) v_index: u32) -> VertexOutput {
     var out: VertexOutput;
     out.position = vec4<f32>(pos, 0.0, 1.0);
     out.uv = pos * 0.5 + 0.5; // UV 0..1
-    // Corrección para sistemas de coordenadas
+    // Correccion para sistemas de coordenadas
     out.uv.y = 1.0 - out.uv.y; 
     return out;
 }
 "#;
 
 pub fn build_uber_shader() -> String {
-    let mut shader_functions = String::new(); // Código que va dentro de shader_N
+    let mut shader_functions = String::new(); // Codigo que va dentro de shader_N
     let mut global_helpers = String::new();   // Funciones auxiliares globales
     let mut switch_cases = String::new();
     
@@ -80,7 +80,7 @@ pub fn build_uber_shader() -> String {
                 safe_content = safe_content.replace("atan2(", "atan(");
                 
                 // --- CORE FIX: Separar Helpers del Main Body ---
-                // WGSL prohíbe definir funciones dentro de funciones.
+                // WGSL prohibe definir funciones dentro de funciones.
                 // Buscamos el separador usado en forest.wgsl o asumimos todo es body.
                 
                 let (helpers, body) = if let Some(idx) = safe_content.find("// --- MAIN SHADER ---") {
@@ -97,7 +97,7 @@ pub fn build_uber_shader() -> String {
                     global_helpers.push_str("\n");
                 }
 
-                // 2. Encapsular el Body en la función única shader_X
+                // 2. Encapsular el Body en la funcion unica shader_X
                 let func_name = format!("shader_{}", id_counter);
                 
                 shader_functions.push_str(&format!(
@@ -113,7 +113,7 @@ pub fn build_uber_shader() -> String {
 
     // Estructura final:
     // 1. HEADER (Structs, Uniforms)
-    // 2. GLOBAL HELPERS (Funciones extraídas de forest.wgsl)
+    // 2. GLOBAL HELPERS (Funciones extraidas de forest.wgsl)
     // 3. SHADER FUNCTIONS (Los cuerpos principales envueltos en fn shader_N)
     // 4. FS_MAIN (Switch gigante)
     let result = format!("{}\n{}\n{}\n@fragment
@@ -123,7 +123,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {{
 {}
         default: {{ col = shader_0(in); }}
     }}
-    // Aplicar mezcla de alpha global aquí (pre-multiplicado)
+    // Aplicar mezcla de alpha global aqui (pre-multiplicado)
     return vec4<f32>(col.rgb, col.a * u.alpha);
 }}
 ", HEADER, global_helpers, shader_functions, switch_cases);

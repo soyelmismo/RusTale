@@ -26,9 +26,9 @@ pub struct Jwk {
 static SESSION_KEYS: Mutex<Option<SigningKey>> = Mutex::new(None);
 static SESSION_JWKS: Mutex<Option<JwkSet>> = Mutex::new(None);
 
-/// Obtiene el JWKS global actual. Si no existen, las inicializa una única vez.
+/// Obtiene el JWKS global actual. Si no existen, las inicializa una unica vez.
 pub fn get_global_jwks() -> JwkSet {
-    let mut jwks_lock = SESSION_JWKS.lock().unwrap();
+    let jwks_lock = SESSION_JWKS.lock().unwrap();
     if let Some(jwks) = &*jwks_lock {
         return jwks.clone();
     }
@@ -43,7 +43,7 @@ pub fn get_jwks() -> JwkSet {
     get_global_jwks()
 }
 
-/// Firma un mensaje usando las claves de sesión actuales
+/// Firma un mensaje usando las claves de sesion actuales
 pub fn sign_message(message: &str) -> String {
     let mut key_lock = SESSION_KEYS.lock().unwrap();
 
@@ -73,12 +73,12 @@ pub fn sign_message(message: &str) -> String {
     }
 }
 
-/// Firma un mensaje con las claves del servidor (unificado con sesión en RAM)
+/// Firma un mensaje con las claves del servidor (unificado con sesion en RAM)
 pub fn sign_message_with_server_keys(message: &str) -> String {
     sign_message(message)
 }
 
-/// Retorna el JWK público actual como un Value de serde_json
+/// Retorna el JWK publico actual como un Value de serde_json
 pub fn get_public_jwk_as_value() -> serde_json::Value {
     let jwks = get_jwks();
     if let Some(key) = jwks.keys.first() {
@@ -90,7 +90,7 @@ pub fn get_public_jwk_as_value() -> serde_json::Value {
             "use": key.use_key
         })
     } else {
-        // Fallback (no debería ocurrir)
+        // Fallback (no deberia ocurrir)
         serde_json::json!({})
     }
 }
@@ -99,7 +99,7 @@ pub fn get_server_public_jwk_as_value() -> serde_json::Value {
     get_public_jwk_as_value()
 }
 
-/// Fuerza la regeneración de claves JWT (Solo en RAM)
+/// Fuerza la regeneracion de claves JWT (Solo en RAM)
 /// Se llama en cada inicio de juego o servidor
 pub fn force_regenerate_keys() {
     let mut key_lock = SESSION_KEYS.lock().unwrap();
@@ -116,7 +116,7 @@ pub fn force_regenerate_keys() {
     rand::rng().fill(&mut bytes);
     let signing_key = SigningKey::from_bytes(&bytes);
 
-    // Derivar clave pública y formatear como JWK
+    // Derivar clave publica y formatear como JWK
     let verifying_key = signing_key.verifying_key();
     let public_bytes = verifying_key.to_bytes();
     let x_b64 = URL_SAFE_NO_PAD.encode(public_bytes);
@@ -159,7 +159,7 @@ pub fn ensure_local_signing_capability() {
 
 /// Inicializa claves si no existen
 pub fn initialize_constant_keys() {
-    let mut key_lock = SESSION_KEYS.lock().unwrap();
+    let key_lock = SESSION_KEYS.lock().unwrap();
     if key_lock.is_none() {
         drop(key_lock);
         force_regenerate_keys();

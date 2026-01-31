@@ -73,7 +73,8 @@ pub fn view<'a>(
                     svg(util::icons::icon(play_icon))
                         .width(icon_size)
                         .height(icon_size)
-                        .style(move |t, s| theme::svg_accent(&palette, t, s)),
+                        .style(move |t, s| theme::svg_accent(&palette, t, s))
+                        .opacity(ctx.palette.text_primary.a),
                     ctx
                 ),
                 theme::text_title(play_button_text, ctx)
@@ -115,6 +116,7 @@ pub fn view<'a>(
                 .width(18)
                 .height(18)
                 .style(move |t, s| theme::svg_accent(&palette, t, s))
+                .opacity(ctx.palette.text_primary.a)
         )
         .width(Length::Fill)
         .height(Length::Fill)
@@ -137,6 +139,7 @@ pub fn view<'a>(
                 .width(18)
                 .height(18)
                 .style(move |t, s| theme::svg_accent(&palette, t, s))
+                .opacity(ctx.palette.text_primary.a)
         )
         .width(Length::Fill)
         .height(Length::Fill)
@@ -170,74 +173,70 @@ pub fn view<'a>(
     // Aplicar LSD al status text
     let status_text_widget = theme::text_body(status_text, ctx);
 
-    column![
-        info_section,
-        if *status == LauncherStatus::Downloading || *status == LauncherStatus::Migrating {
-            column![
+    container(
+        column![
+            info_section,
+            if *status == LauncherStatus::Downloading || *status == LauncherStatus::Migrating {
                 column![
                     row![
-                        theme::text_caption(if *status == LauncherStatus::Migrating {
-                            localization.t("launcher.status.migrating")
-                        } else {
-                            localization.t("launcher.status.general")
-                        }, ctx),
+                        theme::text_micro(localization.t("launcher.status.step"), ctx),
                         Space::new().width(Length::Fill),
-                        theme::text_caption(format!("{:.0}%", download_progress), ctx)
+                        theme::text_micro(format!("{:.0}%", download_progress), ctx)
                     ],
                     container(
                         ProgressBar::new(0.0..=100.0, download_progress)
-                            .style(move |t| theme::orange_bar_style(&palette, t))
+                            .style(move |t| theme::accent_bar_style(&palette, t))
                     )
-                    .height(6)
+                    .height(4)
                     .width(Length::Fill)
                     .style(move |t| theme::container_style_transparent(&palette, t))
                 ]
-                .spacing(3),
-                if *status == LauncherStatus::Migrating {
-                    Element::from(column![])
-                } else {
-                    Element::from(
-                        column![
-                            row![
-                                theme::text_micro(localization.t("launcher.status.step"), ctx),
-                                Space::new().width(Length::Fill),
-                                theme::text_micro(format!("{:.0}%", sub_progress), ctx)
-                            ],
-                            container(
-                                ProgressBar::new(0.0..=100.0, sub_progress)
-                                    .style(move |t| theme::sub_bar_style(&palette, t))
-                            )
-                            .height(3)
-                            .width(Length::Fill)
-                            .style(move |t| theme::container_style_transparent(&palette, t))
-                        ]
-                        .spacing(2),
+                .spacing(5)
+            } else {
+                column![]
+            },
+            if *status == LauncherStatus::Downloading || *status == LauncherStatus::Migrating {
+                column![
+                    row![
+                        theme::text_micro(localization.t("launcher.status.step"), ctx),
+                        Space::new().width(Length::Fill),
+                        theme::text_micro(format!("{:.0}%", sub_progress), ctx)
+                    ],
+                    container(
+                        ProgressBar::new(0.0..=100.0, sub_progress)
+                            .style(move |t| theme::sub_bar_style(&palette, t))
                     )
-                }
-            ]
-            .spacing(10)
-        } else if show_server_patch_progress {
-            column![
-                row![
-                    theme::text_micro("Patching Server...", ctx),
-                    Space::new().width(Length::Fill),
-                    theme::text_micro(format!("{:.0}%", server_patch_progress), ctx)
-                ],
-                container(
-                    ProgressBar::new(0.0..=100.0, server_patch_progress)
-                        .style(move |t| theme::accent_bar_style(&palette, t))
-                )
-                .height(4)
-                .width(Length::Fill)
-                .style(move |t| theme::container_style_transparent(&palette, t))
-            ]
-            .spacing(5)
-        } else {
-            column![]
-        },
-        status_text_widget,
-        actions
-    ]
-    .spacing(15)
+                    .height(3)
+                    .width(Length::Fill)
+                    .style(move |t| theme::container_style_transparent(&palette, t))
+                ]
+                .spacing(2)
+            } else if show_server_patch_progress {
+                column![
+                    row![
+                        theme::text_micro("Patching Server...", ctx),
+                        Space::new().width(Length::Fill),
+                        theme::text_micro(format!("{:.0}%", server_patch_progress), ctx)
+                    ],
+                    container(
+                        ProgressBar::new(0.0..=100.0, server_patch_progress)
+                            .style(move |t| theme::accent_bar_style(&palette, t))
+                    )
+                    .height(4)
+                    .width(Length::Fill)
+                    .style(move |t| theme::container_style_transparent(&palette, t))
+                ]
+                .spacing(5)
+            } else {
+                column![]
+            },
+            status_text_widget,
+            actions
+        ]
+        .spacing(15)
+    )
+    .width(Length::Fill)
+    .height(Length::Shrink)
+    .style(move |t| theme::container_style_transparent(&ctx.palette, t))
     .into()
 }

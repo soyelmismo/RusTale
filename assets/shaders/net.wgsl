@@ -9,7 +9,7 @@ var p = vec3<f32>(uv * 2.5, -u.time * 2.0);
 let accent = vec3<f32>(u.accent_r, u.accent_g, u.accent_b);
 var accum = 0.0;
 
-// Rotacion cámara CPU simulada
+// Rotacion camara CPU simulada
 let t_rot = u.time * 0.2;
 let s = sin(t_rot); let c = cos(t_rot);
 let px = p.x * c - p.y * s;
@@ -33,8 +33,8 @@ for (var i = 0.0; i < 4.0; i += 1.0) {
     accum += glow * fade;
 }
 
-var col = accent * accum * u.intensity;
-// Viñeta
+var col = accent * accum * min(u.intensity, 1.5); 
+// Vineta
 col *= 1.0 - dot(uv, uv) * 0.4;
 
-return vec4<f32>(col, u.alpha);
+return vec4<f32>(col, 1.0);

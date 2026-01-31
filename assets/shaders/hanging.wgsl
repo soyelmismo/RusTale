@@ -120,7 +120,7 @@ for (var i: f32 = 0.0; i < num_layers; i = i + 1.0) {
     
     let base_tree = vec3<f32>(0.02, 0.08, 0.05); 
     
-    // --- CORRECCIÓN AQUÍ: usamos 'var' porque reasignamos abajo ---
+    // --- CORRECCIoN AQUi: usamos 'var' porque reasignamos abajo ---
     var layer_col = mix(vec3<f32>(0.1, 0.15, 0.2) + accent * 0.1, base_tree, layer_norm * layer_norm);
     
     if (i == num_layers - 1.0) {

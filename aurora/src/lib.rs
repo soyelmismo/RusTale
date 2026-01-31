@@ -249,7 +249,7 @@ fn get_swaps(mode: &str) -> Vec<SwapEntry> {
             old: CsString::from_str("hytale.com"),
             new: CsString::from_str("sanasol.ws"),
         });
-        // Agregar aquí los mismos dominios que Windows si sanasol.ws usa subdominios estándar
+        // Agregar aqui los mismos dominios que Windows si sanasol.ws usa subdominios estandar
     } else {
         // --- LOGICA ORIGINAL DE LOCALHOST (EXISTENTE) ---
         // C: {.old = make_csstr(L"https://account-data."), .new = make_csstr(L"http://127.0.0")},

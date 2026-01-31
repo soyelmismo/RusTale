@@ -4,7 +4,6 @@ use crate::server::assets::{
 };
 use crate::server::config::ServerConfig;
 use anyhow::{Context, Result};
-use rand::Rng;
 use std::path::PathBuf;
 use tokio::process::Command;
 use tokio::sync::mpsc;
