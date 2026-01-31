@@ -94,6 +94,7 @@ pub fn find_free_port() -> u16 {
     for _ in 0..100 {
         let port = rng.random_range(10000..=65535);
         if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+            save_active_port(port);
             return port;
         }
     }
@@ -101,26 +102,32 @@ pub fn find_free_port() -> u16 {
     59313
 }
 
-pub fn get_saved_port() -> u16 {
-    let server_root = crate::config::get_server_root_dir();
-    let primary_path = server_root.join("server.port");
-
-    let possible_paths = vec![
-        primary_path,
-        crate::config::get_app_dir().join("server.port"),
-        std::path::PathBuf::from("server.port"),
-    ];
-
-    for p in possible_paths {
-        if p.exists() {
-            if let Ok(s) = std::fs::read_to_string(&p) {
-                if let Ok(p_val) = s.trim().parse::<u16>() {
-                    return p_val;
-                }
-            }
+pub fn get_runtime_port_file() -> PathBuf {
+    #[cfg(target_os = "linux")]
+    {
+        // Usar /run/user/UID/ que es volátil y seguro
+        if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
+            let path = PathBuf::from(runtime_dir).join("rustale");
+            let _ = std::fs::create_dir_all(&path);
+            return path.join("auth.port");
         }
     }
+    // Fallback para Windows o si XDG no está definido
+    crate::config::get_server_root_dir().join("server.port")
+}
 
+pub fn save_active_port(port: u16) {
+    let path = get_runtime_port_file();
+    let _ = std::fs::write(path, port.to_string());
+}
+
+pub fn get_saved_port() -> u16 {
+    let path = get_runtime_port_file();
+    if let Ok(s) = std::fs::read_to_string(&path) {
+        if let Ok(p_val) = s.trim().parse::<u16>() {
+            return p_val;
+        }
+    }
     59313
 }
 
@@ -355,24 +362,14 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
     if !args_processed {
         cmd.args(&args);
     }
-
     println!("Launching real java...");
-
-    // Detect if we should show the console
-    // Show console ONLY if it is a server AND NOT singleplayer
-    let _is_server_jar = args
-        .iter()
-        .any(|a| a.to_lowercase().contains("hytaleserver.jar"));
-    let _is_singleplayer = args.iter().any(|a| a == "--singleplayer");
-    let _is_dedicated_server_flag = std::env::var("RUSTALE_IS_SERVER").is_ok();
 
     #[cfg(target_os = "windows")]
     {
-        let show_console = (_is_server_jar || _is_dedicated_server_flag) && !_is_singleplayer;
-        if !show_console {
-            // Hide black console window for client or singleplayer
-            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-        }
+        // Forzamos la NO creación de ventana independientemente de si es servidor.
+        // Esto se debe a que el Proxy ya se encarga de heredar los canales de logs.
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
     // Explicitly inherit stdio to ensure logs pass through the proxy

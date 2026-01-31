@@ -122,6 +122,8 @@ impl Default for ModsState {
             installing_mods: HashMap::new(),
             checking_updates: false,
             mods_with_updates: HashSet::new(),
+            update_status_cache: HashMap::new(),
+            cache_dirty: false,
             selected_versions: HashMap::new(),
             loading_versions: HashSet::new(),
             cached_versions: HashMap::new(),
