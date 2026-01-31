@@ -219,6 +219,7 @@ impl Drop for ScopedProtect {
 }
 
 // Bypass de Singleplayer Check
+// Se necesita para entrar a servidores con auth mode insecure
 // Busca la secuencia JZ (Jump if Zero) que verifica singleplayer/auth mode y la reemplaza por NOPs.
 unsafe fn patch_offline_check(region: &MemoryRegion) {
     log!("[Aurora] Iniciando búsqueda de checks de singleplayer");
@@ -431,7 +432,7 @@ unsafe fn scan_and_patch() {
 
                 if (prot & PROT_READ) != 0 {
                      let region = MemoryRegion { addr: start as *mut u8, size: end - start, prot };
-                     //unsafe { patch_offline_check(&region) };
+                     unsafe { patch_offline_check(&region) };
                      unsafe { apply_swaps(&region) };
                 }
             }
@@ -451,7 +452,7 @@ unsafe fn scan_and_patch() {
     unsafe { K32GetModuleInformation(GetCurrentProcess(), h_mod, &mut info, std::mem::size_of::<MODULEINFO>() as u32) };
     
     let region = MemoryRegion { addr: info.lpBaseOfDll as *mut u8, size: info.SizeOfImage as usize };
-    //unsafe { patch_offline_check(&region) };
+    unsafe { patch_offline_check(&region) };
     unsafe { apply_swaps(&region) };
 }
 
