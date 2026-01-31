@@ -21,7 +21,7 @@ for /r "." %%f in (*.rs) do (
         REM Use PowerShell but preserve original file attributes
         powershell -Command ^
             "$original = Get-Content -Path '%%f' -Raw -Encoding UTF8; " ^
-            "$modified = $original -replace 'á', 'á' -replace 'é', 'é' -replace 'í', 'í' -replace 'ó', 'ó' -replace 'ú', 'ú' -replace 'Á', 'Á' -replace 'É', 'É' -replace 'Í', 'Í' -replace 'Ó', 'Ó' -replace 'Ú', 'Ú' -replace 'ñ', 'ñ' -replace 'Ñ', 'Ñ' -replace 'ü', 'ü' -replace 'Ü', 'Ü'; " ^
+            "$modified = $original -replace 'á', 'a' -replace 'é', 'e' -replace 'í', 'i' -replace 'ó', 'o' -replace 'ú', 'u' -replace 'Á', 'A' -replace 'É', 'E' -replace 'Í', 'I' -replace 'Ó', 'O' -replace 'Ú', 'U' -replace 'ñ', 'n' -replace 'Ñ', 'N' -replace 'ü', 'u' -replace 'Ü', 'U'; " ^
             "if ($original -ne $modified) { " ^
             "    Set-Content -Path '!tempfile!' -Value $modified -Encoding UTF8 -NoNewline; " ^
             "    exit 1; " ^

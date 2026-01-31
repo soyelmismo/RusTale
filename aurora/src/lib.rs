@@ -203,49 +203,43 @@ unsafe fn raw_search_and_replace(mem: &mut [u8], target: &[u8], replacement: &[u
 fn get_swaps(mode: &str) -> Vec<SwapEntry> {
     let mut swaps = Vec::new();
 
-    if mode == "sanasol" {
-        swaps.push(SwapEntry {
-            old: CsString::from_str("hytale.com"),
-            new: CsString::from_str("sanasol.ws"),
-        });
-    } else {
-        let port_str = std::env::var("AURORA_PORT").unwrap_or_else(|_| "59313".to_string());
-        let subdomains = vec![
-            ("account-data", "000000000"),
-            ("sessions", "00000"),
-            ("telemetry", "000000"),
-            ("tools", "00"),
-        ];
+    let port_str = std::env::var("AURORA_PORT").unwrap_or_else(|_| "59313".to_string());
+    let subdomains = vec![
+        ("account-data", "000000000"),
+        ("sessions", "00000"),
+        ("telemetry", "000000"),
+        ("tools", "00"),
+    ];
 
-        for (subdomain, filler) in &subdomains {
-            swaps.push(SwapEntry {
-                old: CsString::from_str(&format!("https://{}.hytale.com", subdomain)),
-                new: CsString::from_str(&format!("http://127.0.0.{}:{}", filler, port_str)),
-            });
-        }
-
-        for (subdomain, filler) in &subdomains {
-            let old_str = format!("https://{}.", subdomain);
-            let old = CsString::from_str(&old_str);
-            let new = CsString::from_str(&format!("http://127.0.0.{}", filler));
-            swaps.push(SwapEntry { old, new });
-        }
-
+    for (subdomain, filler) in &subdomains {
         swaps.push(SwapEntry {
-            old: CsString::from_str("hytale.com"),
-            new: CsString::from_str(&format!("1:{}", port_str)),
-        });
-        swaps.push(SwapEntry {
-            old: CsString::from_str("hytale.com"),
-            new: CsString::from_str(&format!(".1:{}", port_str)),
+            old: CsString::from_str(&format!("https://{}.hytale.com", subdomain)),
+            new: CsString::from_str(&format!("http://127.0.0.{}:{}", filler, port_str)),
         });
     }
-    swaps
+
+    for (subdomain, filler) in &subdomains {
+        swaps.push(SwapEntry {
+            old: CsString::from_str(&format!("https://{}.", subdomain)),
+            new: CsString::from_str(&format!("http://127.0.0.{}", filler)),
+        });
+    }
+
+    swaps.push(SwapEntry {
+        old: CsString::from_str("hytale.com"),
+        new: CsString::from_str(&format!("1:{}", port_str)),
+    });
+    swaps.push(SwapEntry {
+        old: CsString::from_str("hytale.com"),
+        new: CsString::from_str(&format!(".1:{}", port_str)),
+    });
+
+    return swaps;
 }
 #[cfg(target_os = "linux")]
 fn get_dynamic_port() -> String {
     // Aurora lee directamente de la carpeta de runtime del usuario (SEAMLESS SYNC)
-    // Prioridad 1: XDG_RUNTIME_DIR (estándar Linux)
+    // Prioridad 1: XDG_RUNTIME_DIR (estandar Linux)
     if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
         let path = format!("{}/rustale/auth.port", runtime_dir);
         if let Ok(port) = std::fs::read_to_string(&path) {
@@ -254,7 +248,7 @@ fn get_dynamic_port() -> String {
         }
     }
     
-    // Prioridad 2: Construcción manual usando UID (fallback robusto)
+    // Prioridad 2: Construccion manual usando UID (fallback robusto)
     let uid = unsafe { libc::getuid() };
     let fallback_path = format!("/run/user/{}/rustale/auth.port", uid);
     if let Ok(port) = std::fs::read_to_string(&fallback_path) {
@@ -276,45 +270,37 @@ fn get_dynamic_port() -> String {
 #[cfg(target_os = "linux")]
 fn get_swaps(mode: &str) -> Vec<SwapEntry> {
     let mut swaps = Vec::new();
-    let port_str = get_dynamic_port(); // Puerto obtenido dinámicamente en cada inyección
+    let port_str = get_dynamic_port(); // Puerto obtenido dinamicamente en cada inyeccion
 
-    if mode == "sanasol" {
-        swaps.push(SwapEntry {
-            old: CsString::from_str("hytale.com"),
-            new: CsString::from_str("sanasol.ws"),
-        });
-        // Agregar aqui los mismos dominios que Windows si sanasol.ws usa subdominios estandar
-    } else {
-        // --- LOGICA ACTUALIZADA CON PUERTO DINÁMICO ---
-        // Usamos IPs falsas pero dentro de loopback 127.0.x.x para que el firewall 
-        // piense que es comunicación interna de kernel.
-        swaps.push(SwapEntry {
-            old: CsString::from_str("https://account-data."),
-            new: CsString::from_str("http://127.0.0.000000"),
-        });
+    // --- LOGICA ACTUALIZADA CON PUERTO DINaMICO ---
+    // Usamos IPs falsas pero dentro de loopback 127.0.x.x para que el firewall 
+    // piense que es comunicacion interna de kernel.
+    swaps.push(SwapEntry {
+        old: CsString::from_str("https://account-data."),
+        new: CsString::from_str("http://127.0.00000000"),
+    });
 
-        swaps.push(SwapEntry {
-            old: CsString::from_str("https://sessions."),
-            new: CsString::from_str("http://127.0.0.00"),
-        });
+    swaps.push(SwapEntry {
+        old: CsString::from_str("https://sessions."),
+        new: CsString::from_str("http://127.0.0000"),
+    });
 
-        swaps.push(SwapEntry {
-            old: CsString::from_str("https://telemetry."),
-            new: CsString::from_str("http://127.0.0.000"),
-        });
+    swaps.push(SwapEntry {
+        old: CsString::from_str("https://telemetry."),
+        new: CsString::from_str("http://127.0.00000"),
+    });
 
-        swaps.push(SwapEntry {
-            old: CsString::from_str("https://tools."),
-            new: CsString::from_str("http://127.000"),
-        });
+    swaps.push(SwapEntry {
+        old: CsString::from_str("https://tools."),
+        new: CsString::from_str("http://127.0.0"),
+    });
 
-        swaps.push(SwapEntry {
-            old: CsString::from_str("hytale.com"),
-            new: CsString::from_str(&format!("0001:{}", port_str)),
-        });
-    }
+    swaps.push(SwapEntry {
+        old: CsString::from_str("hytale.com"),
+        new: CsString::from_str(&format!(".001:{}", port_str)),
+    });
 
-    swaps
+    return swaps;
 }
 unsafe fn debug_read_csstr(ptr: *const u8) -> String {
     // 1. Read size
@@ -343,6 +329,20 @@ unsafe fn debug_read_csstr(ptr: *const u8) -> String {
     String::from_utf16_lossy(&buf)
 }
 
+fn get_swaps_main(mode: &str) -> Vec<SwapEntry> {
+    let mut swaps = Vec::new();
+    if mode == "sanasol" {
+        swaps.push(SwapEntry {
+            old: CsString::from_str("hytale.com"),
+            new: CsString::from_str("sanasol.ws"),
+        });
+        // Agregar aqui los mismos dominios que Windows si sanasol.ws usa subdominios estandar
+    } else {
+        swaps = get_swaps(&mode)
+    }
+    swaps
+}
+
 // ==================== STRINGS LOGIC ====================
 
 unsafe fn swap_strings(region: &MemoryInfo) {
@@ -350,7 +350,7 @@ unsafe fn swap_strings(region: &MemoryInfo) {
     let len = region.size;
     let mode = std::env::var("AURORA_MODE").unwrap_or_else(|_| "local".to_string());
 
-    let swaps = get_swaps(&mode);
+    let swaps = get_swaps_main(&mode);
 
     unsafe {
         apply_swaps(

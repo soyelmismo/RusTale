@@ -235,18 +235,21 @@ pub struct SmoothTranslate<'a, Message> {
 
 pub fn background_tint_color(palette: &Palette) -> Color {
     if palette.background.r > 0.5 {
+        // Modo Light: blanco con transparencia moderada
         Color {
-            a: 0.75,
+            a: 0.35,
             ..Color::WHITE
         }
     } else if palette.background.r > 0.1 {
+        // Modo Grey: color del fondo con transparencia similar
         Color {
-            a: 0.4,
+            a: 0.35,
             ..palette.background
         }
     } else {
+        // Modo Black: color del fondo con transparencia similar
         Color {
-            a: 0.2,
+            a: 0.35,
             ..palette.background
         }
     }
@@ -2193,7 +2196,7 @@ pub fn window_control_button<'a, Message: Clone + 'a>(
             iced_svg(crate::util::icons::icon(icon_svg))
                 .width(12)
                 .height(12)
-                .opacity(ctx.palette.text_primary.a) // <--- CRÍTICO: Opacidad dinámica para SVGs
+                .opacity(ctx.palette.text_primary.a) // <--- CRiTICO: Opacidad dinamica para SVGs
                 .style(move |_t, _s| iced::widget::svg::Style {
                     color: Some(if is_close { 
                         if palette.background.r > 0.5 {

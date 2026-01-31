@@ -230,8 +230,9 @@ struct IdentityTokenPayload {
     jti: String,
     scope: String,
     sub: String,
-    username: String, // Moved to root
-    entitlements: Vec<String>, // Moved to root
+    name: String,
+    username: String,
+    entitlements: Vec<String>,
     profile: ProfileInfo,
 }
 
@@ -1341,6 +1342,7 @@ fn generate_jwt(
             jti: Uuid::new_v4().to_string(),
             scope: scope.to_string(),
             sub,
+            name: username.to_string(),
             username: username.to_string(),
             entitlements: ENTITLEMENTS.iter().map(|&s| s.to_string()).collect(),
             profile: ProfileInfo {
