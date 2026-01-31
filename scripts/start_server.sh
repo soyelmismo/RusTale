@@ -1,4 +1,5 @@
 #!/bin/sh
+# scripts/start_server.sh
 
 SCRIPTPATH=$(readlink -f "$0")
 DIR=$(dirname "$SCRIPTPATH")
