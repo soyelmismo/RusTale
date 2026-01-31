@@ -151,6 +151,16 @@ pub fn main() -> iced::Result {
         }
         std::process::exit(0);
     }
+    #[cfg(target_os = "linux")]
+    {
+        unsafe { std::env::set_var("WGPU_BACKEND", "vulkan"); }
+        
+        // El sistema de resize manual de Iced colisiona con el protocolo de Wayland.
+        // Forzamos X11 (XWayland) para que el resize manual matemático sea síncrono y suave.
+        // Esto elimina el "Stretch" y el "Freeze" inmediatamente.
+        unsafe { std::env::set_var("WINIT_UNIX_BACKEND", "x11"); }
+    }
+
     // [GPU OPTIMIZATION 1] ----------------------------
     // Forzamos a WGPU a usar el modo de alto rendimiento antes de inicializar nada.
     // Esto evita que use la integrada o renderizado por software (WARP/LLVMpipe).
@@ -914,25 +924,42 @@ impl RusTale {
                     // 4. Aplicar cambios
                     let mut commands = Vec::new();
 
-                    // IMPORTANTE: NO actualizar self.current_window_pos/size manualmente aqui.
-                    // Deja que el sistema operativo responda con un evento WindowEvent::Moved/Resized.
-                    // Esto elimina el "jitter" o locura al redimensionar hacia la izquierda/arriba.
-
-                    if (new_x - self.current_window_pos.x).abs() > 0.5
-                        || (new_y - self.current_window_pos.y).abs() > 0.5
+                    if (new_x - self.current_window_pos.x).abs() > 0.5 
+                        || (new_y - self.current_window_pos.y).abs() > 0.5 
                     {
+                        // Esto evita que el frame siguiente dibuje la ventana en la posición vieja 
+                        // mientras el sistema operativo la mueve.
+                        self.current_window_pos = Point::new(new_x, new_y);
+                        
                         commands.push(
                             window::oldest()
                                 .and_then(move |id| window::move_to(id, Point::new(new_x, new_y))),
                         );
                     }
 
-                    if (new_w - self.current_window_size.width).abs() > 0.5
-                        || (new_h - self.current_window_size.height).abs() > 0.5
+                    // El umbral puede ser bajo (0.5 o 1.0) si aplicamos la lógica predictiva.
+                    // Si cambia el tamaño aunque sea un píxel, debemos reaccionar.
+                    if (new_w - self.current_window_size.width).abs() > 0.5 
+                        || (new_h - self.current_window_size.height).abs() > 0.5 
                     {
+                        let new_size = Size::new(new_w, new_h);
+
+                        // No esperamos a que Wayland nos avise. Asumimos que el resize sucederá.
+                        // Esto obliga a la UI (view) a recalcular layout EXACTAMENTE con los nuevos píxeles
+                        // que estamos a punto de pedir. Resultado: Pixel-perfect, sin stretch.
+                        self.window_size = new_size;
+                        self.current_window_size = new_size;
+                        
+                        // Sincronizamos settings globales para que el modo compacto se active instantáneamente
+                        self.settings.width = new_w as u32;
+                        self.settings.height = new_h as u32;
+                        // Y los temporales por si hay un modal abierto
+                        self.settings_state.temp_settings.width = new_w as u32;
+                        self.settings_state.temp_settings.height = new_h as u32;
+
                         commands.push(
                             window::oldest()
-                                .and_then(move |id| window::resize(id, Size::new(new_w, new_h))),
+                                .and_then(move |id| window::resize(id, new_size)),
                         );
                     }
 
@@ -946,6 +973,12 @@ impl RusTale {
             Message::Tick(_now) => {
                 // Bloqueo de seguridad: si desactivas el LSD pero quedaba un evento en cola.
                 if !self.settings.theme.lsd_mode {
+                    return Task::none();
+                }
+
+                // Si estamos redimensionando la ventana, pausamos los cálculos matemáticos del shader/texto.
+                // Esto libera recursos para que el motor de layout (Iced/WGPU) recalcule la geometría sin lag.
+                if self.resizing_direction.is_some() {
                     return Task::none();
                 }
 
@@ -2307,18 +2340,23 @@ impl RusTale {
             }
 
             Message::WindowResized(size) => {
+                self.current_window_size = size;
                 self.window_size = size;
-
-                // Actualizamos los settings en memoria
+                
+                // Forzamos actualización manual de los settings para que la lógica de Iced 
+                // detecte el cambio de ancho (Modo compacto vs Full) instantáneamente.
                 self.settings.width = size.width as u32;
                 self.settings.height = size.height as u32;
 
-                // Sincronizamos tambien el estado temporal para que, si el modal esta abierto,
-                // no se sobrescriba con la resolucion vieja al pulsar "Save".
-                self.settings_state.temp_settings.width = size.width as u32;
-                self.settings_state.temp_settings.height = size.height as u32;
-
-                Task::none()
+                // EL FIX: En Linux, redimensionar necesita una señal de redibujado limpia.
+                // Usamos window::request_user_attention o simplemente devolvemos la tarea de is_maximized.
+                return window::oldest().and_then(move |id| {
+                    // Obligamos a que WGPU recalcule el viewport físico pidiendo el foco interno.
+                    Task::batch(vec![
+                        window::gain_focus(id), 
+                        window::is_maximized(id).map(move |max| Message::WindowResizedWithMaximized(size, max))
+                    ])
+                });
             }
             Message::WindowResizedWithMaximized(size, is_maximized) => {
                 self.window_size = size;
@@ -2371,20 +2409,41 @@ impl RusTale {
             Message::WindowEvent(event) => {
                 match event {
                     window::Event::Resized(size) => {
+                        // En Wayland/Linux, a veces el SO nos "corrige" (ej. snapping a bordes).
+                        // Solo aceptamos la corrección del SO si NO estamos nosotros forzando un tamaño manualmente en este mismo frame,
+                        // O si la discrepancia es grande (significa que el drag terminó o hubo snap).
+                        
+                        let delta_w = (size.width - self.current_window_size.width).abs();
+                        let delta_h = (size.height - self.current_window_size.height).abs();
+
+                        // Si la diferencia es pequeña y estamos redimensionando, 
+                        // confiamos en nuestra matemática local (Predictiva) para evitar jitter.
+                        if self.resizing_direction.is_some() && delta_w < 5.0 && delta_h < 5.0 {
+                             return Task::none();
+                        }
+
+                        // Si no estamos redimensionando, o el salto fue grande (Snap de ventana),
+                        // entonces obedecemos al SO como autoridad final.
                         self.current_window_size = size;
-                        self.window_size = size; // Sincronizar con tu variable existente
+                        self.window_size = size; 
+                        
+                        // Actualizar configuraciones temporales para evitar regresiones en modals
                         self.settings.width = size.width as u32;
                         self.settings.height = size.height as u32;
+                        self.settings_state.temp_settings.width = size.width as u32;
+                        self.settings_state.temp_settings.height = size.height as u32;
 
-                        // Verificar estado maximizado despues de resize
-                        // En Iced 0.14, las funciones de ventana devuelven Task
+                        // En Wayland sin decoración, debemos pedirle explícitamente a Iced 
+                        // que verifique el estado del sistema para evitar el "Hitbox desync"
                         let size_clone = size;
-                        return window::oldest()
-                            .and_then(|window_id| window::is_maximized(window_id))
-                            .map(move |is_maximized| {
-                                // No podemos modificar self directamente aqui, necesitamos un mensaje
-                                Message::WindowResizedWithMaximized(size_clone, is_maximized)
-                            });
+                        return window::oldest().and_then(move |id| {
+                            // Task::batch para asegurar que el viewport se limpie
+                            Task::batch(vec![
+                                window::is_maximized(id).map(move |is_maximized| {
+                                    Message::WindowResizedWithMaximized(size_clone, is_maximized)
+                                })
+                            ])
+                        });
                     }
                     window::Event::Moved(point) => {
                         self.current_window_pos = point;
@@ -2798,6 +2857,10 @@ impl RusTale {
                 shader.update_transition(self.next_shader_idx, self.shader_transition);
                 // IMPORTANTE: Actualizar color de acento en tiempo real
                 shader.update_accent(palette.accent);
+                // NUEVO: Sincronizar transparencia con el estado de redimensionamiento
+                // Si redimensionamos, bajamos la intensidad a 0 para que la GPU respire
+                let resize_multiplier = if self.resizing_direction.is_some() { 0.0 } else { 1.0 };
+                shader.update_alpha(ui_alpha * resize_multiplier); 
                 shader
             } else {
                 // Crear nueva instancia
@@ -2809,7 +2872,11 @@ impl RusTale {
                     shader_opacity, // <--- CORREGIDO: Controla opacidad pura (fade in)
                     effect_intensity, // <--- CORREGIDO: Controla violencia matematica del fractal
                 ));
-                shader_opt.as_mut().unwrap()
+                let shader = shader_opt.as_mut().unwrap();
+                // NUEVO: Aplicar sincronización de resize también en la creación
+                let resize_multiplier = if self.resizing_direction.is_some() { 0.0 } else { 1.0 };
+                shader.update_alpha(ui_alpha * resize_multiplier);
+                shader
             };
 
             // Disparar trigger_click si hay un pulso activo

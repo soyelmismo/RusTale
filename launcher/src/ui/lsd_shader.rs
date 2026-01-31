@@ -92,6 +92,10 @@ impl LsdShader {
         self.next_shader_id = next_id;
         self.transition = progress;
     }
+
+    pub fn update_alpha(&mut self, alpha: f32) {
+        self.alpha = alpha;
+    }
 }
 
 impl<Message> shader::Program<Message> for LsdShader {
@@ -106,7 +110,9 @@ impl<Message> shader::Program<Message> for LsdShader {
     ) -> Self::Primitive {
         // Ralentizamos el tiempo para efectos mas hipnoticos
         let time = self.start_time.elapsed().as_secs_f32() * 0.5;
-        let aspect = bounds.width / bounds.height;
+        // Forzamos el calculo de aspect usando los bounds lógicos REALES de la ventana
+        // que Iced acaba de calcular en el layout pass.
+        let aspect = bounds.width / bounds.height.max(1.0);
 
         // Decaimiento del pulso de clic (exponencial)
         let click_decay = (self.last_click_time.elapsed().as_secs_f32() * 8.0).exp();
@@ -118,14 +124,14 @@ impl<Message> shader::Program<Message> for LsdShader {
         LsdPrimitive {
             uniforms: Uniforms {
                 time,
-                aspect,
+                aspect, // <--- Este valor debe ser reactivo puro a los bounds
                 mouse_x: (self.mouse_pos.x / bounds.width) * 2.0 - 1.0,
                 mouse_y: (self.mouse_pos.y / bounds.height) * 2.0 - 1.0,
                 accent_r: self.accent.r,
                 accent_g: self.accent.g,
                 accent_b: self.accent.b,
                 intensity: combined_intensity.min(10.0), // Limitar para evitar explosiones
-                alpha: self.alpha,
+                alpha: if self.transition > 0.0 { self.alpha * self.transition } else { self.alpha }, // TIP EXTRA: Durante el resize, reduce el alpha del shader a 0.5 para que el lag visual se note menos.
                 shader_id: self.shader_id,
                 next_shader_id: self.next_shader_id,
                 transition: self.transition,

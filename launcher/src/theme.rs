@@ -81,18 +81,10 @@ impl SmoothTranslateState {
         is_resizing: bool, // <--- NUEVO PARaMETRO
         mouse_stillness: f32, // <--- NUEVO PARaMETRO
     ) -> Vector {
-        // Si esta desactivado O se esta redimensionando la ventana
-        if !lsd_enabled || is_resizing {
-            // CRiTICO: Reiniciar la velocidad y la repulsion a cero.
-            // Esto evita que cuando termines de redimensionar, los objetos
-            // salgan disparados por la inercia acumulada.
-            self.current_velocity.set(Vector::new(0.0, 0.0));
-            self.current_repulsion.set(Vector::new(0.0, 0.0));
-            self.intensity.set(0.0);
-            
-            // Si quieres mantener el movimiento de "onda" suave (jitter) durante el resize,
-            // puedes devolver solo la parte del jitter. 
-            // Pero para maxima estabilidad, devolvemos 0.0.
+        // CAMBIO CRÍTICO PARA WAYLAND:
+        // Si estamos redimensionando, forzamos retorno cero inmediato.
+        // Esto evita que Iced intente "adivinar" dónde están los hitboxes en movimiento.
+        if is_resizing || !lsd_enabled {
             return Vector::new(0.0, 0.0);
         }
 
@@ -1248,19 +1240,16 @@ pub fn magic_menu_style<'a, M>(
 where
     M: 'a + Clone,
 {
-    if ctx.lsd_enabled {
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 9, ctx.lsd_intensity);
-        Element::new(SmoothTranslate::new(
-            element,
-            (vx, vy), // Pasar vectores directos
-            ctx.mouse_pos,
-            false,
-            ctx.lsd_intensity,
-            ctx.lsd_enabled,
-        ).resizing(ctx.is_resizing))
-    } else {
-        element
-    }
+    // SIEMPRE envolvemos en SmoothTranslate para mantener estabilidad del arbol
+    let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 9, ctx.lsd_intensity);
+    Element::new(SmoothTranslate::new(
+        element,
+        (vx, vy), // Pasar vectores directos
+        ctx.mouse_pos,
+        false,
+        ctx.lsd_intensity,
+        ctx.lsd_enabled,
+    ).resizing(ctx.is_resizing))
 }
 
 /// Un Dropdown totalmente personalizado que aplica efectos LSD a las letras del menu.
@@ -1523,6 +1512,22 @@ impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Messa
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
+        // Durante el redimensionamiento, saltamos el cálculo de SmoothTranslate.
+        // Dibujamos el widget en su posición absoluta. Esto evita que el shader
+        // intente interpolar posiciones en un viewport que está cambiando de tamaño.
+        if self.is_resizing {
+            self.content.as_widget().draw(
+                &tree.children[0],
+                renderer,
+                theme,
+                style,
+                layout,
+                cursor,
+                viewport,
+            );
+            return;
+        }
+
         let bounds = layout.bounds();
 
         // [OPTIMIZATION] SOPHISTICATED CULLING (Culling con Margen)
@@ -1718,20 +1723,18 @@ pub fn text<'a, M: 'a>(
     ctx: UIContext,
 ) -> Element<'a, M, Theme, Renderer> {
     let element: Element<'a, M, Theme, Renderer> = content.into();
-    if ctx.lsd_enabled {
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 1, ctx.lsd_intensity);
-        
-        Element::new(SmoothTranslate::new(
-            element,
-            (vx, vy), // Pasar vectores directos
-            ctx.mouse_pos,
-            false,
-            ctx.lsd_intensity,
-            ctx.lsd_enabled,
-        ).resizing(ctx.is_resizing).with_stillness(ctx.mouse_stillness))
-    } else {
-        element
-    }
+    
+    // SIEMPRE envolvemos en SmoothTranslate para mantener estabilidad del arbol
+    let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 1, ctx.lsd_intensity);
+    
+    Element::new(SmoothTranslate::new(
+        element,
+        (vx, vy), // Pasar vectores directos
+        ctx.mouse_pos,
+        false,
+        ctx.lsd_intensity,
+        ctx.lsd_enabled,
+    ).resizing(ctx.is_resizing).with_stillness(ctx.mouse_stillness))
 }
 
 // NUEVA FUNCIoN: Aplica efecto LSD letra por letra a un string
@@ -1787,20 +1790,17 @@ pub fn text_lsd_letters<'a, M: 'a>(
 pub fn svg<'a, M: 'a>(content: impl Into<Element<'a, M>>, ctx: UIContext) -> Element<'a, M> {
     let element = content.into();
     
-    if ctx.lsd_enabled {
-        let (vx, vy) = get_seeded_disparity((ctx.lsd_offset.0 + 0.5, ctx.lsd_offset.1 + 0.5), 15, ctx.lsd_intensity);
+    // SIEMPRE envolvemos en SmoothTranslate para mantener estabilidad del arbol
+    let (vx, vy) = get_seeded_disparity((ctx.lsd_offset.0 + 0.5, ctx.lsd_offset.1 + 0.5), 15, ctx.lsd_intensity);
 
-        Element::new(SmoothTranslate::new(
-            element,
-            (vx, vy), // Pasar vectores directos
-            ctx.mouse_pos,
-            false,
-            ctx.lsd_intensity,
-            ctx.lsd_enabled,
-        ).resizing(ctx.is_resizing))
-    } else {
-        element
-    }
+    Element::new(SmoothTranslate::new(
+        element,
+        (vx, vy), // Pasar vectores directos
+        ctx.mouse_pos,
+        false,
+        ctx.lsd_intensity,
+        ctx.lsd_enabled,
+    ).resizing(ctx.is_resizing))
 }
 
 pub fn magic_pick_list_with_menu<'a, M>(
@@ -1810,21 +1810,17 @@ pub fn magic_pick_list_with_menu<'a, M>(
 where
     M: 'a + Clone,
 {
-    if ctx.lsd_enabled {
-        // Usamos una semilla unica (2) e intensidad plena
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 2, ctx.lsd_intensity);
+    // SIEMPRE envolvemos en SmoothTranslate para mantener estabilidad del arbol
+    let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 2, ctx.lsd_intensity);
 
-        Element::new(SmoothTranslate::new(
-            element,
-            (vx, vy),
-            ctx.mouse_pos,
-            false,
-            ctx.lsd_intensity,
-            ctx.lsd_enabled,
-        ).resizing(ctx.is_resizing))
-    } else {
-        element
-    }
+    Element::new(SmoothTranslate::new(
+        element,
+        (vx, vy),
+        ctx.mouse_pos,
+        false,
+        ctx.lsd_intensity,
+        ctx.lsd_enabled,
+    ).resizing(ctx.is_resizing))
 }
 pub fn magic_text_input<'a, M>(
     element: Element<'a, M, Theme, Renderer>,
@@ -1833,20 +1829,17 @@ pub fn magic_text_input<'a, M>(
 where
     M: 'a + Clone,
 {
-    if ctx.lsd_enabled {
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 3, ctx.lsd_intensity);
+    // SIEMPRE envolvemos en SmoothTranslate para mantener estabilidad del arbol
+    let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 3, ctx.lsd_intensity);
 
-        Element::new(SmoothTranslate::new(
-            element,
-            (vx, vy),
-            ctx.mouse_pos,
-            false,
-            ctx.lsd_intensity,
-            ctx.lsd_enabled,
-        ).resizing(ctx.is_resizing))
-    } else {
-        element
-    }
+    Element::new(SmoothTranslate::new(
+        element,
+        (vx, vy),
+        ctx.mouse_pos,
+        false,
+        ctx.lsd_intensity,
+        ctx.lsd_enabled,
+    ).resizing(ctx.is_resizing))
 }
 
 pub fn text_editor_style(
@@ -1891,28 +1884,21 @@ pub fn magic_text_area<'a, M>(
 where
     M: 'a + Clone,
 {
-    if ctx.lsd_enabled {
-        // Usamos una semilla diferente (11) para que el area de texto se mueva
-        // de forma distinta a los inputs pequenos
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 11, ctx.lsd_intensity);
+    // SIEMPRE envolvemos en SmoothTranslate para mantener estabilidad del arbol
+    let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 11, ctx.lsd_intensity);
 
-        Element::new(SmoothTranslate::new(
-            container(element)
-                .width(Length::Fill)
-                .height(Length::Fixed(150.0)) // Altura de area de texto real
-                .padding(2)
-                .into(),
-            (vx, vy),
-            ctx.mouse_pos,
-            false,
-            ctx.lsd_intensity,
-            ctx.lsd_enabled,
-        ))
-    } else {
+    Element::new(SmoothTranslate::new(
         container(element)
-            .height(Length::Fixed(150.0)) // Mantener altura incluso sin LSD
-            .into()
-    }
+            .width(Length::Fill)
+            .height(Length::Fixed(150.0)) // Altura de area de texto real
+            .padding(2)
+            .into(),
+        (vx, vy),
+        ctx.mouse_pos,
+        false,
+        ctx.lsd_intensity,
+        ctx.lsd_enabled,
+    ).resizing(ctx.is_resizing))
 }
 pub fn magic_button<'a, M: 'a + Clone>(
     element: Element<'a, M, Theme, Renderer>,
@@ -1921,19 +1907,16 @@ pub fn magic_button<'a, M: 'a + Clone>(
 where
     M: 'a + Clone,
 {
-    if ctx.lsd_enabled {
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 9, ctx.lsd_intensity);
-        Element::new(SmoothTranslate::new(
-            element,
-            (vx, vy), // Pasar vectores directos
-            ctx.mouse_pos,
-            false,
-            ctx.lsd_intensity,
-            ctx.lsd_enabled,
-        ).resizing(ctx.is_resizing).with_stillness(ctx.mouse_stillness))
-    } else {
-        element
-    }
+    // SIEMPRE envolvemos en SmoothTranslate para mantener estabilidad del arbol
+    let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 9, ctx.lsd_intensity);
+    Element::new(SmoothTranslate::new(
+        element,
+        (vx, vy), // Pasar vectores directos
+        ctx.mouse_pos,
+        false,
+        ctx.lsd_intensity,
+        ctx.lsd_enabled,
+    ).resizing(ctx.is_resizing).with_stillness(ctx.mouse_stillness))
 }
 
 pub fn magic_checkbox<'a, M>(
@@ -1943,20 +1926,17 @@ pub fn magic_checkbox<'a, M>(
 where
     M: 'a + Clone,
 {
-    if ctx.lsd_enabled {
-        // Semilla 5 para checkboxes
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 5, ctx.lsd_intensity);
-        Element::new(SmoothTranslate::new(
-            element,
-            (vx, vy), // Pasar vectores directos
-            ctx.mouse_pos,
-            false,
-            ctx.lsd_intensity,
-            ctx.lsd_enabled,
-        ).resizing(ctx.is_resizing))
-    } else {
-        element
-    }
+    // SIEMPRE envolvemos en SmoothTranslate para mantener estabilidad del arbol
+    // Semilla 5 para checkboxes
+    let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 5, ctx.lsd_intensity);
+    Element::new(SmoothTranslate::new(
+        element,
+        (vx, vy), // Pasar vectores directos
+        ctx.mouse_pos,
+        false,
+        ctx.lsd_intensity,
+        ctx.lsd_enabled,
+    ).resizing(ctx.is_resizing))
 }
 
 pub fn magic_image<'a, M>(
@@ -1966,20 +1946,17 @@ pub fn magic_image<'a, M>(
 where
     M: 'a + Clone,
 {
-    if ctx.lsd_enabled {
-        // Semilla 1.5 para imagenes (similar a svg)
-        let (vx, vy) = get_seeded_disparity((ctx.lsd_offset.0 + 0.3, ctx.lsd_offset.1 + 0.3), 1, ctx.lsd_intensity);
-        Element::new(SmoothTranslate::new(
-            element,
-            (vx, vy), // Pasar vectores directos
-            ctx.mouse_pos,
-            false,
-            ctx.lsd_intensity,
-            ctx.lsd_enabled,
-        ).resizing(ctx.is_resizing))
-    } else {
-        element
-    }
+    // SIEMPRE envolvemos en SmoothTranslate para mantener estabilidad del arbol
+    // Semilla 1.5 para imagenes (similar a svg)
+    let (vx, vy) = get_seeded_disparity((ctx.lsd_offset.0 + 0.3, ctx.lsd_offset.1 + 0.3), 1, ctx.lsd_intensity);
+    Element::new(SmoothTranslate::new(
+        element,
+        (vx, vy), // Pasar vectores directos
+        ctx.mouse_pos,
+        false,
+        ctx.lsd_intensity,
+        ctx.lsd_enabled,
+    ).resizing(ctx.is_resizing))
 }
 
 pub fn magic_container<'a, M>(
@@ -1989,21 +1966,18 @@ pub fn magic_container<'a, M>(
 where
     M: 'a + Clone,
 {
-    if ctx.lsd_enabled {
-        // Semilla 6 para contenedores (mas sutil)
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 6, ctx.lsd_intensity);
+    // SIEMPRE envolvemos en SmoothTranslate para mantener estabilidad del arbol
+    // Semilla 6 para contenedores (mas sutil)
+    let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 6, ctx.lsd_intensity);
 
-        Element::new(SmoothTranslate::new(
-            element,
-            (vx, vy),
-            ctx.mouse_pos,
-            false,
-            ctx.lsd_intensity,
-            ctx.lsd_enabled,
-        ).resizing(ctx.is_resizing))
-    } else {
-        element
-    }
+    Element::new(SmoothTranslate::new(
+        element,
+        (vx, vy),
+        ctx.mouse_pos,
+        false,
+        ctx.lsd_intensity,
+        ctx.lsd_enabled,
+    ).resizing(ctx.is_resizing))
 }
 
 pub fn magic_scrollable<'a, M>(
@@ -2013,11 +1987,8 @@ pub fn magic_scrollable<'a, M>(
 where
     M: 'a + Clone,
 {
-    // Si estamos redimensionando, evitamos crear el SmoothTranslate Wrapper para el Scrollable.
-    // Esto evita un nivel de indireccion en el calculo de layout de toda la lista.
-    if ctx.is_resizing {
-        return element;
-    }
+    // Estabilizacion de arbol de widgets: Mantenemos el wrapper aunque estemos redimensionando
+    // para evitar que el estado interno se destruya y recree, causando lag.
 
     // SIEMPRE envolvemos en SmoothTranslate para mantener el arbol de widgets estable.
     // Si lsd_enabled es false, SmoothTranslate simplemente no aplicara efectos,
@@ -2030,7 +2001,7 @@ where
         !ctx.lsd_enabled, // proximity_only si esta desactivado
         ctx.lsd_intensity,
         ctx.lsd_enabled,
-    ))
+    ).resizing(ctx.is_resizing))
 }
 
 pub fn magic_slider<'a, M>(
@@ -2040,20 +2011,17 @@ pub fn magic_slider<'a, M>(
 where
     M: 'a + Clone,
 {
-    if ctx.lsd_enabled {
-        // Semilla 7 para sliders (vibrante)
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 7, ctx.lsd_intensity);
-        Element::new(SmoothTranslate::new(
-            element,
-            (vx, vy),
-            ctx.mouse_pos,
-            false,
-            ctx.lsd_intensity,
-            ctx.lsd_enabled,
-        ).resizing(ctx.is_resizing))
-    } else {
-        element
-    }
+    // SIEMPRE envolvemos en SmoothTranslate para mantener estabilidad del arbol
+    // Semilla 7 para sliders (vibrante)
+    let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 7, ctx.lsd_intensity);
+    Element::new(SmoothTranslate::new(
+        element,
+        (vx, vy),
+        ctx.mouse_pos,
+        false,
+        ctx.lsd_intensity,
+        ctx.lsd_enabled,
+    ).resizing(ctx.is_resizing))
 }
 
 pub fn magic_tooltip<'a, M>(
@@ -2063,20 +2031,17 @@ pub fn magic_tooltip<'a, M>(
 where
     M: 'a + Clone,
 {
-    if ctx.lsd_enabled {
-        // Semilla 8 para tooltips
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 8, ctx.lsd_intensity);
-        Element::new(SmoothTranslate::new(
-            element,
-            (vx, vy),
-            ctx.mouse_pos,
-            false,
-            ctx.lsd_intensity,
-            ctx.lsd_enabled,
-        ).resizing(ctx.is_resizing))
-    } else {
-        element
-    }
+    // SIEMPRE envolvemos en SmoothTranslate para mantener estabilidad del arbol
+    // Semilla 8 para tooltips
+    let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 8, ctx.lsd_intensity);
+    Element::new(SmoothTranslate::new(
+        element,
+        (vx, vy),
+        ctx.mouse_pos,
+        false,
+        ctx.lsd_intensity,
+        ctx.lsd_enabled,
+    ).resizing(ctx.is_resizing))
 }
 
 pub fn dropdown_menu_style(palette: &Palette, _t: &Theme) -> container::Style {
@@ -2223,11 +2188,8 @@ pub fn window_control_button<'a, Message: Clone + 'a>(
     .style(move |t, s| window_control_button_style(&palette, t, s, is_close));
 
     // Aplicar LSD sutil (solo movimiento, no "derretimiento" excesivo para que sean clickeables)
-    if ctx.lsd_enabled {
-        magic_button(btn.into(), ctx)
-    } else {
-        btn.into()
-    }
+    // SIEMPRE usamos magic_button para mantener estabilidad del arbol de widgets
+    magic_button(btn.into(), ctx)
 }
 
 // --------------------------------------------------------
