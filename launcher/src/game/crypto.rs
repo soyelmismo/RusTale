@@ -1,11 +1,13 @@
+// ID Constante para permitir Key Rotation en el futuro si fuese necesario
+pub const KEY_ID: &str = "rustale-host-v1";
+
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use ed25519_dalek::{Signer, SigningKey};
+use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use std::sync::Mutex;
-
-// Identificador de clave usado por el protocolo Hytale
-pub const KEY_ID: &str = "2025-10-01";
+use std::sync::{OnceLock, RwLock};
+use std::path::PathBuf;
+use std::fs;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct JwkSet {
@@ -22,106 +24,159 @@ pub struct Jwk {
     pub use_key: String, // "sig"
 }
 
-// Estado global en RAM (ya no se guarda en HDD)
-static SESSION_KEYS: Mutex<Option<SigningKey>> = Mutex::new(None);
-static SESSION_JWKS: Mutex<Option<JwkSet>> = Mutex::new(None);
+// === MEMORIA ESTÁTICA SEGURA ===
 
-/// Obtiene el JWKS global actual. Si no existen, las inicializa una unica vez.
+// 1. Host Identity: Generada UNA vez al inicio. Inmutable.
+// Contiene la clave Privada para firmar. Nunca puede ser None una vez inicializada.
+static HOST_IDENTITY: OnceLock<SigningKey> = OnceLock::new();
+
+// 2. Cache JWK Público del Host: Para servir /jwks.json rápidamente.
+static HOST_JWKS_CACHE: OnceLock<JwkSet> = OnceLock::new();
+
+// 3. Claves Remotas (Opcional): Si actuamos como cliente validando otros servidores.
+// Usamos RwLock porque estas SI pueden cambiar si nos conectamos a otro server.
+static REMOTE_JWKS_CACHE: RwLock<Option<JwkSet>> = RwLock::new(None);
+
+/// Obtiene el JWKS público actual (Host o Remoto).
+/// Prioridad: Si hay remoto, devuelve remoto (modo cliente).
+/// Si no, devuelve local (modo servidor).
 pub fn get_global_jwks() -> JwkSet {
-    let jwks_lock = SESSION_JWKS.lock().unwrap();
-    if let Some(jwks) = &*jwks_lock {
-        return jwks.clone();
+    // 1. Si tenemos llaves remotas inyectadas (modo cliente), las preferimos para validación
+    if let Ok(guard) = REMOTE_JWKS_CACHE.read() {
+        if let Some(remote) = guard.as_ref() {
+            return remote.clone();
+        }
     }
 
-    // Si no existen, generarlas por primera vez (Lazy Init)
-    drop(jwks_lock);
-    initialize_constant_keys();
-    SESSION_JWKS.lock().unwrap().as_ref().unwrap().clone()
+    // 2. Si no, devolvemos las nuestras (modo servidor)
+    initialize_constant_keys(); // Garantizar inicialización
+    HOST_JWKS_CACHE.get().expect("Keys should be initialized").clone()
 }
 
 pub fn get_jwks() -> JwkSet {
     get_global_jwks()
 }
 
-/// Firma un mensaje usando las claves de sesion actuales
+/// Firma un mensaje SIEMPRE con las llaves del Host.
+/// Si el Host no está inicializado, lo inicializa ahora mismo.
+/// Esta función es ROBUSTA: No puede fallar ni regenerar claves aleatoriamente.
 pub fn sign_message(message: &str) -> String {
-    let mut key_lock = SESSION_KEYS.lock().unwrap();
-
-    // Asegurar que las claves existan
-    if key_lock.is_none() {
-        // If we have JWKS but no keys, it means we are a client of a remote emulator.
-        // We CANNOT sign messages because we don't have the private key.
-        let jwks_lock = SESSION_JWKS.lock().unwrap();
-        if jwks_lock.is_some() {
-            eprintln!(
-                "[Crypto] Error: Attempted to sign message but we only have remote public keys. This token will be invalid!"
-            );
-            return "INVALID_SIGNATURE_REMOTE_ONLY".to_string();
-        }
-        drop(jwks_lock);
-
-        drop(key_lock);
-        force_regenerate_keys();
-        key_lock = SESSION_KEYS.lock().unwrap();
-    }
-
-    if let Some(key) = key_lock.as_ref() {
-        let signature = key.sign(message.as_bytes());
-        URL_SAFE_NO_PAD.encode(signature.to_bytes())
-    } else {
-        "ERROR_NO_KEY".to_string()
-    }
+    // Garantizar que existen claves
+    initialize_constant_keys();
+    
+    // Obtener referencia segura sin bloqueos
+    let key = HOST_IDENTITY.get().expect("Host Identity failed to initialize");
+    
+    let signature = key.sign(message.as_bytes());
+    URL_SAFE_NO_PAD.encode(signature.to_bytes())
 }
 
-/// Firma un mensaje con las claves del servidor (unificado con sesion en RAM)
+/// Alias para claridad semántica
 pub fn sign_message_with_server_keys(message: &str) -> String {
     sign_message(message)
 }
 
-/// Retorna el JWK publico actual como un Value de serde_json
-pub fn get_public_jwk_as_value() -> serde_json::Value {
+pub fn get_server_public_jwk_as_value() -> serde_json::Value {
     let jwks = get_jwks();
     if let Some(key) = jwks.keys.first() {
         serde_json::json!({
-            "kty": key.kty,
-            "crv": key.crv,
-            "x": key.x,
-            "kid": key.kid,
-            "use": key.use_key
+            "kty": key.kty, "crv": key.crv, "x": key.x, "kid": key.kid, "use": key.use_key
         })
     } else {
-        // Fallback (no deberia ocurrir)
         serde_json::json!({})
     }
 }
 
-pub fn get_server_public_jwk_as_value() -> serde_json::Value {
-    get_public_jwk_as_value()
+pub fn get_public_jwk_as_value() -> serde_json::Value {
+    // Para token forgery local, siempre usamos la NUESTRA, no la remota
+    initialize_constant_keys();
+    let local_jwks = HOST_JWKS_CACHE.get().expect("Local cache empty");
+    
+    if let Some(key) = local_jwks.keys.first() {
+        serde_json::json!({
+            "kty": key.kty, "crv": key.crv, "x": key.x, "kid": key.kid, "use": key.use_key
+        })
+    } else {
+        serde_json::json!({})
+    }
 }
 
-/// Fuerza la regeneracion de claves JWT (Solo en RAM)
-/// Se llama en cada inicio de juego o servidor
-pub fn force_regenerate_keys() {
-    let mut key_lock = SESSION_KEYS.lock().unwrap();
-    let mut jwks_lock = SESSION_JWKS.lock().unwrap();
+/// Retorna la ruta al archivo de llave privada
+fn get_key_file_path() -> PathBuf {
+    crate::config::get_identity_dir().join("host.key")
+}
 
-    // WARNING: If we already have private keys, don't regenerate
-    // But if we only have JWKS (public keys) and no private keys, regenerate
-    if key_lock.is_some() {
-        return;
-    }
+/// Inicializa la identidad criptográfica del servidor.
+/// 
+/// 1. Intenta leer `server/identity/host.key`.
+/// 2. Si existe y es válida, la carga.
+/// 3. Si no, genera una nueva y la guarda.
+/// 4. PANIC si no tiene permisos de escritura (La seguridad es crítica).
+pub fn initialize_constant_keys() {
+    HOST_IDENTITY.get_or_init(|| {
+        let key_path = get_key_file_path();
+        
+        // A. INTENTO DE CARGA (Persistencia)
+        if key_path.exists() {
+            println!("[Crypto] Loading Host Identity from disk: {:?}", key_path);
+            match fs::read(&key_path) {
+                Ok(bytes) => {
+                    if bytes.len() == 32 {
+                        let mut arr = [0u8; 32];
+                        arr.copy_from_slice(&bytes);
+                        let key = SigningKey::from_bytes(&arr);
+                        
+                        // Generar el cache público inmediatamente
+                        let jwk_set = create_jwk_from_public(&key.verifying_key());
+                        let _ = HOST_JWKS_CACHE.set(jwk_set);
+                        
+                        return key;
+                    } else {
+                        eprintln!("[Crypto] CRITICAL: Corrupt key file (len != 32). Backing up and regenerating.");
+                        let _ = fs::rename(&key_path, key_path.with_extension("key.corrupt"));
+                    }
+                }
+                Err(e) => {
+                    // Si no podemos leer la llave, es un error fatal de permisos o hardware.
+                    panic!("[Crypto] FATAL: Cannot read host identity file: {}", e);
+                }
+            }
+        }
 
-    // Generar bytes aleatorios para la clave privada
-    let mut bytes = [0u8; 32];
-    rand::rng().fill(&mut bytes);
-    let signing_key = SigningKey::from_bytes(&bytes);
+        // B. GENERACIÓN (Primer arranque o regeneración)
+        println!("[Crypto] Generating NEW Persistent Host Identity...");
+        
+        // Crear directorios si no existen
+        if let Some(parent) = key_path.parent() {
+            if !parent.exists() {
+                fs::create_dir_all(parent).expect("Failed to create identity directory");
+            }
+        }
 
-    // Derivar clave publica y formatear como JWK
-    let verifying_key = signing_key.verifying_key();
-    let public_bytes = verifying_key.to_bytes();
+        let mut bytes = [0u8; 32];
+        rand::rng().fill(&mut bytes);
+        let signing_key = SigningKey::from_bytes(&bytes);
+
+        // Guardar estrictamente
+        match fs::write(&key_path, bytes) {
+            Ok(_) => println!("[Crypto] Host Identity saved to {:?}", key_path),
+            Err(e) => panic!("[Crypto] FATAL: Failed to persist host identity! {}", e),
+        }
+
+        // Cachear pública
+        let jwk_set = create_jwk_from_public(&signing_key.verifying_key());
+        let _ = HOST_JWKS_CACHE.set(jwk_set);
+
+        signing_key
+    });
+}
+
+/// Helper para crear estructura JWKS
+fn create_jwk_from_public(vk: &VerifyingKey) -> JwkSet {
+    let public_bytes = vk.to_bytes();
     let x_b64 = URL_SAFE_NO_PAD.encode(public_bytes);
-
-    let jwks = JwkSet {
+    
+    JwkSet {
         keys: vec![Jwk {
             kty: "OKP".to_string(),
             crv: "Ed25519".to_string(),
@@ -129,44 +184,21 @@ pub fn force_regenerate_keys() {
             kid: KEY_ID.to_string(),
             use_key: "sig".to_string(),
         }],
-    };
-
-    *key_lock = Some(signing_key);
-    *jwks_lock = Some(jwks);
-
-    println!("[Crypto] Fresh JWT keys generated and active in RAM.");
+    }
 }
 
-/// Actualiza el JWKS desde una fuente remota (usado al unirse a servidores dedicados)
 pub fn update_jwks_from_remote(jwks: JwkSet) {
-    let mut jwks_lock = SESSION_JWKS.lock().unwrap();
-    let mut key_lock = SESSION_KEYS.lock().unwrap();
-
-    *jwks_lock = Some(jwks);
-    *key_lock = None; // Importante: invalidar llaves privadas locales si somos clientes
-
-    println!("[Crypto] JWKS updated from remote server (Cloned)");
-}
-
-/// Asegura que tenemos capacidad de firmar localmente (para modo local/patch)
-pub fn ensure_local_signing_capability() {
-    let key_lock = SESSION_KEYS.lock().unwrap();
-    if key_lock.is_none() {
-        drop(key_lock);
-        force_regenerate_keys();
+    if let Ok(mut guard) = REMOTE_JWKS_CACHE.write() {
+        *guard = Some(jwks);
+        println!("[Crypto] Synchronized with remote JWKS. Host keys preserved.");
     }
 }
 
-/// Inicializa claves si no existen
-pub fn initialize_constant_keys() {
-    let key_lock = SESSION_KEYS.lock().unwrap();
-    if key_lock.is_none() {
-        drop(key_lock);
-        force_regenerate_keys();
-    }
-}
-
-/// Mantenido por compatibilidad
-pub fn initialize_server_keys_if_local() {
-    initialize_constant_keys();
+// Deprecated logic kept for compatibility
+pub fn ensure_local_signing_capability() { initialize_constant_keys(); }
+pub fn initialize_server_keys_if_local() { initialize_constant_keys(); }
+pub fn force_regenerate_keys() { 
+    // Ahora es un no-op seguro. No regeneramos para mantener la estabilidad del puerto.
+    // Solo registramos el intento.
+    println!("[Crypto] Ignoring regen request. Keeping persistent identity."); 
 }

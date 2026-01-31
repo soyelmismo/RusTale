@@ -1,13 +1,15 @@
-// Thanks to https://github.com/LiEnby/HytaleSP for the original C code
-
 use std::ffi::c_void;
-use std::fs::OpenOptions;
-use std::io::Write;
 use std::slice;
 use std::sync::Mutex;
+use std::fs::OpenOptions;
+use std::io::Write;
 
 #[cfg(target_os = "linux")]
 use libc;
+
+const DEFAULT_PORT: u16 = 59313;
+
+// ==================== LOGGING SYSTEM ====================
 
 static LOG_FILE: Mutex<Option<std::fs::File>> = Mutex::new(None);
 
@@ -43,666 +45,447 @@ macro_rules! log {
     }
 }
 
-// ==================== DATA TYPES ====================
+// ==================== ESTRUCTURAS DE DATOS ====================
 
+// Estructura en memoria de las Strings de Hytale (Length-Prefixed UTF16)
+// Corresponde a 'csString' del código original en C.
 #[repr(C, packed)]
-#[derive(Debug, Clone, Copy)]
-struct CsString {
+struct CsStringHeader {
     size: u32,
-    data: [u16; 256],
+    // data sigue inmediatamente después
 }
 
-impl CsString {
-    fn from_str(s: &str) -> Self {
-        let mut data = [0u16; 256];
-        let mut len = 0;
-        for (i, c) in s.encode_utf16().enumerate() {
-            if i >= 255 {
-                break;
-            }
-            data[i] = c;
-            len = i + 1;
-        }
+struct SwapDefinition {
+    pattern_bytes: Vec<u8>,
+    replacement_bytes: Vec<u8>,
+}
+
+impl SwapDefinition {
+    fn new(original: &str, replacement: &str) -> Self {
         Self {
-            size: len as u32,
-            data,
+            pattern_bytes: encode_cs_string_bytes(original),
+            replacement_bytes: encode_cs_string_bytes(replacement),
         }
     }
+}
 
-    fn active_size_bytes(&self) -> usize {
-        std::mem::size_of::<u32>() + (self.size as usize * std::mem::size_of::<u16>())
+// Codifica un str a formato binario [Length: u32][Data: utf16... no null term]
+fn encode_cs_string_bytes(s: &str) -> Vec<u8> {
+    let utf16: Vec<u16> = s.encode_utf16().collect();
+    let size = utf16.len() as u32;
+    
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&size.to_le_bytes()); // Header
+    for c in utf16 {
+        bytes.extend_from_slice(&c.to_le_bytes()); // Data
     }
+    bytes
 }
 
-struct SwapEntry {
-    old: CsString,
-    new: CsString,
+// ==================== LISTA DE PARCHES ====================
+
+fn get_swaps() -> Vec<SwapDefinition> {
+    let mut swaps = Vec::new();
+    let port = std::env::var("AURORA_PORT").unwrap_or_else(|_| DEFAULT_PORT.to_string());
+    
+    // NOTA TÉCNICA (IMPORTANTE PARA LINUX):
+    // La memoria en el binario compilado está empaquetada estrictamente.
+    // Reemplazar una cadena con una de diferente longitud CORROMPE los datos adyacentes.
+    // Se usan ceros '0' en las IPs para hacer padding hasta alcanzar la longitud exacta de la string original.
+    // IP Objetivo Lógica: 127.0.0.1
+    // La resolución de IPs estándar ignora ceros a la izquierda en octetos (ej. 0001 = 1).
+
+    // --- Parte 1: Sufijo de Dominio ---
+    // Original: "hytale.com" (10 chars)
+    // Nuevo:    "0001:59313" (10 chars)
+    // Efecto: Cuando se concatena con el prefijo, termina en ...001:59313
+    swaps.push(SwapDefinition::new(
+        "hytale.com",
+        &format!("0001:{}", port) 
+    ));
+
+    // --- Parte 2: Prefijos (padding exacto) ---
+    
+    // 1. "https://account-data." (21 chars) -> "http://127.000.000.00" (21 chars)
+    // Resultado final: http://127.000.000.000001:59313 (Valid IP)
+    swaps.push(SwapDefinition::new(
+        "https://account-data.",
+        "http://127.0.0.000000"
+    ));
+
+    // 2. "https://sessions." (17 chars) -> "http://127.0.0.000" (17 chars)
+    // Resultado final: http://127.0.0.0000001:59313
+    swaps.push(SwapDefinition::new(
+        "https://sessions.",
+        "http://127.0.0.00"
+    ));
+
+    // 3. "https://telemetry." (18 chars) -> "http://127.0.0.0000" (18 chars)
+    // Resultado final: http://127.0.0.00000001:59313
+    swaps.push(SwapDefinition::new(
+        "https://telemetry.",
+        "http://127.0.0.000"
+    ));
+
+    // 4. "https://tools." (14 chars) -> "http://127.0.0" (14 chars)
+    // Resultado final: http://127.0.00001:59313
+    swaps.push(SwapDefinition::new(
+        "https://tools.",
+        "http://127.0.0"
+    ));
+    
+    // 5. Argumentos CLI: Reemplazos directos
+    // Original: "--session-token" (15 chars) -> "--singleplayer " (15 chars)
+    // Nota: Padding con espacio al final para mantener length
+    // Nota C original reemplazaba --session-token por --singleplayer pero el resto se quedaba sucio.
+    // Aquí es más limpio padding con espacio o nulls (espacio es seguro en args).
+    // Usaremos un string filler seguro.
+    
+    // Para argumentos específicos, usamos la lógica de anulación.
+    // C code used: .new = make_csstr(L"--singleplayer=\"") (15 chars?? No)
+    // C: "--session-token=\"" (17 chars). New: "--singleplayer=\"" (16 chars + ??)
+    // Vamos a usar reemplazo estricto también.
+    swaps.push(SwapDefinition::new("authenticated", "insecure\0\0\0\0")); // 13 -> 8 + padding nulls (C# ignora después de null? No, depende, pero 'insecure' es válido)
+    
+    // Fix especial session token
+    // Original: --session-token
+    // Nuevo:    --singleplayer 
+    swaps.push(SwapDefinition::new("--session-token", "--singleplayer ")); 
+    swaps.push(SwapDefinition::new("--identity-token", "--singleplayer "));
+
+    swaps
 }
 
-struct MemoryInfo {
-    start: *mut u8,
+// ==================== LÓGICA DE MEMORIA (System Agnostic Logic) ====================
+
+struct MemoryRegion {
+    addr: *mut u8,
     size: usize,
     #[cfg(target_os = "linux")]
-    prot: i32, // Store original protection flags for Linux
+    prot: i32, // Para restaurar protección en Linux
 }
 
-struct MemoryProtectionGuard {
+// Gestiona los permisos rwx temporalmente
+struct ScopedProtect {
     addr: *mut c_void,
     size: usize,
     #[cfg(target_os = "windows")]
     old_protect: u32,
     #[cfg(target_os = "linux")]
-    restore_prot: i32,
+    orig_prot: i32,
 }
 
-// ==================== MEMORY PATCHING LOGIC ====================
-
-fn match_pattern(mem: &[u8], offset: usize) -> bool {
-    if offset + 17 > mem.len() {
-        return false;
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        return mem[offset] == 0x48
-            && mem[offset + 1] == 0x8D
-            && mem[offset + 5] == 0xE8
-            && mem[offset + 10] == 0x80
-            && mem[offset + 14] == 0x00
-            && mem[offset + 15] == 0x0F
-            && mem[offset + 16] == 0x84;
-    }
+impl ScopedProtect {
     #[cfg(target_os = "linux")]
-    {
-        return mem[offset] == 0x48
-            && mem[offset + 1] == 0x8D
-            && mem[offset + 4] == 0xE8
-            && mem[offset + 8] == 0x00
-            && mem[offset + 9] == 0x80
-            && mem[offset + 12] == 0x00
-            && mem[offset + 13] == 0x0F
-            && mem[offset + 14] == 0x84;
-    }
-}
-
-unsafe fn allow_offline_in_online(region: &MemoryInfo) {
-    let slice = unsafe { slice::from_raw_parts_mut(region.start, region.size) };
-    let len = region.size;
-
-    for i in 0..len {
-        if match_pattern(slice, i) {
-            log!("Found offline/online pattern at offset {}", i);
-
-            let mut jz_found_count = 0;
-            let mut current_offset = i;
-            let max_scan = 500;
-            let mut scanned = 0;
-
-            while jz_found_count < 2 && scanned < max_scan && current_offset < len - 6 {
-                if slice[current_offset] == 0x0F && slice[current_offset + 1] == 0x84 {
-                    log!("Found JZ instruction (offset {})", current_offset);
-
-                    // Pass region permissions (Linux) or ignore (Windows uses internal logic)
-                    let _guard = unsafe {
-                        MemoryProtectionGuard::new(
-                            region.start.add(current_offset),
-                            6,
-                            #[cfg(target_os = "linux")]
-                            region.prot,
-                        )
-                    };
-
-                    for k in 0..6 {
-                        slice[current_offset + k] = 0x90;
-                    }
-                    jz_found_count += 1;
-                    current_offset += 6;
-                } else {
-                    current_offset += 1;
-                }
-                scanned += 1;
-            }
-            if jz_found_count > 0 {
-                break;
-            }
-        }
-    }
-}
-
-// ==================== STRINGS LOGIC (WINDOWS) ====================
-
-#[cfg(target_os = "windows")]
-unsafe fn raw_search_and_replace(mem: &mut [u8], target: &[u8], replacement: &[u8]) {
-    if replacement.len() > target.len() {
-        return;
-    }
-    let len = mem.len();
-    let pat_len = target.len();
-    if len < pat_len {
-        return;
-    }
-
-    for i in 0..=(len - pat_len) {
-        if mem[i] != target[0] {
-            continue;
-        }
-        if &mem[i..i + pat_len] == target {
-            log!("Found raw pattern at offset: {}", i);
-            let _guard = unsafe { MemoryProtectionGuard::new(mem.as_mut_ptr().add(i), pat_len) };
-            for (j, &byte) in replacement.iter().enumerate() {
-                mem[i + j] = byte;
-            }
-            for j in replacement.len()..pat_len {
-                mem[i + j] = 0;
-            }
-        }
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn get_swaps(mode: &str) -> Vec<SwapEntry> {
-    let mut swaps = Vec::new();
-
-    let port_str = std::env::var("AURORA_PORT").unwrap_or_else(|_| "59313".to_string());
-    let subdomains = vec![
-        ("account-data", "000000000"),
-        ("sessions", "00000"),
-        ("telemetry", "000000"),
-        ("tools", "00"),
-    ];
-
-    for (subdomain, filler) in &subdomains {
-        swaps.push(SwapEntry {
-            old: CsString::from_str(&format!("https://{}.hytale.com", subdomain)),
-            new: CsString::from_str(&format!("http://127.0.0.{}:{}", filler, port_str)),
-        });
-    }
-
-    for (subdomain, filler) in &subdomains {
-        swaps.push(SwapEntry {
-            old: CsString::from_str(&format!("https://{}.", subdomain)),
-            new: CsString::from_str(&format!("http://127.0.0.{}", filler)),
-        });
-    }
-
-    swaps.push(SwapEntry {
-        old: CsString::from_str("hytale.com"),
-        new: CsString::from_str(&format!("1:{}", port_str)),
-    });
-    swaps.push(SwapEntry {
-        old: CsString::from_str("hytale.com"),
-        new: CsString::from_str(&format!(".1:{}", port_str)),
-    });
-
-    return swaps;
-}
-#[cfg(target_os = "linux")]
-fn get_dynamic_port() -> String {
-    // Aurora lee directamente de la carpeta de runtime del usuario (SEAMLESS SYNC)
-    // Prioridad 1: XDG_RUNTIME_DIR (estandar Linux)
-    if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
-        let path = format!("{}/rustale/auth.port", runtime_dir);
-        if let Ok(port) = std::fs::read_to_string(&path) {
-            log!("[RusTale] Found dynamic port from XDG_RUNTIME_DIR: {}", port.trim());
-            return port.trim().to_string();
-        }
-    }
-    
-    // Prioridad 2: Construccion manual usando UID (fallback robusto)
-    let uid = unsafe { libc::getuid() };
-    let fallback_path = format!("/run/user/{}/rustale/auth.port", uid);
-    if let Ok(port) = std::fs::read_to_string(&fallback_path) {
-        log!("[RusTale] Found dynamic port from fallback path: {}", port.trim());
-        return port.trim().to_string();
-    }
-    
-    // Prioridad 3: Variable de entorno (redundancia)
-    if let Ok(port) = std::env::var("AURORA_PORT") {
-        log!("[RusTale] Using AURORA_PORT env var: {}", port);
-        return port;
-    }
-    
-    // Default final
-    log!("[RusTale] No port found, using default 59313");
-    "59313".to_string()
-}
-
-#[cfg(target_os = "linux")]
-fn get_swaps(mode: &str) -> Vec<SwapEntry> {
-    let mut swaps = Vec::new();
-    let port_str = get_dynamic_port(); // Puerto obtenido dinamicamente en cada inyeccion
-
-    // --- LOGICA ACTUALIZADA CON PUERTO DINaMICO ---
-    // Usamos IPs falsas pero dentro de loopback 127.0.x.x para que el firewall 
-    // piense que es comunicacion interna de kernel.
-    swaps.push(SwapEntry {
-        old: CsString::from_str("https://account-data."),
-        new: CsString::from_str("http://127.0.00000000"),
-    });
-
-    swaps.push(SwapEntry {
-        old: CsString::from_str("https://sessions."),
-        new: CsString::from_str("http://127.0.0000"),
-    });
-
-    swaps.push(SwapEntry {
-        old: CsString::from_str("https://telemetry."),
-        new: CsString::from_str("http://127.0.00000"),
-    });
-
-    swaps.push(SwapEntry {
-        old: CsString::from_str("https://tools."),
-        new: CsString::from_str("http://127.0.0"),
-    });
-
-    swaps.push(SwapEntry {
-        old: CsString::from_str("hytale.com"),
-        new: CsString::from_str(&format!(".001:{}", port_str)),
-    });
-
-    return swaps;
-}
-unsafe fn debug_read_csstr(ptr: *const u8) -> String {
-    // 1. Read size
-    let size = unsafe { std::ptr::read_unaligned(ptr as *const u32) };
-
-    // Sanity check: if the size is absurd, return error
-    if size > 512 {
-        return "<invalid size>".to_string();
-    }
-
-    let data_ptr = unsafe { ptr.add(4) };
-    let mut buf: Vec<u16> = Vec::with_capacity(size as usize);
-
-    for k in 0..size {
-        let char_ptr = unsafe { data_ptr.add((k as usize) * 2) as *const u16 };
-        let c = unsafe { std::ptr::read_unaligned(char_ptr) };
-
-        // critical: stop reading if we find a null terminator
-        // or if the character seems garbage (optional, but helps clean logs)
-        if c == 0 {
-            break;
-        }
-        buf.push(c);
-    }
-
-    String::from_utf16_lossy(&buf)
-}
-
-fn get_swaps_main(mode: &str) -> Vec<SwapEntry> {
-    let mut swaps = Vec::new();
-    if mode == "sanasol" {
-        swaps.push(SwapEntry {
-            old: CsString::from_str("hytale.com"),
-            new: CsString::from_str("sanasol.ws"),
-        });
-        // Agregar aqui los mismos dominios que Windows si sanasol.ws usa subdominios estandar
-    } else {
-        swaps = get_swaps(&mode)
-    }
-    swaps
-}
-
-// ==================== STRINGS LOGIC ====================
-
-unsafe fn swap_strings(region: &MemoryInfo) {
-    let addr = region.start;
-    let len = region.size;
-    let mode = std::env::var("AURORA_MODE").unwrap_or_else(|_| "local".to_string());
-
-    let swaps = get_swaps_main(&mode);
-
-    unsafe {
-        apply_swaps(
-            addr,
-            len,
-            &swaps,
-            #[cfg(target_os = "linux")]
-            region.prot,
-        );
-    }
-}
-
-unsafe fn apply_swaps(
-    addr: *mut u8,
-    len: usize,
-    swaps: &[SwapEntry],
-    #[cfg(target_os = "linux")] prot: i32,
-) {
-    #[cfg(target_os = "windows")]
-    unsafe {
-        internal_apply_swaps_windows(addr, len, swaps)
-    };
-
-    #[cfg(target_os = "linux")]
-    unsafe {
-        internal_apply_swaps_linux(addr, len, swaps, prot)
-    };
-}
-
-#[cfg(target_os = "windows")]
-unsafe fn internal_apply_swaps_windows(addr: *mut u8, len: usize, swaps: &[SwapEntry]) {
-    let mut swaps_done = 0;
-    for i in 0..len {
-        for swap in swaps {
-            let active_size_old = swap.old.active_size_bytes();
-            if i + active_size_old > len {
-                continue;
-            }
-
-            let matches = unsafe {
-                let mem_ptr = addr.add(i) as *const u8;
-                let old_ptr = &swap.old as *const CsString as *const u8;
-                let mut m = true;
-                for j in 0..active_size_old {
-                    if *mem_ptr.add(j) != *old_ptr.add(j) {
-                        m = false;
-                        break;
-                    }
-                }
-                m
-            };
-
-            if matches {
-                let old_str_debug = unsafe { debug_read_csstr(addr.add(i)) };
-                let new_slice = unsafe {
-                    std::slice::from_raw_parts(
-                        std::ptr::addr_of!(swap.new.data) as *const u16,
-                        swap.new.size as usize,
-                    )
-                };
-                let new_str_debug = String::from_utf16_lossy(new_slice);
-
-                log!(
-                    "Swapping at offset {}: '{}' -> '{}'",
-                    i,
-                    old_str_debug,
-                    new_str_debug
-                );
-                let _guard = unsafe { MemoryProtectionGuard::new(addr.add(i), active_size_old) };
-                let new_ptr = &swap.new as *const CsString as *const u8;
-                let copy_size = swap.new.active_size_bytes();
-
-                unsafe {
-                    std::ptr::copy_nonoverlapping(new_ptr, addr.add(i), copy_size);
-                }
-                swaps_done += 1;
-            }
-        }
-    }
-    if swaps_done > 0 {
-        log!("Total string replacements in region: {}", swaps_done);
-    }
-}
-
-// New corrected logic for Linux
-#[cfg(target_os = "linux")]
-unsafe fn internal_apply_swaps_linux(addr: *mut u8, len: usize, swaps: &[SwapEntry], prot: i32) {
-    let mut swaps_done = 0;
-    for i in 0..len {
-        for swap in swaps {
-            let active_size_old = swap.old.active_size_bytes();
-            if i + active_size_old > len {
-                continue;
-            }
-
-            // FIX: Compare size - 1 (ignoring last byte/byte high) to replicate C behavior
-            let compare_len = active_size_old - 1;
-
-            let matches = unsafe {
-                let mem_ptr = addr.add(i) as *const u8;
-                let old_ptr = &swap.old as *const CsString as *const u8;
-                let mut m = true;
-                for j in 0..compare_len {
-                    if *mem_ptr.add(j) != *old_ptr.add(j) {
-                        m = false;
-                        break;
-                    }
-                }
-                m
-            };
-
-            if matches {
-                let old_str_debug = unsafe { debug_read_csstr(addr.add(i)) };
-
-                // For the "new", we read directly from the swap structure
-                let new_slice = unsafe {
-                    std::slice::from_raw_parts(
-                        std::ptr::addr_of!(swap.new.data) as *const u16,
-                        swap.new.size as usize,
-                    )
-                };
-
-                let new_str_debug = String::from_utf16_lossy(new_slice);
-
-                log!(
-                    "Swapping at offset {}: '{}' -> '{}'",
-                    i,
-                    old_str_debug,
-                    new_str_debug
-                );
-                let _guard =
-                    unsafe { MemoryProtectionGuard::new(addr.add(i), active_size_old, prot) };
-                let new_ptr = &swap.new as *const CsString as *const u8;
-
-                // FIX: Copiar size - 1 para replicar C
-                let copy_size = swap.new.active_size_bytes() - 1;
-
-                unsafe {
-                    std::ptr::copy_nonoverlapping(new_ptr, addr.add(i), copy_size);
-                }
-                swaps_done += 1;
-            }
-        }
-    }
-    if swaps_done > 0 {
-        log!("Total string replacements in region: {}", swaps_done);
-    }
-}
-
-// ==================== SYSTEM INTERNALS ====================
-
-impl MemoryProtectionGuard {
-    #[cfg(target_os = "windows")]
-    unsafe fn new(addr: *mut u8, size: usize) -> Self {
-        use windows_sys::Win32::System::Memory::{PAGE_EXECUTE_READWRITE, VirtualProtect};
-        let mut old_protect = 0;
-        unsafe {
-            VirtualProtect(
-                addr as *const c_void,
-                size,
-                PAGE_EXECUTE_READWRITE,
-                &mut old_protect,
-            );
-        }
-        Self {
-            addr: addr as *mut c_void,
-            size,
-            old_protect,
-        }
-    }
-
-    #[cfg(target_os = "linux")]
-    unsafe fn new(addr: *mut u8, size: usize, original_prot: i32) -> Self {
-        use libc::{_SC_PAGESIZE, PROT_EXEC, PROT_READ, PROT_WRITE, mprotect, sysconf};
-        let page_size = unsafe { sysconf(_SC_PAGESIZE) as usize };
+    unsafe fn new(addr: *mut u8, len: usize, region_prot: i32) -> Self {
+        use libc::{mprotect, PROT_READ, PROT_WRITE, PROT_EXEC, sysconf, _SC_PAGESIZE};
+        
+        let page_size = sysconf(_SC_PAGESIZE) as usize;
         let addr_usize = addr as usize;
         let page_start = addr_usize - (addr_usize % page_size);
-        let len = (addr_usize + size) - page_start;
+        let protect_len = (addr_usize + len) - page_start + page_size; // Ensure covering logic
+        
+        mprotect(page_start as *mut c_void, protect_len, PROT_READ | PROT_WRITE | PROT_EXEC);
+        
+        Self { addr: page_start as *mut c_void, size: protect_len, orig_prot: region_prot }
+    }
+    
+    #[cfg(target_os = "windows")]
+    unsafe fn new(addr: *mut u8, len: usize) -> Self {
+        use windows_sys::Win32::System::Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE};
+        let mut old = 0;
+        unsafe { VirtualProtect(addr as *mut _, len, PAGE_EXECUTE_READWRITE, &mut old); }
+        Self { addr: addr as *mut _, size: len, old_protect: old }
+    }
+}
 
+impl Drop for ScopedProtect {
+    fn drop(&mut self) {
         unsafe {
-            mprotect(
-                page_start as *mut c_void,
-                len,
-                PROT_READ | PROT_WRITE | PROT_EXEC,
-            );
-        }
-
-        Self {
-            addr: page_start as *mut c_void,
-            size: len,
-            restore_prot: original_prot,
+            #[cfg(target_os = "linux")]
+            libc::mprotect(self.addr, self.size, self.orig_prot);
+            
+            #[cfg(target_os = "windows")]
+            {
+                let mut dummy = 0;
+                windows_sys::Win32::System::Memory::VirtualProtect(self.addr, self.size, self.old_protect, &mut dummy);
+            }
         }
     }
 }
 
-impl Drop for MemoryProtectionGuard {
-    fn drop(&mut self) {
-        unsafe {
-            #[cfg(target_os = "windows")]
-            {
-                use windows_sys::Win32::System::Memory::VirtualProtect;
-                let mut dummy = 0;
-                VirtualProtect(self.addr, self.size, self.old_protect, &mut dummy);
-            }
+// Bypass de Singleplayer Check
+// Busca la secuencia JZ (Jump if Zero) que verifica singleplayer/auth mode y la reemplaza por NOPs.
+unsafe fn patch_offline_check(region: &MemoryRegion) {
+    log!("[Aurora] Iniciando búsqueda de checks de singleplayer");
+    
+    let slice = unsafe { slice::from_raw_parts(region.addr, region.size) };
+    let mut i = 0;
+    // Límite de seguridad
+    if region.size < 20 { 
+        log!("[Aurora] Región de memoria demasiado pequeña para parcheo: {} bytes", region.size);
+        return; 
+    }
+
+    let mut checks_patched = 0;
+
+    while i < region.size - 17 {
+        let is_match;
+        
+        #[cfg(target_os = "linux")]
+        {
+            // Linux Pattern: 48 8D ?? ?? E8 ?? ?? ?? 00 80 ?? ?? 00 0F 84
+            is_match = slice[i] == 0x48 && slice[i+1] == 0x8D && slice[i+4] == 0xE8 
+                      && slice[i+8] == 0x00 && slice[i+9] == 0x80 && slice[i+12] == 0x00
+                      && slice[i+13] == 0x0F && slice[i+14] == 0x84;
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+             // Windows Pattern: 48 8D ?? ?? ?? E8 ?? ?? ?? ?? 80 ?? ?? ?? 00 0F 84
+             is_match = slice[i] == 0x48 && slice[i+1] == 0x8D && slice[i+5] == 0xE8
+                       && slice[i+10] == 0x80 && slice[i+14] == 0x00
+                       && slice[i+15] == 0x0F && slice[i+16] == 0x84;
+        }
+
+        if is_match {
+            log!("[Aurora] Check de singleplayer encontrado en offset +{:X}", i);
+
+            // Búsqueda de JZs cercanos para parchear (NOP = 0x90)
+            // Se necesitan encontrar 2 JZs.
+            let mut cursor = i;
+            let mut jz_found = 0;
+            
+            // Permitimos acceso RW
             #[cfg(target_os = "linux")]
-            {
-                use libc::mprotect;
-                mprotect(self.addr, self.size, self.restore_prot);
+            let _guard = ScopedProtect::new(region.addr.add(i), 500, region.prot);
+            #[cfg(target_os = "windows")]
+            let _guard = unsafe { ScopedProtect::new(region.addr.add(i), 500) };
+
+            let writable_slice = unsafe { slice::from_raw_parts_mut(region.addr, region.size) };
+
+            while jz_found < 2 && cursor < region.size - 6 && cursor < i + 500 {
+                 if writable_slice[cursor] == 0x0F && writable_slice[cursor+1] == 0x84 {
+                     // Rellenar con NOPs (0x90) los 6 bytes de la instrucción (JZ suele ser largo en x64 si salta lejos, pero verificamos opcode 0F 84 standard rel32)
+                     // Normalmente 0F 84 XX XX XX XX (6 bytes).
+                     for k in 0..6 {
+                         writable_slice[cursor + k] = 0x90;
+                     }
+                     log!("[Aurora] JZ parcheado en offset +{:X}", cursor);
+                     jz_found += 1;
+                     cursor += 6; // saltar
+                 } else {
+                     cursor += 1;
+                 }
+            }
+            
+            if jz_found > 0 {
+                checks_patched += 1;
+                log!("[Aurora] {} JZs parcheados en este check", jz_found);
+            }
+        }
+        i += 1;
+    }
+    
+    log!("[Aurora] Búsqueda de checks completada: {} grupos de JZs parcheados", checks_patched);
+}
+
+// Intercambio de Strings
+unsafe fn apply_swaps(region: &MemoryRegion) {
+    init_logging();
+    log!("[Aurora] Iniciando búsqueda y reemplazo de strings");
+    let mut swaps = Vec::new();
+    let mode = std::env::var("AURORA_MODE").unwrap_or_else(|_| "local".to_string());
+    
+    if mode == "sanasol" {
+        swaps.push(SwapDefinition::new(
+            "hytale.com.",
+            "sanasol.ws"
+        ));
+        // Agregar aqui los mismos dominios que Windows si sanasol.ws usa subdominios estandar
+    } else {
+        swaps = get_swaps()
+    }
+    let mem = unsafe { slice::from_raw_parts(region.addr, region.size) };
+    let mut replacements_found = 0;
+    let mut replacements_applied = 0;
+    
+    // Itera sobre la memoria buscando headers de strings
+    for i in 0..region.size {
+        // Optimización rápida: verifica si podría ser un string (longitud posible?)
+        if i + 4 >= region.size { break; }
+        
+        // El primer u32 es la longitud en caracteres.
+        // Hytale (Mono/C#) strings struct: [u32 Length] [u16 Char] ...
+        // No leemos la longitud directamente para saltar, buscamos byte-a-byte patrones conocidos.
+        
+        for swap in &swaps {
+            let pattern = &swap.pattern_bytes;
+            if i + pattern.len() > region.size { continue; }
+
+            // IMPORTANTE: Reproducir la lógica del código C original (get_size_ptr)
+            // El código C hacía memcmp de: 4 + (2*Len) - 1.
+            // Es decir, ignoraba el ÚLTIMO byte del string en la comparación.
+            // Esto permite "matchear" incluso si hay basura o un null terminator raro en el último byte high.
+            
+            let compare_len = pattern.len() - 1; // Magic trick de C para Linux matching
+            
+            if &mem[i..i+compare_len] == &pattern[0..compare_len] {
+                replacements_found += 1;
+                
+                // Extraer el string original para logging
+                let original_str = if i + 4 <= region.size {
+                    let len_bytes = &mem[i..i+4];
+                    let len = u32::from_le_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]]) as usize;
+                    if i + 4 + len * 2 <= region.size {
+                        let utf16_bytes = &mem[i+4..i+4+len*2];
+                        let mut utf16_vec = Vec::new();
+                        for chunk in utf16_bytes.chunks_exact(2) {
+                            utf16_vec.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+                        }
+                        String::from_utf16_lossy(&utf16_vec)
+                    } else {
+                        "<invalid length>".to_string()
+                    }
+                } else {
+                    "<invalid header>".to_string()
+                };
+                
+                log!("[Aurora] String encontrado en {:p}: '{}' -> reemplazando", unsafe { region.addr.add(i) }, original_str);
+
+                // Abrir candado de memoria
+                #[cfg(target_os = "linux")]
+                let _guard = ScopedProtect::new(region.addr.add(i), swap.replacement_bytes.len(), region.prot);
+                #[cfg(target_os = "windows")]
+                let _guard = unsafe { ScopedProtect::new(region.addr.add(i), swap.replacement_bytes.len()) };
+                
+                let writable_mem = unsafe { slice::from_raw_parts_mut(region.addr, region.size) };
+                
+                // Sobrescribir exactamente la longitud del pattern
+                // Si la replacement es más corta, se ha hecho padding o se rellenan con 0 si así se definiera (en este caso usamos padding estricto)
+                let copy_len = swap.replacement_bytes.len().min(pattern.len()); // Seguridad
+                
+                // NOTA: Rust copy_from_slice es seguro, pero necesitamos escritura raw punteros en memoria protegida (aunque ScopedProtect ya la abrió)
+                writable_mem[i..i+copy_len].copy_from_slice(&swap.replacement_bytes[0..copy_len]);
+                
+                replacements_applied += 1;
+                log!("[Aurora] Reemplazo aplicado exitosamente");
+            }
+        }
+    }
+    
+    log!("[Aurora] Búsqueda completada: {} strings encontrados, {} reemplazos aplicados", replacements_found, replacements_applied);
+}
+
+
+// ==================== DISCOVERY MEMORIA ====================
+
+#[cfg(target_os = "linux")]
+unsafe fn scan_and_patch() {
+    use std::io::{BufRead, BufReader};
+    use std::fs::File;
+    use libc::{PROT_READ, PROT_WRITE, PROT_EXEC};
+
+    // Obtener path del exe actual para filtrar regiones
+    let mut exe_path = [0u8; 1024];
+    let len = libc::readlink(
+        "/proc/self/exe\0".as_ptr() as *const i8, 
+        exe_path.as_mut_ptr() as *mut i8, 
+        1023
+    );
+    if len <= 0 { return; }
+    let exe_name = std::str::from_utf8(&exe_path[0..len as usize]).unwrap_or("");
+
+    if let Ok(f) = File::open("/proc/self/maps") {
+        let reader = BufReader::new(f);
+        for line in reader.lines() {
+            if let Ok(l) = line {
+                if !l.contains(exe_name) { continue; }
+                
+                // Parse: 00400000-00452000 r-xp ...
+                let parts: Vec<&str> = l.split_whitespace().collect();
+                if parts.len() < 2 { continue; }
+                
+                let range_parts: Vec<&str> = parts[0].split('-').collect();
+                if range_parts.len() != 2 { continue; }
+                
+                let start = usize::from_str_radix(range_parts[0], 16).unwrap_or(0);
+                let end = usize::from_str_radix(range_parts[1], 16).unwrap_or(0);
+                let perms = parts[1];
+                
+                let mut prot = 0;
+                if perms.contains('r') { prot |= PROT_READ; }
+                if perms.contains('w') { prot |= PROT_WRITE; }
+                if perms.contains('x') { prot |= PROT_EXEC; }
+
+                if (prot & PROT_READ) != 0 {
+                     let region = MemoryRegion { addr: start as *mut u8, size: end - start, prot };
+                     patch_offline_check(&region);
+                     apply_swaps(&region);
+                }
             }
         }
     }
 }
 
 #[cfg(target_os = "windows")]
-unsafe fn get_memory_regions() -> Vec<MemoryInfo> {
-    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleA;
+unsafe fn scan_and_patch() {
     use windows_sys::Win32::System::ProcessStatus::K32GetModuleInformation;
     use windows_sys::Win32::System::ProcessStatus::MODULEINFO;
+    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleA;
     use windows_sys::Win32::System::Threading::GetCurrentProcess;
-
-    let h_module = unsafe { GetModuleHandleA(std::ptr::null()) };
-    let mut info: MODULEINFO = unsafe { std::mem::zeroed() };
-    unsafe {
-        K32GetModuleInformation(
-            GetCurrentProcess(),
-            h_module,
-            &mut info,
-            std::mem::size_of::<MODULEINFO>() as u32,
-        );
-    }
-
-    vec![MemoryInfo {
-        start: info.lpBaseOfDll as *mut u8,
-        size: info.SizeOfImage as usize,
-    }]
-}
-
-#[cfg(target_os = "linux")]
-unsafe fn get_memory_regions() -> Vec<MemoryInfo> {
-    use libc::{PROT_EXEC, PROT_READ, PROT_WRITE};
-    use std::fs::File;
-    use std::io::{BufRead, BufReader};
-
-    let exe_path = std::fs::read_link("/proc/self/exe").unwrap_or_default();
-    let exe_str = exe_path.to_string_lossy();
-    let mut regions = Vec::new();
-
-    if let Ok(file) = File::open("/proc/self/maps") {
-        let reader = BufReader::new(file);
-
-        for line in reader.lines() {
-            if let Ok(l) = line {
-                if l.contains(&*exe_str) {
-                    let parts: Vec<&str> = l.split_whitespace().collect();
-                    if parts.len() < 2 {
-                        continue;
-                    }
-
-                    let range_str = parts[0];
-                    let perms = parts[1];
-
-                    // Parse permissions for correct restoration later
-                    let mut prot = 0;
-                    if perms.contains('r') {
-                        prot |= PROT_READ;
-                    }
-                    if perms.contains('w') {
-                        prot |= PROT_WRITE;
-                    }
-                    if perms.contains('x') {
-                        prot |= PROT_EXEC;
-                    }
-
-                    if prot & PROT_READ == 0 {
-                        continue;
-                    }
-
-                    let ranges: Vec<&str> = range_str.split('-').collect();
-                    if ranges.len() != 2 {
-                        continue;
-                    }
-
-                    let start = usize::from_str_radix(ranges[0], 16).unwrap_or(0);
-                    let end = usize::from_str_radix(ranges[1], 16).unwrap_or(0);
-
-                    if end > start {
-                        regions.push(MemoryInfo {
-                            start: start as *mut u8,
-                            size: end - start,
-                            prot,
-                        });
-                    }
-                }
-            }
-        }
-    }
-    regions
+    
+    let h_mod = unsafe { GetModuleHandleA(std::ptr::null()) };
+    let mut info: MODULEINFO = unsafe {std::mem::zeroed()};
+    unsafe { K32GetModuleInformation(GetCurrentProcess(), h_mod, &mut info, std::mem::size_of::<MODULEINFO>() as u32) };
+    
+    let region = MemoryRegion { addr: info.lpBaseOfDll as *mut u8, size: info.SizeOfImage as usize };
+    unsafe { patch_offline_check(&region) };
+    unsafe { apply_swaps(&region) };
 }
 
 // ==================== ENTRY POINTS ====================
 
-unsafe fn main_logic() {
+// Linux Constructor (se ejecuta al cargar la librería .so)
+#[cfg(target_os = "linux")]
+#[ctor::ctor]
+unsafe fn aurora_init() {
     init_logging();
-    log!("Aurora Patcher initialized.");
-
-    let regions = unsafe { get_memory_regions() };
-    log!("Found {} memory regions for patching.", regions.len());
-
-    for region in regions {
-        if region.start.is_null() || region.size == 0 {
-            continue;
-        }
-
-        unsafe { allow_offline_in_online(&region) };
-        unsafe { swap_strings(&region) };
-    }
+    log!("[Aurora] Inicializando Aurora para Linux");
+    
+    // Eliminar LD_PRELOAD para no afectar subprocesos
+    std::env::remove_var("LD_PRELOAD");
+    log!("[Aurora] LD_PRELOAD eliminado");
+    
+    scan_and_patch();
+    log!("[Aurora] Inicialización completada");
 }
 
+// Windows DllMain
 #[cfg(target_os = "windows")]
 #[unsafe(no_mangle)]
-#[allow(non_snake_case, unused_variables)]
 pub unsafe extern "system" fn DllMain(
-    h_module: windows_sys::Win32::Foundation::HMODULE,
-    ul_reason_for_call: u32,
-    lp_reserved: *mut c_void,
+    _inst: isize,
+    reason: u32,
+    _reserved: *const c_void
 ) -> i32 {
-    use windows_sys::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
-    if ul_reason_for_call == DLL_PROCESS_ATTACH {
-        unsafe { main_logic() };
+    if reason == 1 { // DLL_PROCESS_ATTACH
+        init_logging();
+        log!("[Aurora] Inicializando Aurora para Windows");
+        
+        unsafe { scan_and_patch(); }
+        log!("[Aurora] Inicialización completada");
     }
     1
 }
 
+// Export para Windows (stubs necesarios para que el juego cargue la DLL pensando que es Secur32)
 #[cfg(target_os = "windows")]
 #[unsafe(no_mangle)]
-pub unsafe extern "system" fn GetUserNameExW(_nfmt: i32, name_buf: *mut u16, sz: *mut i32) -> i32 {
+pub unsafe extern "system" fn GetUserNameExW(_format: i32, buffer: *mut u16, size: *mut u32) -> u8 {
     unsafe {
-        if !sz.is_null() {
-            *sz = 0;
-        }
-        if !name_buf.is_null() {
-            *name_buf = 0;
-        }
+    if !size.is_null() { *size = 0; }
+    if !buffer.is_null() { *buffer = 0; }
     }
     0
-}
-
-#[cfg(target_os = "linux")]
-#[ctor::ctor]
-unsafe fn init() {
-    unsafe {
-        let _ = std::env::remove_var("LD_PRELOAD");
-    }
-    unsafe { main_logic() };
 }

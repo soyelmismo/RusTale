@@ -86,17 +86,28 @@ pub async fn make_executable(path: &std::path::PathBuf) -> anyhow::Result<()> {
 }
 
 pub fn find_free_port() -> u16 {
+    // 1. PRIMERO: Intentar revivir el puerto guardado (Recuperación de sesión)
     let saved_port = get_saved_port();
+    
+    // Verificamos si podemos bindearlo nosotros (está libre)
     if std::net::TcpListener::bind(("127.0.0.1", saved_port)).is_ok() {
+        println!("[Port] Successfully recovered saved port {}", saved_port);
+        // Devolvemos el puerto guardado para mantener el Issuer URL estático
         return saved_port;
     }
 
+    // 2. Si no pudimos bindearlo, es porque OTRO proceso (¿Server vivo?) lo tiene
+    // En ese caso, este código no debería ejecutarse para levantar un servidor,
+    // sino para conectar. Pero si estamos aquí para buscar puerto para servidor nuevo...
+    // Generamos uno nuevo.
+    
     use rand::Rng;
     let mut rng = rand::rng();
 
     for _ in 0..100 {
         let port = rng.random_range(10000..=65535);
         if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+            // ¡IMPORTANTE! Solo guardar si es nuevo.
             save_active_port(port);
             return port;
         }

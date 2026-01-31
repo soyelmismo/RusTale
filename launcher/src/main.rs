@@ -2149,16 +2149,6 @@ impl RusTale {
                 }
                 Task::none()
             }
-            Message::DownloadError(err) => {
-                if err.contains("Cancelled by user") {
-                    Task::none()
-                } else {
-                    self.status = LauncherStatus::Ready;
-                    self.error = Some(err);
-                    self.running_game = None;
-                    Task::none()
-                }
-            }
             Message::OpenFolder => {
                 util::open_game_folder();
                 Task::none()
