@@ -8,43 +8,6 @@ pub mod icons;
 pub mod image_cache;
 pub mod win_job;
 
-/// Sanitizes Java arguments to prevent path injection and security vulnerabilities
-fn sanitize_java_arguments(args: &[String]) -> Vec<String> {
-    let mut sanitized = Vec::new();
-
-    for arg in args {
-        // Skip potentially dangerous absolute paths in non-JAR contexts
-        if arg.starts_with('/') || (cfg!(windows) && arg.contains(':') && arg.contains('\\')) {
-            // Allow absolute paths only for JAR files and specific safe arguments
-            let arg_lower = arg.to_lowercase();
-            if arg_lower.ends_with(".jar") || 
-               arg_lower.ends_with(".zip") || // Allow .zip files for assets
-               arg.starts_with("-D") || 
-               arg.starts_with("-X") || 
-               arg.starts_with("-XX:") ||
-               arg.starts_with("-javaagent:") ||
-               arg.starts_with("-cp") ||
-               arg.starts_with("-classpath") ||
-               // Allow --assets argument path for Hytale server
-               (args.iter().position(|a| a == "--assets").map_or(false, |pos| pos + 1 < args.len() && &args[pos + 1] == arg) ||
-                arg.starts_with("--assets"))
-            {
-                sanitized.push(arg.clone());
-            } else {
-                println!(
-                    "[SECURITY] Blocked potentially dangerous absolute path: {}",
-                    arg
-                );
-            }
-        } else {
-            // Allow relative paths and standard JVM arguments
-            sanitized.push(arg.clone());
-        }
-    }
-
-    sanitized
-}
-
 /// Validates that the Java executable path is within expected bounds
 fn validate_java_executable(java_path: &PathBuf, bin_dir: &Path) -> Result<()> {
     // Ensure the Java executable is within the same directory as the launcher
@@ -234,9 +197,6 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
         return Err(e);
     }
 
-    // Sanitize arguments to prevent path injection attacks
-    let mut final_args = sanitize_java_arguments(&args);
-
     println!("CWD: {:?}", std::env::current_dir());
     let cwd_res = std::env::current_dir();
 
@@ -245,6 +205,16 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
         OnlineFixMode::Sanasol => "sanasol",
         OnlineFixMode::Local => "local",
     };
+
+    // Launch the real Java
+    use std::process::Command;
+    #[cfg(target_os = "windows")]
+    use std::os::windows::process::CommandExt;
+
+    let mut cmd = Command::new(java_real);
+    
+    // If no server jar was found/processed, use original args
+    let mut args_processed = false;
 
     // 2. Scan for server.jar
     println!("Scanning arguments...");
@@ -351,21 +321,28 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
                     }
                 } */
 
-                // Apply replacements in final_args
+                // Apply replacements in args
                 // 1. Replace JAR path with the target one
-                if let Some(idx) = final_args.iter().position(|x| x == arg) {
-                    final_args[idx] = target_jar_path.to_string_lossy().to_string();
+                if let Some(idx) = args.iter().position(|x| x == arg) {
+                    // Create a mutable copy for modifications
+                    let mut modified_args = args.clone();
+                    modified_args[idx] = target_jar_path.to_string_lossy().to_string();
+                    
+                    // 2. Always remove AOT arg to avoid issues
+                    if let Some(aot_idx) = modified_args
+                        .iter()
+                        .position(|r| r.starts_with("-XX:AOTCache")) {
+                        println!("Removing AOT argument to avoid startup issues.");
+                        modified_args.remove(aot_idx);
+                    }
+                    
+                    // Use modified args for command
+                    cmd.args(&modified_args);
+                } else {
+                    // Use original args if JAR path not found
+                    cmd.args(&args);
                 }
-
-                // 2. Always remove AOT arg to avoid issues
-                let aot_arg_pos = final_args
-                    .iter()
-                    .position(|r| r.starts_with("-XX:AOTCache"));
-
-                if let Some(idx) = aot_arg_pos {
-                    println!("Removing AOT argument to avoid startup issues.");
-                    final_args.remove(idx);
-                }
+                args_processed = true;
                 // Break after handling the server jar arg
                 break;
             } else {
@@ -373,16 +350,13 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
             }
         }
     }
+    
+    // If no server jar was processed, use original args
+    if !args_processed {
+        cmd.args(&args);
+    }
 
-    // Launch the real Java
-    use std::process::Command;
     println!("Launching real java...");
-
-    #[cfg(target_os = "windows")]
-    use std::os::windows::process::CommandExt;
-
-    let mut cmd = Command::new(java_real);
-    cmd.args(final_args);
 
     // Detect if we should show the console
     // Show console ONLY if it is a server AND NOT singleplayer

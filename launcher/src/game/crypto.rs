@@ -105,9 +105,9 @@ pub fn force_regenerate_keys() {
     let mut key_lock = SESSION_KEYS.lock().unwrap();
     let mut jwks_lock = SESSION_JWKS.lock().unwrap();
 
-    // WARNING: If we already have keys or JWKS from a remote, do NOT regenerate
-    // unless explicitly asked (which we don't have an API for yet).
-    if key_lock.is_some() || jwks_lock.is_some() {
+    // WARNING: If we already have private keys, don't regenerate
+    // But if we only have JWKS (public keys) and no private keys, regenerate
+    if key_lock.is_some() {
         return;
     }
 
@@ -146,6 +146,15 @@ pub fn update_jwks_from_remote(jwks: JwkSet) {
     *key_lock = None; // Importante: invalidar llaves privadas locales si somos clientes
 
     println!("[Crypto] JWKS updated from remote server (Cloned)");
+}
+
+/// Asegura que tenemos capacidad de firmar localmente (para modo local/patch)
+pub fn ensure_local_signing_capability() {
+    let key_lock = SESSION_KEYS.lock().unwrap();
+    if key_lock.is_none() {
+        drop(key_lock);
+        force_regenerate_keys();
+    }
 }
 
 /// Inicializa claves si no existen

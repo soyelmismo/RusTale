@@ -157,7 +157,7 @@ pub fn generate_fake_tokens(player_name: &str, player_uuid: &str, issuer_url: &s
     };
 
     println!("[Auth Debug] Fake tokens generated with embedded JWK");
-    //debug_print_tokens(&tokens);
+    debug_print_tokens(&tokens);
     tokens
 }
 
