@@ -15,41 +15,24 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         config.online_mode, config.game_version
     );
 
+    // AUTO-SINCRO: Buscamos el puerto dinámico de la instancia madre
+    let mut auth_port = crate::util::get_saved_port();
+
+    if crate::game::server::is_server_alive(auth_port).await {
+        println!("[RusTale] Local Auth found on port {}", auth_port);
+        println!("[RusTale] Attaching to existing emulator instance...");
+    } else {
+        // Si el puerto guardado está muerto, buscamos uno nuevo libre
+        auth_port = crate::util::find_free_port();
+        println!("[RusTale] No active instance found. Starting new emulator on port {}", auth_port);
+        
+        // GUARDAMOS EL SECRETO: Escribimos el puerto para que Aurora (LD_PRELOAD) lo encuentre
+        crate::util::save_active_port(auth_port);
+    }
+
     // 1. Definir Rutas (Unificadas a root_dir para evitar OS Error 3)
     let root_dir = crate::config::get_server_root_dir();
     let _ = tokio::fs::create_dir_all(&root_dir).await;
-    let port_file = root_dir.join("server.port");
-
-    let mut auth_port = crate::util::get_saved_port();
-
-    // Check if a server is already alive on the saved port.
-    // If not alive, check if it's free. If not free, find a new one.
-    if !crate::game::server::is_server_alive(auth_port).await {
-        if std::net::TcpListener::bind(("127.0.0.1", auth_port)).is_err() {
-            println!(
-                "Port {} is taken by another app or zombie, finding new one...",
-                auth_port
-            );
-            auth_port = crate::util::find_free_port();
-
-            // Save for future use
-            if let Err(e) = tokio::fs::write(&port_file, auth_port.to_string()).await {
-                eprintln!("Warning: Could not save auth port to file: {}", e);
-            }
-        } else {
-            // Port is free, use it (and it was already in the file or is the default)
-            println!("Using Auth Port: {}", auth_port);
-            // Ensure the file exists if it was the default
-            if !port_file.exists() {
-                let _ = tokio::fs::write(&port_file, auth_port.to_string()).await;
-            }
-        }
-    } else {
-        println!(
-            "Existing Auth Server detected on port {}. Attaching naturally.",
-            auth_port
-        );
-    }
 
     // -----------------------------------------------------------------------
     // INICIAR SERVIDOR WEB LOCAL (Si es necesario)
@@ -125,7 +108,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     if let Ok(Err(e)) = auth_result_rx.try_recv() {
         eprintln!("\n[FATAL] Could not start authentication server: {}", e);
         eprintln!("It is likely that a previous instance was left open.");
-        eprintln!("Please close 'java.exe' or 'rustale.exe' from Task Manager.\n");
+        eprintln!("Please close 'java' or 'rustale' from Task Manager.\n");
         std::process::exit(1);
     }
 

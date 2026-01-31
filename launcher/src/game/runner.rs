@@ -229,6 +229,9 @@ impl Recipe for Runner {
                 if settings.enable_online_fix {
                     auth_mode = "authenticated".to_string();
 
+                    // 1. Guardar el puerto actual en RAM inmediatamente
+                    crate::util::save_active_port(server_port);
+
                     // --- [CORRECCIoN INICIO] ---
                     // Configuramos los modos y URLs ANTES de verificar archivos fisicos.
                     match settings.online_fix_mode {
@@ -584,11 +587,9 @@ impl Recipe for Runner {
 
                 // Pass the mode to Aurora
                 if settings.enable_online_fix {
+                    // 2. Variables de entorno mínimas para el cliente (REDUNDANCIA DE SEGURIDAD)
                     envs.insert("AURORA_MODE".to_string(), aurora_env_value);
                     envs.insert("RUSTALE_IS_PROXY".to_string(), "1".to_string());
-
-                    // --- NEW: Pass the port to Aurora ---
-                    // Aurora will read this to know how to replace the string
                     envs.insert("AURORA_PORT".to_string(), server_port.to_string());
 
                     let logs_dir = base_dir.join("logs");
@@ -604,6 +605,8 @@ impl Recipe for Runner {
                     {
                         let natives_dir = base_dir.join("cache").join("natives");
                         let so_path = natives_dir.join("Aurora.so");
+                        // El truco definitivo: Pre-cargar Aurora y borrar la evidencia
+                        // de la variable LD_PRELOAD apenas entre al binario para no ensuciar logs
                         envs.insert(
                             "LD_PRELOAD".to_string(),
                             so_path.to_string_lossy().to_string(),

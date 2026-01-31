@@ -654,8 +654,9 @@ pub async fn start_server(
         .with(cors)
         .with(log);
 
-    // Start server on 127.0.0.1:{port}
-    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), port);
+    // Start server on 127.0.0.1:{port} - BLINDAJE ESTRICTO A LOOPBACK
+    // Esto es CLAVE en Linux para pasar desapercibido por el firewall
+    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
 
     {
         match std::net::TcpListener::bind(addr) {
@@ -669,7 +670,7 @@ pub async fn start_server(
         }
     }
 
-    println!("Emulated server started successfully on http://{}", addr);
+    println!("Seamless Server listening on loopback: http://{}", addr);
     let server = warp::serve(routes).bind(addr).await;
 
     let graceful_server = server.graceful(async {

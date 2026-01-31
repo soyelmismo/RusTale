@@ -4,6 +4,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+#[cfg(target_os = "linux")]
+use libc;
+
 pub mod icons;
 pub mod image_cache;
 pub mod win_job;
@@ -105,30 +108,43 @@ pub fn find_free_port() -> u16 {
 pub fn get_runtime_port_file() -> PathBuf {
     #[cfg(target_os = "linux")]
     {
-        // Usar /run/user/UID/ que es volátil y seguro
+        // Resuelve /run/user/1000/rustale/auth.port automáticamente
+        // Prioridad 1: XDG_RUNTIME_DIR (estándar Linux)
         if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
             let path = PathBuf::from(runtime_dir).join("rustale");
             let _ = std::fs::create_dir_all(&path);
             return path.join("auth.port");
         }
+        
+        // Prioridad 2: Construcción manual usando UID (fallback robusto)
+        let uid = unsafe { libc::getuid() };
+        let fallback_path = PathBuf::from(format!("/run/user/{}/rustale", uid));
+        let _ = std::fs::create_dir_all(&fallback_path);
+        return fallback_path.join("auth.port");
     }
-    // Fallback para Windows o si XDG no está definido
+    // En Windows seguimos usando la carpeta del servidor para consistencia
     crate::config::get_server_root_dir().join("server.port")
 }
 
 pub fn save_active_port(port: u16) {
     let path = get_runtime_port_file();
-    let _ = std::fs::write(path, port.to_string());
+    if let Err(e) = std::fs::write(&path, port.to_string()) {
+        eprintln!("[WARNING] Failed to save port to {:?}: {}", path, e);
+    } else {
+        println!("[SEAMLESS] Port {} saved to runtime storage", port);
+    }
 }
 
 pub fn get_saved_port() -> u16 {
     let path = get_runtime_port_file();
     if let Ok(s) = std::fs::read_to_string(&path) {
         if let Ok(p_val) = s.trim().parse::<u16>() {
+            println!("[SEAMLESS] Found active port {} from runtime storage", p_val);
             return p_val;
         }
     }
-    59313
+    println!("[SEAMLESS] No active port found, using default 59313");
+    59313 // Default si no hay nadie corriendo
 }
 
 #[cfg(target_os = "windows")]

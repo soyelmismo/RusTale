@@ -6,6 +6,9 @@ use std::io::Write;
 use std::slice;
 use std::sync::Mutex;
 
+#[cfg(target_os = "linux")]
+use libc;
+
 static LOG_FILE: Mutex<Option<std::fs::File>> = Mutex::new(None);
 
 fn init_logging() {
@@ -241,17 +244,33 @@ fn get_swaps(mode: &str) -> Vec<SwapEntry> {
 }
 #[cfg(target_os = "linux")]
 fn get_dynamic_port() -> String {
-    // Aurora intenta leer el archivo en /run/user/... de forma directa
-    // para saber a qué puerto inyectar el tráfico del cliente
+    // Aurora lee directamente de la carpeta de runtime del usuario (SEAMLESS SYNC)
+    // Prioridad 1: XDG_RUNTIME_DIR (estándar Linux)
     if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
         let path = format!("{}/rustale/auth.port", runtime_dir);
         if let Ok(port) = std::fs::read_to_string(&path) {
-            log!("Found dynamic port from runtime: {}", port.trim());
+            log!("[RusTale] Found dynamic port from XDG_RUNTIME_DIR: {}", port.trim());
             return port.trim().to_string();
         }
     }
-    // Fallback a variable de entorno o default
-    std::env::var("AURORA_PORT").unwrap_or_else(|_| "59313".to_string())
+    
+    // Prioridad 2: Construcción manual usando UID (fallback robusto)
+    let uid = unsafe { libc::getuid() };
+    let fallback_path = format!("/run/user/{}/rustale/auth.port", uid);
+    if let Ok(port) = std::fs::read_to_string(&fallback_path) {
+        log!("[RusTale] Found dynamic port from fallback path: {}", port.trim());
+        return port.trim().to_string();
+    }
+    
+    // Prioridad 3: Variable de entorno (redundancia)
+    if let Ok(port) = std::env::var("AURORA_PORT") {
+        log!("[RusTale] Using AURORA_PORT env var: {}", port);
+        return port;
+    }
+    
+    // Default final
+    log!("[RusTale] No port found, using default 59313");
+    "59313".to_string()
 }
 
 #[cfg(target_os = "linux")]
