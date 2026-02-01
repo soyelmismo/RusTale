@@ -27,7 +27,7 @@ This project would not be possible without the work of the following projects:
 
 *   [HyLauncher](https://github.com/ArchDevs/HyLauncher): Launcher in TypeScript and Go.
 *   [HytaleSP](https://github.com/LiEnby/HytaleSP): Patching logic in C.
-
+*   [hytale-auth-server](https://github.com/sanasol/hytale-auth-server): Emulated authentication server in JavaScript.
 
 ## ⚠️ Disclaimer & Contact
 

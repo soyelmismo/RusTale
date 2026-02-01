@@ -2848,6 +2848,13 @@ impl RusTale {
 
             // Crear o actualizar instancia del shader dinamicamente
             let mut shader_opt = self.lsd_shader_instance.borrow_mut();
+            
+            // CORRECCIÓN: Separar opacidad del shader de la opacidad de la UI
+            // El shader debe responder solo al ramp_alpha (fade-in inicial) y a la protección de redimensionamiento
+            // pero ignorar si el usuario está ocultando los menús con el clic
+            let shader_base_alpha = ramp_alpha; // ramp_alpha va de 0.0 a 1.0 según theme::LSD_RAMP_UP_SECONDS
+            let resize_multiplier = if self.resizing_direction.is_some() { 0.0 } else { 1.0 };
+            
             let shader_instance = if let Some(ref mut shader) = *shader_opt {
                 // Actualizar posicion del mouse, shader_id y color de acento
                 shader.update_mouse_position(self.cursor_position);
@@ -2857,10 +2864,8 @@ impl RusTale {
                 shader.update_transition(self.next_shader_idx, self.shader_transition);
                 // IMPORTANTE: Actualizar color de acento en tiempo real
                 shader.update_accent(palette.accent);
-                // NUEVO: Sincronizar transparencia con el estado de redimensionamiento
-                // Si redimensionamos, bajamos la intensidad a 0 para que la GPU respire
-                let resize_multiplier = if self.resizing_direction.is_some() { 0.0 } else { 1.0 };
-                shader.update_alpha(ui_alpha * resize_multiplier); 
+                
+                shader.update_alpha(shader_base_alpha * resize_multiplier); 
                 shader
             } else {
                 // Crear nueva instancia
@@ -2869,13 +2874,11 @@ impl RusTale {
                     self.cursor_position,
                     palette.accent,
                     self.active_shader_idx,
-                    shader_opacity, // <--- CORREGIDO: Controla opacidad pura (fade in)
+                    shader_base_alpha, // <--- CORREGIDO: Usar alfa base basado en ramp_alpha
                     effect_intensity, // <--- CORREGIDO: Controla violencia matematica del fractal
                 ));
                 let shader = shader_opt.as_mut().unwrap();
-                // NUEVO: Aplicar sincronización de resize también en la creación
-                let resize_multiplier = if self.resizing_direction.is_some() { 0.0 } else { 1.0 };
-                shader.update_alpha(ui_alpha * resize_multiplier);
+                shader.update_alpha(shader_base_alpha * resize_multiplier);
                 shader
             };
 

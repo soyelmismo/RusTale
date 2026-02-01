@@ -19,7 +19,7 @@ use std::cell::Cell;
 pub const STANDARD_PADDING: f32 = 20.0;
 pub const STANDARD_SPACING: u32 = 15;
 
-pub const LSD_RAMP_UP_SECONDS: f32 = 10.0; // Temporarily reduced for testing (was 300.0)
+pub const LSD_RAMP_UP_SECONDS: f32 = 120.0; // Temporarily reduced for testing (was 300.0)
 
 #[derive(Debug, Clone, Copy)]
 pub struct UIContext {
