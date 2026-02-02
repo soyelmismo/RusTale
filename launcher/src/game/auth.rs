@@ -31,6 +31,12 @@ pub async fn fetch_remote_tokens(
     player_name: &str,
     player_uuid: &str,
 ) -> Result<AuthTokens> {
+    // Si es localhost, generamos tokens localmente en lugar de hacer petición HTTP
+    if auth_server_url.contains("127.0.0.") {
+        println!("[Auth] Local issuer detected, generating tokens locally");
+        return Ok(generate_fake_tokens(player_name, player_uuid, auth_server_url));
+    }
+
     // Usamos el endpoint child que es el estandar para launchers
     let url = format!("{}/game-session/child", auth_server_url);
 
@@ -105,7 +111,8 @@ pub fn generate_fake_tokens(player_name: &str, player_uuid: &str, issuer_url: &s
         "alg": "EdDSA",
         "typ": "JWT",
         "kid": crate::game::crypto::KEY_ID,
-        "jwk": crate::game::crypto::get_public_jwk_as_value()
+        // CRITICO: Esto debe retornar la KEYPAIR completa (con "d"), no solo la pública ("x")
+        "jwk": crate::game::crypto::get_private_jwk_as_value() 
     });
 
     let id_payload = serde_json::json!({
@@ -155,6 +162,10 @@ pub fn generate_fake_tokens(player_name: &str, player_uuid: &str, issuer_url: &s
         ),
         expires_at_str: expires_at_iso,
     };
+
+    println!("Header: {}", header);
+    println!("ID payload: {}", id_payload);
+    println!("Session payload: {}", session_payload);
 
     println!("[Auth Debug] Fake tokens generated with embedded JWK");
     debug_print_tokens(&tokens);

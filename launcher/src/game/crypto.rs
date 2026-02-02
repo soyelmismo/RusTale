@@ -101,6 +101,32 @@ pub fn get_public_jwk_as_value() -> serde_json::Value {
     }
 }
 
+pub fn get_private_jwk_as_value() -> serde_json::Value {
+    // Para arquitectura descentralizada donde el cliente es su propio emisor
+    // Incluye la clave privada ("d") para que el servidor pueda firmar en nombre del cliente
+    initialize_constant_keys();
+    
+    let key = HOST_IDENTITY.get().expect("Host Identity failed to initialize");
+    let public_key = key.verifying_key();
+    
+    // Extraer bytes de la clave privada
+    let private_bytes = key.as_bytes();
+    let public_bytes = public_key.to_bytes();
+    
+    // Codificar en base64url sin padding
+    let d_b64 = URL_SAFE_NO_PAD.encode(private_bytes);
+    let x_b64 = URL_SAFE_NO_PAD.encode(public_bytes);
+    
+    serde_json::json!({
+        "kty": "OKP",
+        "crv": "Ed25519",
+        "x": x_b64,
+        "d": d_b64,
+        "kid": KEY_ID,
+        "use": "sig"
+    })
+}
+
 /// Retorna la ruta al archivo de llave privada
 fn get_key_file_path() -> PathBuf {
     crate::config::get_identity_dir().join("host.key")
