@@ -100,7 +100,7 @@ pub fn view<'a>(
         },
         
         LauncherStatus::Downloading | LauncherStatus::Migrating => {
-            theme::danger_button_style(&palette, t, bs)
+            theme::play_button_style_active(&palette, t, bs)
         },
         
         LauncherStatus::NeedsUpdate => {
