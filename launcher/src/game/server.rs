@@ -450,7 +450,7 @@ pub async fn start_server(
             .map(|| warp::reply::with_status("", warp::http::StatusCode::NO_CONTENT)));
 
     let jwks_route = warp::path!("jwks.json").and(warp::get()).map(|| {
-        let jwks = crypto::get_jwks();
+        let jwks = crypto::get_host_jwks();
         warp::reply::json(&jwks)
     });
 
@@ -464,7 +464,7 @@ pub async fn start_server(
             }
         })
         .map(|_| {
-            let jwks = crypto::get_jwks();
+            let jwks = crypto::get_host_jwks();
             warp::reply::json(&jwks)
         });
 

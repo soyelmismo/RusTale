@@ -1774,7 +1774,14 @@ impl RusTale {
                 let base_dir = config::get_app_dir();
                 self.paths = GamePaths::new(base_dir);
 
-                // NUEVO: Reconciliar estado del servidor local
+                // --- Si cambió el modo online, limpiar caché criptográfico ---
+                if old_settings.online_fix_mode != s.online_fix_mode 
+                   || old_settings.enable_online_fix != s.enable_online_fix {
+                    crate::game::crypto::clear_remote_jwks();
+                }
+                // ------------------------------------------------------------------
+
+                // Reconciliar estado del servidor local
                 self.reconcile_local_server();
 
                 let news_action = if s.enable_news && !old_settings.enable_news {

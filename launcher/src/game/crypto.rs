@@ -228,3 +228,19 @@ pub fn force_regenerate_keys() {
     // Solo registramos el intento.
     println!("[Crypto] Ignoring regen request. Keeping persistent identity."); 
 }
+
+/// Obtiene EXCLUSIVAMENTE las llaves públicas locales del servidor emulado.
+/// Ignora el caché remoto. Usado por el servidor interno para anunciar su propia identidad.
+pub fn get_host_jwks() -> JwkSet {
+    initialize_constant_keys();
+    HOST_JWKS_CACHE.get().expect("Host keys should be initialized").clone()
+}
+
+/// Limpia el caché de llaves remotas.
+/// Debe llamarse al cambiar de modo Online/Offline.
+pub fn clear_remote_jwks() {
+    if let Ok(mut guard) = REMOTE_JWKS_CACHE.write() {
+        *guard = None;
+        println!("[Crypto] Remote JWKS cache cleared.");
+    }
+}
