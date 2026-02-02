@@ -587,7 +587,7 @@ impl Recipe for Runner {
 
                 // Pass the mode to Aurora
                 if settings.enable_online_fix {
-                    // 2. Variables de entorno mínimas para el cliente (REDUNDANCIA DE SEGURIDAD)
+                    // 2. Variables de entorno minimas para el cliente (REDUNDANCIA DE SEGURIDAD)
                     envs.insert("AURORA_MODE".to_string(), aurora_env_value);
                     envs.insert("RUSTALE_IS_PROXY".to_string(), "1".to_string());
                     envs.insert("AURORA_PORT".to_string(), server_port.to_string());
@@ -616,6 +616,55 @@ impl Recipe for Runner {
                                 "LD_PRELOAD".to_string(),
                                 so_path.to_string_lossy().to_string(),
                             );
+                        }
+                    }
+                }
+
+                // --- LINUX SPECIFIC FIXES ---
+                #[cfg(target_os = "linux")]
+                {
+                    if let Some(bin_dir) = executable_path.parent() {
+                        let bundled_lib = bin_dir.join("libzstd.so");
+                        let backup_lib = bin_dir.join("libzstd.so.bundled");
+                        
+                        // Lista de rutas comunes donde Ubuntu/Fedora/Arch guardan la libreria buena
+                        let system_paths = [
+                            "/usr/lib/x86_64-linux-gnu/libzstd.so.1", // Debian/Ubuntu moderno
+                            "/usr/lib64/libzstd.so.1",                 // Fedora/RHEL
+                            "/usr/lib/libzstd.so.1",                   // Arch/SteamDeck
+                            "/lib/x86_64-linux-gnu/libzstd.so.1"       // Fallback Ubuntu
+                        ];
+
+                        // Buscar cual existe en tu sistema
+                        let system_lib = system_paths.iter().find(|p| std::path::Path::new(p).exists());
+
+                        if let Some(sys_path) = system_lib {
+                             println!("[Linux-Fix] Found system zstd at: {}", sys_path);
+
+                             // 1. Respaldar la libreria corrupta que trae el juego (si es un archivo real)
+                             if bundled_lib.exists() {
+                                 let is_symlink = std::fs::symlink_metadata(&bundled_lib)
+                                     .map(|m| m.file_type().is_symlink())
+                                     .unwrap_or(false);
+                                 
+                                 // Si es archivo real, lo renombramos a .bundled
+                                 if !is_symlink {
+                                     println!("[Linux-Fix] Backing up bundled libzstd.so...");
+                                     let _ = std::fs::rename(&bundled_lib, &backup_lib);
+                                 }
+                             }
+
+                             // 2. Crear el Symlink magico si no existe o estaba roto
+                             // Si no existe (porque lo acabamos de renombrar), lo creamos.
+                             if !bundled_lib.exists() {
+                                 println!("[Linux-Fix] Creating symlink: Local/libzstd.so -> System/libzstd.so.1");
+                                 use std::os::unix::fs::symlink;
+                                 if let Err(e) = symlink(sys_path, &bundled_lib) {
+                                     eprintln!("[Linux-Fix] Failed to create symlink: {}", e);
+                                 }
+                             }
+                        } else {
+                             eprintln!("[Linux-Fix] WARNING: System libzstd.so.1 NOT FOUND. Install 'libzstd1' via apt/pacman.");
                         }
                     }
                 }

@@ -86,19 +86,19 @@ pub async fn make_executable(path: &std::path::PathBuf) -> anyhow::Result<()> {
 }
 
 pub fn find_free_port() -> u16 {
-    // 1. PRIMERO: Intentar revivir el puerto guardado (Recuperación de sesión)
+    // 1. PRIMERO: Intentar revivir el puerto guardado (Recuperacion de sesion)
     let saved_port = get_saved_port();
     
-    // Verificamos si podemos bindearlo nosotros (está libre)
+    // Verificamos si podemos bindearlo nosotros (esta libre)
     if std::net::TcpListener::bind(("127.0.0.1", saved_port)).is_ok() {
         println!("[Port] Successfully recovered saved port {}", saved_port);
-        // Devolvemos el puerto guardado para mantener el Issuer URL estático
+        // Devolvemos el puerto guardado para mantener el Issuer URL estatico
         return saved_port;
     }
 
     // 2. Si no pudimos bindearlo, es porque OTRO proceso (¿Server vivo?) lo tiene
-    // En ese caso, este código no debería ejecutarse para levantar un servidor,
-    // sino para conectar. Pero si estamos aquí para buscar puerto para servidor nuevo...
+    // En ese caso, este codigo no deberia ejecutarse para levantar un servidor,
+    // sino para conectar. Pero si estamos aqui para buscar puerto para servidor nuevo...
     // Generamos uno nuevo.
     
     use rand::Rng;
@@ -119,15 +119,15 @@ pub fn find_free_port() -> u16 {
 pub fn get_runtime_port_file() -> PathBuf {
     #[cfg(target_os = "linux")]
     {
-        // Resuelve /run/user/1000/rustale/auth.port automáticamente
-        // Prioridad 1: XDG_RUNTIME_DIR (estándar Linux)
+        // Resuelve /run/user/1000/rustale/auth.port automaticamente
+        // Prioridad 1: XDG_RUNTIME_DIR (estandar Linux)
         if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
             let path = PathBuf::from(runtime_dir).join("rustale");
             let _ = std::fs::create_dir_all(&path);
             return path.join("auth.port");
         }
         
-        // Prioridad 2: Construcción manual usando UID (fallback robusto)
+        // Prioridad 2: Construccion manual usando UID (fallback robusto)
         let uid = unsafe { libc::getuid() };
         let fallback_path = PathBuf::from(format!("/run/user/{}/rustale", uid));
         let _ = std::fs::create_dir_all(&fallback_path);
@@ -394,7 +394,7 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
 
     #[cfg(target_os = "windows")]
     {
-        // Forzamos la NO creación de ventana independientemente de si es servidor.
+        // Forzamos la NO creacion de ventana independientemente de si es servidor.
         // Esto se debe a que el Proxy ya se encarga de heredar los canales de logs.
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         cmd.creation_flags(CREATE_NO_WINDOW);

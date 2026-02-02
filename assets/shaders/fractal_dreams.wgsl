@@ -4,7 +4,7 @@ uv.x *= u.aspect;
 
 // Interactividad mejorada con el mouse para explorar el fractal
 let mouse_influence = vec2<f32>(u.mouse_x, u.mouse_y) * 2.5;
-var pos = uv * 1.2 + mouse_influence; // Movimiento mucho más sensible al mouse
+var pos = uv * 1.2 + mouse_influence; // Movimiento mucho mas sensible al mouse
 
 // Zoom dinamico basado en intensidad - aumentado para objeto mas grande
 let zoom = 0.8 + sin(u.time * 0.2) * 0.3 * u.intensity; // Reducido base de 1.5 a 0.8 para mas zoom

@@ -90,7 +90,7 @@ pub struct ModsState {
     pub installing_mods: HashMap<String, GenericMod>,
     pub checking_updates: bool,
     pub mods_with_updates: HashSet<String>, // Ahora contiene remote_ids
-    // Cache para evitar recálculos en view()
+    // Cache para evitar recalculos en view()
     pub update_status_cache: HashMap<String, bool>, // file_name/mod_id -> has_update
     pub cache_dirty: bool, // Marcar cuando se necesita recalcular
     // Mapa para recordar que version selecciono el usuario en la UI para cada mod (Browse tab)

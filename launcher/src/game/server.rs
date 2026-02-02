@@ -368,7 +368,7 @@ pub async fn start_server(
         // Leemos el archivo
         match tokio::fs::read_to_string(&skin_file).await {
             Ok(content) => {
-                // Intentamos parsear. Si falla (archivo corrupto), iniciamos vacío.
+                // Intentamos parsear. Si falla (archivo corrupto), iniciamos vacio.
                 serde_json::from_str(&content).unwrap_or_default()
             },
             Err(e) => {
@@ -384,7 +384,7 @@ pub async fn start_server(
     let state = Arc::new(tokio::sync::Mutex::new(ServerState {
         username,
         uuid,
-        skins, // <--- Aquí pasamos el mapa cargado
+        skins, // <--- Aqui pasamos el mapa cargado
         game_dir: game_folder_path,
         last_server_uuid: None,
     }));
@@ -682,7 +682,7 @@ async fn handle_game_profile(
     // 3. Crear respuesta JSON
     let json_resp = warp::reply::json(&info);
 
-    // 4. Agregar headers anti-cache para que los cambios se vean instantáneamente
+    // 4. Agregar headers anti-cache para que los cambios se vean instantaneamente
     warp::reply::with_header(
         warp::reply::with_header(
             warp::reply::with_header(json_resp, "Cache-Control", "no-store, no-cache, must-revalidate"),
@@ -818,7 +818,7 @@ async fn handle_launcher_data(state: Arc<tokio::sync::Mutex<ServerState>>) -> im
                 entitlements: vec!["game.base".to_string()],
                 created_at: Utc::now(),
                 next_name_change_at: Utc::now() + chrono::Duration::days(30),
-                // Aquí va la String serializada
+                // Aqui va la String serializada
                 skin: skin_string 
             }
         ],

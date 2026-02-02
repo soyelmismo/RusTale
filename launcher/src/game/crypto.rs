@@ -24,24 +24,24 @@ pub struct Jwk {
     pub use_key: String, // "sig"
 }
 
-// === MEMORIA ESTÁTICA SEGURA ===
+// === MEMORIA ESTaTICA SEGURA ===
 
 // 1. Host Identity: Generada UNA vez al inicio. Inmutable.
 // Contiene la clave Privada para firmar. Nunca puede ser None una vez inicializada.
 static HOST_IDENTITY: OnceLock<SigningKey> = OnceLock::new();
 
-// 2. Cache JWK Público del Host: Para servir /jwks.json rápidamente.
+// 2. Cache JWK Publico del Host: Para servir /jwks.json rapidamente.
 static HOST_JWKS_CACHE: OnceLock<JwkSet> = OnceLock::new();
 
 // 3. Claves Remotas (Opcional): Si actuamos como cliente validando otros servidores.
 // Usamos RwLock porque estas SI pueden cambiar si nos conectamos a otro server.
 static REMOTE_JWKS_CACHE: RwLock<Option<JwkSet>> = RwLock::new(None);
 
-/// Obtiene el JWKS público actual (Host o Remoto).
+/// Obtiene el JWKS publico actual (Host o Remoto).
 /// Prioridad: Si hay remoto, devuelve remoto (modo cliente).
 /// Si no, devuelve local (modo servidor).
 pub fn get_global_jwks() -> JwkSet {
-    // 1. Si tenemos llaves remotas inyectadas (modo cliente), las preferimos para validación
+    // 1. Si tenemos llaves remotas inyectadas (modo cliente), las preferimos para validacion
     if let Ok(guard) = REMOTE_JWKS_CACHE.read() {
         if let Some(remote) = guard.as_ref() {
             return remote.clone();
@@ -49,7 +49,7 @@ pub fn get_global_jwks() -> JwkSet {
     }
 
     // 2. Si no, devolvemos las nuestras (modo servidor)
-    initialize_constant_keys(); // Garantizar inicialización
+    initialize_constant_keys(); // Garantizar inicializacion
     HOST_JWKS_CACHE.get().expect("Keys should be initialized").clone()
 }
 
@@ -58,8 +58,8 @@ pub fn get_jwks() -> JwkSet {
 }
 
 /// Firma un mensaje SIEMPRE con las llaves del Host.
-/// Si el Host no está inicializado, lo inicializa ahora mismo.
-/// Esta función es ROBUSTA: No puede fallar ni regenerar claves aleatoriamente.
+/// Si el Host no esta inicializado, lo inicializa ahora mismo.
+/// Esta funcion es ROBUSTA: No puede fallar ni regenerar claves aleatoriamente.
 pub fn sign_message(message: &str) -> String {
     // Garantizar que existen claves
     initialize_constant_keys();
@@ -71,7 +71,7 @@ pub fn sign_message(message: &str) -> String {
     URL_SAFE_NO_PAD.encode(signature.to_bytes())
 }
 
-/// Alias para claridad semántica
+/// Alias para claridad semantica
 pub fn sign_message_with_server_keys(message: &str) -> String {
     sign_message(message)
 }
@@ -106,12 +106,12 @@ fn get_key_file_path() -> PathBuf {
     crate::config::get_identity_dir().join("host.key")
 }
 
-/// Inicializa la identidad criptográfica del servidor.
+/// Inicializa la identidad criptografica del servidor.
 /// 
 /// 1. Intenta leer `server/identity/host.key`.
-/// 2. Si existe y es válida, la carga.
+/// 2. Si existe y es valida, la carga.
 /// 3. Si no, genera una nueva y la guarda.
-/// 4. PANIC si no tiene permisos de escritura (La seguridad es crítica).
+/// 4. PANIC si no tiene permisos de escritura (La seguridad es critica).
 pub fn initialize_constant_keys() {
     HOST_IDENTITY.get_or_init(|| {
         let key_path = get_key_file_path();
@@ -126,7 +126,7 @@ pub fn initialize_constant_keys() {
                         arr.copy_from_slice(&bytes);
                         let key = SigningKey::from_bytes(&arr);
                         
-                        // Generar el cache público inmediatamente
+                        // Generar el cache publico inmediatamente
                         let jwk_set = create_jwk_from_public(&key.verifying_key());
                         let _ = HOST_JWKS_CACHE.set(jwk_set);
                         
@@ -143,7 +143,7 @@ pub fn initialize_constant_keys() {
             }
         }
 
-        // B. GENERACIÓN (Primer arranque o regeneración)
+        // B. GENERACIoN (Primer arranque o regeneracion)
         println!("[Crypto] Generating NEW Persistent Host Identity...");
         
         // Crear directorios si no existen
@@ -163,7 +163,7 @@ pub fn initialize_constant_keys() {
             Err(e) => panic!("[Crypto] FATAL: Failed to persist host identity! {}", e),
         }
 
-        // Cachear pública
+        // Cachear publica
         let jwk_set = create_jwk_from_public(&signing_key.verifying_key());
         let _ = HOST_JWKS_CACHE.set(jwk_set);
 

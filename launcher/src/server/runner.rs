@@ -15,14 +15,14 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         config.online_mode, config.game_version
     );
 
-    // AUTO-SINCRO: Buscamos el puerto dinámico de la instancia madre
+    // AUTO-SINCRO: Buscamos el puerto dinamico de la instancia madre
     let mut auth_port = crate::util::get_saved_port();
 
     if crate::game::server::is_server_alive(auth_port).await {
         println!("[RusTale] Local Auth found on port {}", auth_port);
         println!("[RusTale] Attaching to existing emulator instance...");
     } else {
-        // Si el puerto guardado está muerto, buscamos uno nuevo libre
+        // Si el puerto guardado esta muerto, buscamos uno nuevo libre
         auth_port = crate::util::find_free_port();
         println!("[RusTale] No active instance found. Starting new emulator on port {}", auth_port);
         

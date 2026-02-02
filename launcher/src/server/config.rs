@@ -29,19 +29,19 @@ impl Default for ServerConfig {
 }
 
 impl ServerConfig {
-    /// Fusiona automáticamente los campos faltantes con valores por defecto
-    /// Funciona para cualquier campo nuevo agregado al struct sin modificar este código
+    /// Fusiona automaticamente los campos faltantes con valores por defecto
+    /// Funciona para cualquier campo nuevo agregado al struct sin modificar este codigo
     fn merge_missing_fields(&mut self) {
         let default = ServerConfig::default();
         
-        // Convertir ambos structs a JSON Value para comparación
+        // Convertir ambos structs a JSON Value para comparacion
         let self_json = serde_json::to_value(&*self).unwrap_or_default();
         let default_json = serde_json::to_value(&default).unwrap_or_default();
         
         // Si self_json es un objeto, iterar sobre sus campos
         if let serde_json::Value::Object(mut self_obj) = self_json {
             if let serde_json::Value::Object(default_obj) = default_json {
-                // Para cada campo en el default, verificar si falta o está vacío en self
+                // Para cada campo en el default, verificar si falta o esta vacio en self
                 for (key, default_value) in default_obj {
                     match self_obj.get(&key) {
                         None => {
@@ -53,7 +53,7 @@ impl ServerConfig {
                             self_obj.insert(key, default_value);
                         }
                         Some(serde_json::Value::String(s)) if s.is_empty() => {
-                            // Campo string vacío - usar default si no está vacío
+                            // Campo string vacio - usar default si no esta vacio
                             if let serde_json::Value::String(default_str) = &default_value {
                                 if !default_str.is_empty() {
                                     self_obj.insert(key, default_value);
@@ -78,7 +78,7 @@ impl ServerConfig {
 pub async fn load_or_create(args: &crate::Args) -> ServerConfig {
     let path = crate::config::get_server_root_dir().join("server_config.toml");
 
-    // 1. Cargar configuración existente (misma lógica que GameSettings)
+    // 1. Cargar configuracion existente (misma logica que GameSettings)
     let mut config = if path.exists() {
         match fs::read_to_string(&path).await {
             Ok(content) => toml::from_str(&content).unwrap_or_default(),
@@ -88,8 +88,8 @@ pub async fn load_or_create(args: &crate::Args) -> ServerConfig {
         ServerConfig::default()
     };
 
-    // 2. Fusionar automáticamente campos faltantes con valores por defecto
-    // Esto funciona para CUALQUIER campo nuevo agregado al struct sin modificar este código
+    // 2. Fusionar automaticamente campos faltantes con valores por defecto
+    // Esto funciona para CUALQUIER campo nuevo agregado al struct sin modificar este codigo
     config.merge_missing_fields();
 
     // 3. Sobreescribir con argumentos de CLI si existen (prioridad CLI)

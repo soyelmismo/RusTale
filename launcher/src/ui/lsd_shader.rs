@@ -110,7 +110,7 @@ impl<Message> shader::Program<Message> for LsdShader {
     ) -> Self::Primitive {
         // Ralentizamos el tiempo para efectos mas hipnoticos
         let time = self.start_time.elapsed().as_secs_f32() * 0.5;
-        // Forzamos el calculo de aspect usando los bounds lógicos REALES de la ventana
+        // Forzamos el calculo de aspect usando los bounds logicos REALES de la ventana
         // que Iced acaba de calcular en el layout pass.
         let aspect = bounds.width / bounds.height.max(1.0);
 

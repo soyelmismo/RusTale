@@ -11,15 +11,15 @@ const DEFAULT_PORT: u16 = 59313;
 
 // ==================== PARCHES DE SEGURIDAD LINUX ====================
 
-// En x86_64 Linux, modificar el código requiere invalidar la caché de instrucciones 
-// o al menos asegurar la serialización. Rust no expone __builtin___clear_cache de GCC.
+// En x86_64 Linux, modificar el codigo requiere invalidar la cache de instrucciones 
+// o al menos asegurar la serializacion. Rust no expone __builtin___clear_cache de GCC.
 #[inline(always)]
 unsafe fn flush_instruction_cache(addr: *mut c_void, len: usize) {
     #[cfg(target_os = "linux")]
     {
-        // Usamos clear_cache de gcc a través de un extern C básico o un truco.
+        // Usamos clear_cache de gcc a traves de un extern C basico o un truco.
         // Dado que mprotect suele flashear TLBs, para JIT simple a veces basta.
-        // Pero para robustez, usamos __clear_cache via linking implícito de libc (compilador built-in).
+        // Pero para robustez, usamos __clear_cache via linking implicito de libc (compilador built-in).
         // Si falla el linkeo, este bloque fallback ayuda.
         unsafe extern "C" {
             fn __clear_cache(beg: *mut c_void, end: *mut c_void);
@@ -101,12 +101,12 @@ fn get_swaps() -> Vec<SwapDefinition> {
     let mut swaps = Vec::new();
     let port = std::env::var("AURORA_PORT").unwrap_or_else(|_| DEFAULT_PORT.to_string());
     
-    // NOTA TÉCNICA (IMPORTANTE PARA LINUX):
-    // La memoria en el binario compilado está empaquetada estrictamente.
+    // NOTA TeCNICA (IMPORTANTE PARA LINUX):
+    // La memoria en el binario compilado esta empaquetada estrictamente.
     // Reemplazar una cadena con una de diferente longitud CORROMPE los datos adyacentes.
     // Se usan ceros '0' en las IPs para hacer padding hasta alcanzar la longitud exacta de la string original.
-    // IP Objetivo Lógica: 127.0.0.1
-    // La resolución de IPs estándar ignora ceros a la izquierda en octetos (ej. 0001 = 1).
+    // IP Objetivo Logica: 127.0.0.1
+    // La resolucion de IPs estandar ignora ceros a la izquierda en octetos (ej. 0001 = 1).
 
     // --- Parte 1: Sufijo de Dominio ---
     // Original: "hytale.com" (10 chars)
@@ -148,18 +148,18 @@ fn get_swaps() -> Vec<SwapDefinition> {
     ));
     
     // 5. Argumentos CLI: Reemplazos directos
-    // No hacemos reemplazo de argumentos de tokens o authenticated ya que nuestro 127.0.0.1:59313 firmará las llaves.
+    // No hacemos reemplazo de argumentos de tokens o authenticated ya que nuestro 127.0.0.1:59313 firmara las llaves.
 
     swaps
 }
 
-// ==================== LÓGICA DE MEMORIA (System Agnostic Logic) ====================
+// ==================== LoGICA DE MEMORIA (System Agnostic Logic) ====================
 
 struct MemoryRegion {
     addr: *mut u8,
     size: usize,
     #[cfg(target_os = "linux")]
-    prot: i32, // Para restaurar protección en Linux
+    prot: i32, // Para restaurar proteccion en Linux
 }
 
 // Gestiona los permisos rwx temporalmente
@@ -215,13 +215,13 @@ impl Drop for ScopedProtect {
 // Se necesita para entrar a servidores con auth mode insecure
 // Busca la secuencia JZ (Jump if Zero) que verifica singleplayer/auth mode y la reemplaza por NOPs.
 unsafe fn patch_offline_check(region: &MemoryRegion) {
-    log!("[Aurora] Iniciando búsqueda de checks de singleplayer");
+    log!("[Aurora] Iniciando busqueda de checks de singleplayer");
     
     let slice = unsafe { slice::from_raw_parts(region.addr, region.size) };
     let mut i = 0;
-    // Límite de seguridad
+    // Limite de seguridad
     if region.size < 20 { 
-        log!("[Aurora] Región de memoria demasiado pequeña para parcheo: {} bytes", region.size);
+        log!("[Aurora] Region de memoria demasiado pequeña para parcheo: {} bytes", region.size);
         return; 
     }
 
@@ -249,7 +249,7 @@ unsafe fn patch_offline_check(region: &MemoryRegion) {
         if is_match {
             log!("[Aurora] Check de singleplayer encontrado en offset +{:X}", i);
 
-            // Búsqueda de JZs cercanos para parchear (NOP = 0x90)
+            // Busqueda de JZs cercanos para parchear (NOP = 0x90)
             // Se necesitan encontrar 2 JZs.
             let mut cursor = i;
             let mut jz_found = 0;
@@ -269,8 +269,8 @@ unsafe fn patch_offline_check(region: &MemoryRegion) {
                          writable_slice[cursor + k] = 0x90;
                      }
                      
-                     // !!! NUEVO: FLUSH DE CACHÉ !!!
-                     // Crítico en Linux para que la CPU no ejecute los bytes viejos que tiene en caché
+                     // !!! NUEVO: FLUSH DE CACHe !!!
+                     // Critico en Linux para que la CPU no ejecute los bytes viejos que tiene en cache
                      unsafe { flush_instruction_cache(region.addr.add(cursor) as *mut c_void, 6); }
                      
                      log!("[Aurora] JZ parcheado en offset +{:X}", cursor);
@@ -289,13 +289,13 @@ unsafe fn patch_offline_check(region: &MemoryRegion) {
         i += 1;
     }
     
-    log!("[Aurora] Búsqueda de checks completada: {} grupos de JZs parcheados", checks_patched);
+    log!("[Aurora] Busqueda de checks completada: {} grupos de JZs parcheados", checks_patched);
 }
 
 // Intercambio de Strings
 unsafe fn apply_swaps(region: &MemoryRegion) {
     init_logging();
-    log!("[Aurora] Iniciando búsqueda y reemplazo de strings");
+    log!("[Aurora] Iniciando busqueda y reemplazo de strings");
     let mut swaps = Vec::new();
     let mode = std::env::var("AURORA_MODE").unwrap_or_else(|_| "local".to_string());
     
@@ -314,7 +314,7 @@ unsafe fn apply_swaps(region: &MemoryRegion) {
     
     // Itera sobre la memoria buscando headers de strings
     for i in 0..region.size {
-        // Optimización rápida: verifica si podría ser un string (longitud posible?)
+        // Optimizacion rapida: verifica si podria ser un string (longitud posible?)
         if i + 4 >= region.size { break; }
         
         // El primer u32 es la longitud en caracteres.
@@ -325,10 +325,10 @@ unsafe fn apply_swaps(region: &MemoryRegion) {
             let pattern = &swap.pattern_bytes;
             if i + pattern.len() > region.size { continue; }
 
-            // IMPORTANTE: Reproducir la lógica del código C original (get_size_ptr)
-            // El código C hacía memcmp de: 4 + (2*Len) - 1.
-            // Es decir, ignoraba el ÚLTIMO byte del string en la comparación.
-            // Esto permite "matchear" incluso si hay basura o un null terminator raro en el último byte high.
+            // IMPORTANTE: Reproducir la logica del codigo C original (get_size_ptr)
+            // El codigo C hacia memcmp de: 4 + (2*Len) - 1.
+            // Es decir, ignoraba el uLTIMO byte del string en la comparacion.
+            // Esto permite "matchear" incluso si hay basura o un null terminator raro en el ultimo byte high.
             
             let compare_len = pattern.len() - 1; // Magic trick de C para Linux matching
             
@@ -363,12 +363,12 @@ unsafe fn apply_swaps(region: &MemoryRegion) {
                 
                 let writable_mem = unsafe { slice::from_raw_parts_mut(region.addr, region.size) };
                 
-                // !!! CORRECCIÓN CRÍTICA !!!
-                // Usamos length - 1 también para escritura. 
-                // Esto protege el byte límite del objeto siguiente en memoria compactada.
+                // !!! CORRECCIoN CRiTICA !!!
+                // Usamos length - 1 tambien para escritura. 
+                // Esto protege el byte limite del objeto siguiente en memoria compactada.
                 let safe_copy_len = compare_len; 
                 
-                // Sobrescribimos header + data pero sin tocar el último byte "peligroso"
+                // Sobrescribimos header + data pero sin tocar el ultimo byte "peligroso"
                 writable_mem[i..i+safe_copy_len].copy_from_slice(&swap.replacement_bytes[0..safe_copy_len]);
                 
                 replacements_applied += 1;
@@ -451,7 +451,7 @@ unsafe fn scan_and_patch() {
 
 // ==================== ENTRY POINTS ====================
 
-// Linux Constructor (se ejecuta al cargar la librería .so)
+// Linux Constructor (se ejecuta al cargar la libreria .so)
 #[cfg(target_os = "linux")]
 #[ctor::ctor]
 unsafe fn aurora_init() {

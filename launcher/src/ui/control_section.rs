@@ -96,7 +96,7 @@ pub fn view<'a>(
         },
         
         LauncherStatus::Playing => {
-            theme::play_button_style_active(&palette, t, bs) // Ahora es dinámico-danger
+            theme::play_button_style_active(&palette, t, bs) // Ahora es dinamico-danger
         },
         
         LauncherStatus::Downloading | LauncherStatus::Migrating => {
@@ -104,7 +104,7 @@ pub fn view<'a>(
         },
         
         LauncherStatus::NeedsUpdate => {
-            theme::update_button_style(&palette, t, bs) // Ahora es dinámico-accent
+            theme::update_button_style(&palette, t, bs) // Ahora es dinamico-accent
         },
         
         _ => theme::play_button_style(&palette, t, bs),

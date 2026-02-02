@@ -81,9 +81,9 @@ impl SmoothTranslateState {
         is_resizing: bool, // <--- NUEVO PARaMETRO
         mouse_stillness: f32, // <--- NUEVO PARaMETRO
     ) -> Vector {
-        // CAMBIO CRÍTICO PARA WAYLAND:
+        // CAMBIO CRiTICO PARA WAYLAND:
         // Si estamos redimensionando, forzamos retorno cero inmediato.
-        // Esto evita que Iced intente "adivinar" dónde están los hitboxes en movimiento.
+        // Esto evita que Iced intente "adivinar" donde estan los hitboxes en movimiento.
         if is_resizing || !lsd_enabled {
             return Vector::new(0.0, 0.0);
         }
@@ -1104,7 +1104,7 @@ pub fn update_button_style(
     let mut s = primary_button_style(palette, _t, status);
     
     if status != button::Status::Hovered {
-        // Hacemos que parpadee levemente o sea un poco más claro que el play normal
+        // Hacemos que parpadee levemente o sea un poco mas claro que el play normal
         s.background = Some(Background::Color(Color { 
             a: 0.8 * ui_a, 
             ..palette.accent 
@@ -1512,9 +1512,9 @@ impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Messa
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
-        // Durante el redimensionamiento, saltamos el cálculo de SmoothTranslate.
-        // Dibujamos el widget en su posición absoluta. Esto evita que el shader
-        // intente interpolar posiciones en un viewport que está cambiando de tamaño.
+        // Durante el redimensionamiento, saltamos el calculo de SmoothTranslate.
+        // Dibujamos el widget en su posicion absoluta. Esto evita que el shader
+        // intente interpolar posiciones en un viewport que esta cambiando de tamaño.
         if self.is_resizing {
             self.content.as_widget().draw(
                 &tree.children[0],
