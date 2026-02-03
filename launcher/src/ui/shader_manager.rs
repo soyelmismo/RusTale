@@ -55,104 +55,35 @@ fn vs_main(@builtin(vertex_index) v_index: u32) -> VertexOutput {
 "#;
 
 pub fn build_uber_shader() -> String {
-    let mut shader_functions = String::new(); // Codigo que va dentro de shader_N
-    let mut global_helpers = String::new();   // Funciones auxiliares globales
-    let mut switch_cases = String::new();
-    
-    println!("[Shader] Building embedded uber shader...");
+    println!("[Shader] Injecting SINGLE ENTROPY KERNEL...");
 
-    // Importante: Ordenar archivos para garantizar ID deterministas
-    let mut filenames: Vec<String> = ShaderAssets::iter()
-        .map(|f| f.into_owned())
-        .filter(|name| name.ends_with(".wgsl"))
-        .collect();
-    
-    filenames.sort(); 
-
-    println!("[Shader] Found {} embedded shaders", filenames.len());
-
-    let mut id_counter = 0;
-
-    for filename in filenames {
-        if let Some(file) = ShaderAssets::get(&filename) {
-            if let Ok(content) = std::str::from_utf8(file.data.as_ref()) {
-                println!("[Shader] Registering ID {}: {}", id_counter, filename);
-                
-                let mut safe_content = content.to_string();
-                safe_content = safe_content.replace("atan2(", "atan(");
-                
-                // --- CORE FIX: Separar Helpers del Main Body ---
-                // WGSL prohibe definir funciones dentro de funciones.
-                // Buscamos el separador usado en forest.wgsl o asumimos todo es body.
-                
-                let (helpers, body) = if let Some(idx) = safe_content.find("// --- MAIN SHADER ---") {
-                    let (h, b) = safe_content.split_at(idx);
-                    (h, b)
-                } else {
-                    ("", safe_content.as_str())
-                };
-
-                // 1. Agregar Helpers al scope global (si hay)
-                if !helpers.trim().is_empty() {
-                    global_helpers.push_str(&format!("// Helpers form {}\n", filename));
-                    global_helpers.push_str(helpers);
-                    global_helpers.push_str("\n");
-                }
-
-                // 2. Encapsular el Body en la funcion unica shader_X
-                let func_name = format!("shader_{}", id_counter);
-                
-                shader_functions.push_str(&format!(
-                    "// Body of: {}\nfn {}(in: VertexOutput) -> vec4<f32> {{\n{}\n}}\n", 
-                    filename, func_name, body
-                ));
-                
-                switch_cases.push_str(&format!("        case {}u: {{ return {}(in); }}\n", id_counter, func_name));
-                id_counter += 1;
-            }
+    // Cargar el archivo especifico
+    // Usamos el mismo HEADER constante definido en el archivo original
+    let entropy_src = if let Some(file) = ShaderAssets::get("entropy.wgsl") {
+        match String::from_utf8(file.data.to_vec()) {
+            Ok(s) => s,
+            Err(_) => super::lsd_shader::DEFAULT_FALLBACK.to_string(),
         }
-    }
+    } else {
+        super::lsd_shader::DEFAULT_FALLBACK.to_string()
+    };
 
-    // Estructura final:
-    // 1. HEADER (Structs, Uniforms)
-    // 2. GLOBAL HELPERS (Funciones extraidas de forest.wgsl)
-    // 3. SHADER FUNCTIONS (Los cuerpos principales envueltos en fn shader_N)
-    // 4. FS_MAIN (Cross-fading logic)
-    let result = format!("{}\n{}\n{}\n
-// Helper para obtener el color de cualquier shader mediante ID
-fn get_shader_color(id: u32, in: VertexOutput) -> vec4<f32> {{
-    switch (id) {{
-{}
-        default: {{ return shader_0(in); }}
-    }}
-}}
+    let mut safe_content = entropy_src;
+    
+    // Limpieza de compatibilidad por si acaso (atan2 -> atan en WGSL estandar viejo)
+    //safe_content = safe_content.replace("atan2(", "atan("); 
 
-@fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {{
-    let col_a = get_shader_color(u.shader_id, in);
+    // Eliminamos duplicados si existen en el wgsl
+    let body = safe_content.replace("struct Uniforms", "// struct Uniforms embedded via header");
+    let body = body.replace("@group(0) @binding(0) var<uniform> u: Uniforms;", "// uniform u embedded");
     
-    // Si no hay transicion, devolvemos col_a directamente para ahorrar recursos
-    if (u.transition <= 0.0) {{
-        return vec4<f32>(col_a.rgb, col_a.a * u.alpha);
-    }}
+    // IMPORTANTE: entropy.wgsl trae sus propios helpers.
+    // Solo necesitamos concatenar Header + Body
     
-    let col_b = get_shader_color(u.next_shader_id, in);
-    
-    // MEZCLA LINEAL (Cross-fade)
-    let final_col = mix(col_a, col_b, u.transition);
-    
-    return vec4<f32>(final_col.rgb, final_col.a * u.alpha);
-}}
-", HEADER, global_helpers, shader_functions, switch_cases);
-
-    result
+    format!("{}\n{}", HEADER, body)
 }
 
 pub fn get_shader_count() -> usize {
-    let external_count = ShaderAssets::iter()
-        .map(|f| f.into_owned())
-        .filter(|name| name.ends_with(".wgsl"))
-        .count();
-    external_count
+    1 // Solo existe el Universo
 }
 

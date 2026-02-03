@@ -349,6 +349,7 @@ pub enum Message {
     WindowDrag,
     MinimizeWindow,
     MaximizeWindow,
+    ToggleFullscreen, // Nuevo mensaje específico para F11
 
     // --- NUEVOS MENSAJES PARA REDIMENSIoN MANUAL ---
     ResizePressed(ResizeDirection),
@@ -440,6 +441,12 @@ struct RusTale {
     is_minimized: bool,         // Estado de minimizacion de la ventana
     is_focused: bool,           // Estado de foco de la ventana
     // -------------------------------------
+    
+    // --- CAMPOS PARA OCULTAMIENTO DE CURSOR POR INACTIVIDAD ---
+    is_cursor_hidden: bool,      // Para trackear estado del puntero
+    last_user_interaction: std::time::Instant, // Para resetear con clicks también
+    is_fullscreen: bool,         // Estado separado para fullscreen (F11)
+    // -----------------------------------------------------
 }
 
 impl RusTale {
@@ -466,6 +473,15 @@ impl RusTale {
             return 1.0;
         }
         self.ui_opacity_accumulator // Usamos el valor que actualiza el Tick
+    }
+
+    // Funcion para determinar el tipo de cursor segun el estado
+    fn get_cursor_interaction(&self) -> mouse::Interaction {
+        if self.is_cursor_hidden {
+            mouse::Interaction::None
+        } else {
+            mouse::Interaction::default()
+        }
     }
 
     fn new(quickplay: bool) -> (Self, Task<Message>) {
@@ -633,6 +649,12 @@ impl RusTale {
                 is_minimized: false,        // Inicialmente no minimizado
                 is_focused: true,          // Inicialmente con foco (ventana principal)
                 // -------------------------------------
+                
+                // --- CAMPOS PARA OCULTAMIENTO DE CURSOR POR INACTIVIDAD ---
+                is_cursor_hidden: false,   // Inicialmente visible
+                last_user_interaction: std::time::Instant::now(), // Inicializar con tiempo actual
+                is_fullscreen: false,      // Inicialmente no fullscreen
+                // -----------------------------------------------------
             },
             Task::batch(vec![
                 Task::done(Message::Initialize),
@@ -745,6 +767,10 @@ impl RusTale {
                         iced::keyboard::Key::Character(c) if c.as_str() == "s" => {
                             Some(Message::NextShader)
                         }
+                        // --- NUEVO: Soporte F11 ---
+                        iced::keyboard::Key::Named(iced::keyboard::key::Named::F11) => {
+                            Some(Message::ToggleFullscreen)
+                        }
                         _ => None,
                     }
                 } else {
@@ -813,6 +839,13 @@ impl RusTale {
             Message::CursorMoved(relative_position) => {
                 self.cursor_position = relative_position;
                 self.last_mouse_move_time = std::time::Instant::now();
+                self.last_user_interaction = std::time::Instant::now(); // Reset interacción
+
+                // Si el cursor estaba oculto y el usuario mueve el mouse, lo mostramos inmediatamente
+                if self.is_cursor_hidden {
+                    self.is_cursor_hidden = false;
+                    // No podemos cambiar el ícono directamente en Iced, pero podemos actualizar el estado
+                }
 
                 if let Some(dir) = self.resizing_direction {
                     // 1. Calcular donde esta el mouse en la PANTALLA ahora mismo
@@ -988,23 +1021,52 @@ impl RusTale {
                 let reveal_speed = 2.5; // Velocidad para aparecer (el ojo humano prefiere UI que aparece rapido)
                 let hold_threshold = 0.25; // SEGUNDOS DE ESPERA para considerar que se esta "manteniendo"
                 
+                // Constante de inactividad solicitada
+                let inactivity_threshold = 10.0; // 10 segundos
+                
                 let elapsed_since_click = self.shader_click_time.elapsed().as_secs_f32();
+                let elapsed_idle = self.last_mouse_move_time.elapsed().as_secs_f32();
 
                 // Detectamos si hay algun modal abierto
                 let is_modal_active = self.settings_state.is_open || self.mods_state.is_open;
 
+                let mut tasks = Vec::new();
+
                 // --- LoGICA DE PRIORIDAD DE INTERFAZ ---
                 if is_modal_active {
-                    // SIEMPRE FORZAR VISIBILIDAD si estamos en ajustes o mods
+                    // SIEMPRE FORZAR VISIBILIDAD si estamos en ajustes o mods (ignoramos inactividad)
                     self.ui_opacity_accumulator = (self.ui_opacity_accumulator + dt * reveal_speed).min(1.0);
+                    
+                    // Asegurar que el cursor vuelva si la UI es visible de nuevo
+                    if self.ui_opacity_accumulator > 0.1 && self.is_cursor_hidden {
+                        self.is_cursor_hidden = false;
+                        // No podemos cambiar el ícono directamente en Iced
+                    }
                 } else {
-                    // Logica normal de transparencia por mantener click
-                    if self.is_mouse_pressed && elapsed_since_click > hold_threshold {
+                    // Condiciones para desvanecer:
+                    // 1. Mouse presionado por un tiempo (Hold click)
+                    // 2. Mouse inactivo por 10 segundos (Idle)
+                    let should_fade_out = (self.is_mouse_pressed && elapsed_since_click > hold_threshold) 
+                                       || elapsed_idle > inactivity_threshold;
+
+                    if should_fade_out {
                         // Disminuir opacidad gradualmente hacia 0.0
                         self.ui_opacity_accumulator = (self.ui_opacity_accumulator - dt * fade_speed).max(0.0);
-                    } else if !self.is_mouse_pressed {
-                        // Aumentar opacidad gradualmente hacia 1.0
+                        
+                        // Ocultar cursor si la UI ya es casi invisible
+                        if self.ui_opacity_accumulator < 0.05 && !self.is_cursor_hidden {
+                            self.is_cursor_hidden = true;
+                            // No podemos cambiar el ícono directamente en Iced, pero actualizamos el estado
+                        }
+                    } else {
+                        // Aumentar opacidad gradualmente hacia 1.0 (Movimiento o Click reciente)
                         self.ui_opacity_accumulator = (self.ui_opacity_accumulator + dt * reveal_speed).min(1.0);
+                        
+                        // Asegurar que el cursor vuelva si la UI es visible de nuevo
+                        if self.ui_opacity_accumulator > 0.1 && self.is_cursor_hidden {
+                            self.is_cursor_hidden = false;
+                            // No podemos cambiar el ícono directamente en Iced
+                        }
                     }
                 }
 
@@ -1038,7 +1100,7 @@ impl RusTale {
                     }
                 }
 
-                return Task::none();
+                return if tasks.is_empty() { Task::none() } else { Task::batch(tasks) };
             }
 
             _ => {}
@@ -1129,6 +1191,11 @@ impl RusTale {
                 // Disparar pulso de onda de choque en el shader
                 self.shader_click_intensity = 2.0; // Pico fuerte para la onda
                 self.shader_click_time = std::time::Instant::now();
+                
+                // --- NUEVO: Resetear inactividad al hacer click ---
+                self.last_mouse_move_time = std::time::Instant::now();
+                // -------------------------------------------------
+                
                 Task::none()
             }
 
@@ -2404,12 +2471,39 @@ impl RusTale {
                 })
             }
             Message::MaximizeWindow => {
+                // Botón de maximizar normal (solo maximiza, no fullscreen)
                 self.is_maximized = !self.is_maximized;
                 if self.is_minimized {
                     self.is_minimized = false;
                     println!("[Window] Window restored from minimized - Enabling ticks");
                 }
                 window::oldest().and_then(|id| window::toggle_maximize(id))
+            }
+            Message::ToggleFullscreen => {
+                // Alternamos el estado interno de fullscreen
+                let entering_fullscreen = !self.is_fullscreen;
+                self.is_fullscreen = entering_fullscreen;
+
+                // Si entramos a fullscreen, YA NO estamos maximizados.
+                // Actualizamos esto para que la UI (bordes redondeados, etc) sepa que cambió el estado.
+                if entering_fullscreen {
+                    self.is_maximized = false;
+                }
+
+                return window::oldest().and_then(move |id| {
+                    if entering_fullscreen {
+                        // TRUCO: Para evitar el glitch visual cuando está maximizada,
+                        // enviamos una secuencia: Primero restaurar a ventana normal, luego Fullscreen.
+                        // El batch asegura que Iced intente procesarlo en orden.
+                        Task::batch(vec![
+                            window::set_mode(id, window::Mode::Windowed),
+                            window::set_mode(id, window::Mode::Fullscreen),
+                        ])
+                    } else {
+                        // Al salir, volvemos a modo ventana normal
+                        window::set_mode(id, window::Mode::Windowed)
+                    }
+                });
             }
 
             // --- NUEVA LoGICA DE REDIMENSIONAMIENTO MANUAL ---
@@ -2499,7 +2593,13 @@ impl RusTale {
 
             Message::MousePressed => {
                 self.is_mouse_pressed = true;
-                self.shader_click_time = std::time::Instant::now(); // Registrar cuando se presiono
+                self.last_user_interaction = std::time::Instant::now(); // Reset interacción al hacer click
+                self.shader_click_time = std::time::Instant::now();
+                
+                // --- Resetear inactividad al presionar ---
+                self.last_mouse_move_time = std::time::Instant::now();
+                // ------------------------------------------------
+                
                 Task::none()
             }
 
@@ -3038,11 +3138,16 @@ impl RusTale {
         let window_frame = container(content_with_modal)
             .width(Length::Fill)
             .height(Length::Fill)
-            .style(move |t| theme::window_frame_style(&palette, t, self.is_maximized));
+            .style(move |t| theme::window_frame_style(&palette, t, self.is_maximized || self.is_fullscreen));
 
         // --- SISTEMA DE REDIMENSIONAMIENTO (8 LADOS) ---
-        if self.is_maximized {
-            window_frame.into()
+        if self.is_maximized || self.is_fullscreen {
+            // Aplicar cursor segun estado de ocultamiento incluso cuando está maximizado o en fullscreen
+            mouse_area(window_frame)
+                .interaction(self.get_cursor_interaction())
+                .on_move(Message::CursorMoved)
+                .on_press(Message::MousePressed)
+                .into()
         } else {
             let b = 10.0; // Grosor del borde para arrastrar
             let c = 20.0; // Tamano de la zona de las esquinas
@@ -3146,11 +3251,17 @@ impl RusTale {
             ];
 
             // STACK FINAL: resize_handles DEBE ser el ultimo elemento para capturar eventos
-            stack![
+            let final_stack = stack![
                 window_frame,   // Contenido visual abajo
                 resize_handles  // Capa invisible de control arriba
-            ]
-            .into()
+            ];
+            
+            // Aplicar cursor segun estado de ocultamiento
+            mouse_area(final_stack)
+                .interaction(self.get_cursor_interaction())
+                .on_move(Message::CursorMoved)
+                .on_press(Message::MousePressed)
+                .into()
         }
     }
 

@@ -53,21 +53,30 @@ impl LsdShader {
         start_time: Instant,
         mouse_pos: Point,
         accent: Color,
-        shader_id: u32,
-        alpha: f32,
+        _shader_id: u32, // Ignoramos IDs, solo existe Uno.
+        _alpha: f32,
         intensity: f32,
     ) -> Self {
+        use rand::Rng; // Importante: usar 'rand' para acceder al Kernel PRNG
+        
+        // Generar 2 floats de entropía pura del sistema
+        let mut rng = rand::rng(); 
+        // alpha sera nuestra 'Primary Seed' (X axis shift)
+        let entropy_seed_1: f32 = rng.random_range(0.0..1000.0);
+        // transition sera nuestra 'Secondary Seed' (Y axis shift)
+        let entropy_seed_2: f32 = rng.random_range(0.0..1000.0);
+
         Self {
             start_time,
             mouse_pos,
             accent,
-            shader_id,
-            alpha,
+            shader_id: 0, 
+            alpha: entropy_seed_1,      // Inyeccion de caos #1
+            transition: entropy_seed_2,  // Inyeccion de caos #2
             intensity,
             click_intensity: 0.0,
             last_click_time: Instant::now(),
             next_shader_id: 0,
-            transition: 0.0,
         }
     }
 
@@ -131,7 +140,7 @@ impl<Message> shader::Program<Message> for LsdShader {
                 accent_g: self.accent.g,
                 accent_b: self.accent.b,
                 intensity: combined_intensity.min(10.0), // Limitar para evitar explosiones
-                alpha: if self.transition > 0.0 { self.alpha * self.transition } else { self.alpha }, // TIP EXTRA: Durante el resize, reduce el alpha del shader a 0.5 para que el lag visual se note menos.
+                alpha: self.alpha, // Mantenemos la opacidad maestra constante durante la mezcla
                 shader_id: self.shader_id,
                 next_shader_id: self.next_shader_id,
                 transition: self.transition,
@@ -365,7 +374,7 @@ pub fn get_global_wgsl() -> &'static str {
 }
 
 // Shader de emergencia por si falla la carga
-const DEFAULT_FALLBACK: &str = r#"
+pub const DEFAULT_FALLBACK: &str = r#"
 @vertex fn vs_main(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
     return vec4<f32>(0.0, 0.0, 0.0, 1.0); 
 }
