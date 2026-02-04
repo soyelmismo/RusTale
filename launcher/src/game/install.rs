@@ -156,9 +156,11 @@ pub async fn ensure_installed(
         let jre_ok = paths.java_exec().exists();
         let butler_ok = paths.butler().exists();
         if game_ok && jre_ok && butler_ok {
-            // Incluso en modo offline, intentamos verificar el agente (es muy rapido)
-            if let Err(e) = crate::game::agent::ensure_agent(client, base_dir, &progress_callback, cancel_token.clone()).await {
-                println!("[Install] Agent verification skipped or failed: {}", e);
+            // Incluso en modo offline, verificamos rápidamente si el agente existe (sin descargar)
+            if let Ok(exists) = crate::game::agent::quick_verify_agent(base_dir).await {
+                if !exists {
+                    println!("[Install] Agent not found, will download after game launch");
+                }
             }
             progress_callback("complete", 100.0, "Verified.");
             return Ok(());
@@ -188,9 +190,8 @@ pub async fn ensure_installed(
     )
     .await?;
 
-    // 2.5 Install DualAuth Agent
-    crate::game::agent::ensure_agent(client, base_dir, &progress_callback, cancel_token.clone())
-        .await?;
+    // 2.5 Skip DualAuth Agent download during installation - will be downloaded async after game launch
+    println!("[Install] Skipping agent download during installation - will download after game launch");
 
     // 3. Find latest version or use target
     progress_callback("version", 0.0, "Checking for game updates...");

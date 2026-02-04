@@ -613,7 +613,7 @@ impl Recipe for Runner {
                     }
                 }
 
-                if let Ok(mut child) = crate::game::launch_game(
+                if let Ok(mut child) = crate::game::launch_game_with_async_agent(
                     &player_name,
                     &player_uuid,
                     &executable_path,
@@ -622,6 +622,7 @@ impl Recipe for Runner {
                     &java_exec_for_client, // <--- USE THE PROXY PATH HERE
                     auth_args,
                     envs,
+                    client.clone(),
                 ) {
                     // Wait for the game to close
                     let _ = child.wait().await;
