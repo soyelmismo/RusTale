@@ -88,7 +88,7 @@ pub async fn make_executable(path: &std::path::PathBuf) -> anyhow::Result<()> {
 pub fn find_free_port() -> u16 {
     // 1. PRIMERO: Intentar revivir el puerto guardado (Recuperacion de sesion)
     let saved_port = get_saved_port();
-    
+
     // Verificamos si podemos bindearlo nosotros (esta libre)
     if std::net::TcpListener::bind(("127.0.0.1", saved_port)).is_ok() {
         println!("[Port] Successfully recovered saved port {}", saved_port);
@@ -100,7 +100,7 @@ pub fn find_free_port() -> u16 {
     // En ese caso, este codigo no deberia ejecutarse para levantar un servidor,
     // sino para conectar. Pero si estamos aqui para buscar puerto para servidor nuevo...
     // Generamos uno nuevo.
-    
+
     use rand::Rng;
     let mut rng = rand::rng();
 
@@ -126,7 +126,7 @@ pub fn get_runtime_port_file() -> PathBuf {
             let _ = std::fs::create_dir_all(&path);
             return path.join("auth.port");
         }
-        
+
         // Prioridad 2: Construccion manual usando UID (fallback robusto)
         let uid = unsafe { libc::getuid() };
         let fallback_path = PathBuf::from(format!("/run/user/{}/rustale", uid));
@@ -151,7 +151,10 @@ pub fn get_saved_port() -> u16 {
     let path = get_runtime_port_file();
     if let Ok(s) = std::fs::read_to_string(&path) {
         if let Ok(p_val) = s.trim().parse::<u16>() {
-            println!("[SEAMLESS] Found active port {} from runtime storage", p_val);
+            println!(
+                "[SEAMLESS] Found active port {} from runtime storage",
+                p_val
+            );
             return p_val;
         }
     }
@@ -242,154 +245,42 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
     };
 
     // Launch the real Java
-    use std::process::Command;
     #[cfg(target_os = "windows")]
     use std::os::windows::process::CommandExt;
+    use std::process::Command;
 
     let mut cmd = Command::new(java_real);
-    
-    // If no server jar was found/processed, use original args
-    let mut args_processed = false;
 
-    // 2. Scan for server.jar
-    println!("Scanning arguments...");
+    // Inject DualAuth environment variables for the new patcher
+    if online_mode == OnlineFixMode::Local {
+        cmd.env("HYTALE_AUTH_DOMAIN", format!("127.0.0.000001:{}", port));
+    } else {
+        cmd.env("HYTALE_AUTH_DOMAIN", "sessions.sanasol.ws");
+    }
 
-    for (_i, arg) in args.iter().enumerate() {
-        let arg_low = arg.to_lowercase();
-        if arg_low.contains("hytaleserver") && arg_low.ends_with(".jar") {
-            println!("Found candidate arg: {}", arg);
+    // Disable Sentry for proxy
+    cmd.env("DISABLE_SENTRY", "1");
 
-            let mut original_jar_path = std::path::PathBuf::from(arg);
-
-            // Try to resolve absolute path if it doesn't exist
-            if !original_jar_path.exists() {
-                if let Ok(cwd) = &cwd_res {
-                    let abs = cwd.join(arg);
-                    if abs.exists() {
-                        original_jar_path = abs;
-                        println!("Resolved relative path to: {:?}", original_jar_path);
-                    }
-                }
-            }
-
-            if original_jar_path.exists() {
-                println!("Intercepting Server JAR at: {:?}", original_jar_path);
-
-                let server_dir = original_jar_path
-                    .parent()
-                    .unwrap_or(std::path::Path::new("."));
-
-                let possible_original = server_dir.join("HytaleServer.original");
-
-                let filename_low = original_jar_path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_lowercase();
-                let is_vanilla_name = filename_low == "hytaleserver.jar";
-
-                // Determine which jar we are actually going to use
-                let target_jar_path = if !is_vanilla_name {
-                    println!("Using specific JAR directly (Dedicated Server or pre-patched).");
-                    original_jar_path.clone()
-                } else if possible_original.exists() {
-                    println!(
-                        "Detected persistent swap (HytaleServer.original exists). Using HytaleServer.jar as patched.",
-                    );
-                    original_jar_path.clone()
+    // --- NEW: JAVA AGENT INJECTION ---
+    // The agent is located at RusTale/tools/dualauth-agent.jar
+    // We are at RusTale/tools/jre/latest/bin/java.exe (Proxy)
+    // Hierarchy: tools -> jre -> latest -> bin -> java.exe
+    if let Some(latest_dir) = bin_dir.parent() {      // tools/jre/latest
+        if let Some(jre_dir) = latest_dir.parent() {  // tools/jre
+            if let Some(tools_dir) = jre_dir.parent() { // tools
+                let agent_path = tools_dir.join("dualauth-agent.jar");
+                if agent_path.exists() {
+                    println!("[Proxy] Injecting Java Agent: {:?}", agent_path);
+                    cmd.arg(format!("-javaagent:{}", agent_path.to_string_lossy()));
                 } else {
-                    let patched_jar_name = format!("HytaleServer.{}.{}.jar", port, mode_str);
-                    let side_by_side_path = server_dir.join(patched_jar_name);
-
-                    if side_by_side_path.exists() {
-                        println!("Persistent patched JAR found (side-by-side). Using it.");
-                    } else {
-                        println!("Patched JAR not found. Patching on-the-fly...");
-                        crate::game::patcher::patch_server_jar(
-                            &original_jar_path,
-                            &side_by_side_path,
-                            online_mode,
-                            port,
-                            None,
-                        )?;
-                    }
-                    side_by_side_path
-                };
-
-                /* // Ensure AOT backup for safety
-                let _ = crate::game::patcher::handle_aot_backups(server_dir);
-
-                // Check/Generate AOT for the TARGET JAR
-                let target_aot_path = target_jar_path.with_extension("aot");
-
-                if !target_aot_path.exists() {
-                    println!(
-                        "AOT Cache for {:?} missing. Generating...",
-                        target_jar_path
-                    );
-
-                    // Collect JVM args for AOT generation
-                    let jvm_args: String = args
-                        .iter()
-                        .filter(|a| a.starts_with("-D") || a.starts_with("-X"))
-                        .cloned()
-                        .collect::<Vec<_>>()
-                        .join(" ");
-
-                    // Get application args (everything after -jar)
-                    let app_args: Vec<String> = args
-                        .iter()
-                        .skip_while(|a| *a != "-jar")
-                        .skip(2)
-                        .cloned()
-                        .collect();
-
-                    if let Err(e) = crate::game::patcher::generate_server_aot(
-                        &java_real,
-                        &target_jar_path,
-                        &jvm_args,
-                        &app_args,
-                    ) {
-                        println!("AOT Generation Warning: {}", e);
-                    } else {
-                        println!("AOT Generation Completed.");
-                    }
-                } */
-
-                // Apply replacements in args
-                // 1. Replace JAR path with the target one
-                if let Some(idx) = args.iter().position(|x| x == arg) {
-                    // Create a mutable copy for modifications
-                    let mut modified_args = args.clone();
-                    modified_args[idx] = target_jar_path.to_string_lossy().to_string();
-                    
-                    // 2. Always remove AOT arg to avoid issues
-                    if let Some(aot_idx) = modified_args
-                        .iter()
-                        .position(|r| r.starts_with("-XX:AOTCache")) {
-                        println!("Removing AOT argument to avoid startup issues.");
-                        modified_args.remove(aot_idx);
-                    }
-                    
-                    // Use modified args for command
-                    cmd.args(&modified_args);
-                } else {
-                    // Use original args if JAR path not found
-                    cmd.args(&args);
+                    println!("[Proxy] WARNING: Java Agent NOT FOUND at {:?}", agent_path);
                 }
-                args_processed = true;
-                // Break after handling the server jar arg
-                break;
-            } else {
-                println!("File not found: {:?}", original_jar_path);
             }
         }
     }
-    
-    // If no server jar was processed, use original args
-    if !args_processed {
-        cmd.args(&args);
-    }
+
+    // Launch the real Java with telemetry disabled by default
+    cmd.args(&args).arg("--disable-sentry");
     println!("Launching real java...");
 
     #[cfg(target_os = "windows")]

@@ -2,6 +2,7 @@ use crate::Message;
 use crate::config::GameSettings;
 use crate::game::install::InstallPolicy;
 use crate::game::progress::ProgressTracker;
+use anyhow::Error;
 use iced::advanced::subscription::{self, Hasher, Recipe};
 use iced::futures::{SinkExt, StreamExt};
 use iced::{Subscription, stream};
@@ -11,7 +12,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, atomic::AtomicBool};
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
-use tokio::task;
 
 /// Security guard to clean up temporary files when exiting the scope via Drop.
 struct FileCleanupGuard {
@@ -261,182 +261,111 @@ impl Recipe for Runner {
                     // =========================================================
                     let mut server_jar_path =
                         game_working_dir.join("Server").join("HytaleServer.jar");
+                    let mut server_dir = game_working_dir.join("Server");
 
-                    // Fallback: Check inside Client folder if not found in root
+                    // Fallback: Check locations
                     if !server_jar_path.exists() {
-                        let alt = game_working_dir.join("Client").join("HytaleServer.jar");
-                        if alt.exists() {
-                            server_jar_path = alt;
-                        } else {
-                            // Check root
-                            let root_alt = game_working_dir.join("HytaleServer.jar");
-                            if root_alt.exists() {
-                                server_jar_path = root_alt;
+                        let locations = [
+                            game_working_dir.join("Server").join("HytaleServer.jar"),
+                            game_working_dir.join("HytaleServer.jar"),
+                        ];
+                        for loc in locations {
+                            if loc.exists() {
+                                server_jar_path = loc;
+                                server_dir = server_jar_path.parent().unwrap().to_path_buf();
+                                break;
                             }
                         }
                     }
 
-                    if server_jar_path.exists() {
-                        let server_jar_path_clone = server_jar_path.clone();
-                        let mode_fix = settings.online_fix_mode.clone();
-                        let aurora_env_value_clone = aurora_env_value.clone();
-                        let channel_clone = settings.channel.clone();
-                        let version_clone = version_str.clone();
+                    // Ensure vanilla JAR state (restore from .original if exists)
+                    if let Err(e) = crate::game::patcher::ensure_vanilla_jar(&server_dir) {
+                        eprintln!(
+                            "[Runner] Warning: Failed to ensure vanilla jar state: {}",
+                            e
+                        );
+                    }
+
+                    // Verificamos si al menos el server_dir existe
+                    if server_dir.exists() {
+                        println!(
+                            "[Runner] Server directory found. No JAR patching needed (DualAuth Agent active)."
+                        );
+                    } else {
+                        eprintln!(
+                            "[Runner] WARNING: Server directory NOT FOUND at {:?}",
+                            server_dir
+                        );
+                        // We continue anyway as the agent is runtime-based, but logs might complain
+                    }
+
+                    // --- [RESTORED]: Authentication & Server Logic ---
+                    if settings.online_fix_mode == crate::config::OnlineFixMode::Local {
+                        let server_username = player_name.clone();
+                        let server_uuid = player_uuid.clone();
+                        let server_game_dir = game_working_dir.clone();
                         let port_clone = server_port;
 
-                        // Authentication & Server Logic
-                        match settings.online_fix_mode {
-                            crate::config::OnlineFixMode::Local => {
-                                // Start local server (aurora_env_value y auth_url ya configurados arriba)
-                                let server_username = player_name.clone();
-                                let server_uuid = player_uuid.clone();
-                                let server_game_dir = game_working_dir.clone();
-                                let port_clone = server_port;
-
-                                if !crate::game::server::is_server_alive(port_clone).await {
-                                    println!(
-                                        "[Runner] Starting Auth Server on port {}",
-                                        port_clone
-                                    );
-                                    tokio::spawn(async move {
-                                        let _ = crate::game::server::start_server(
-                                            server_username,
-                                            server_uuid,
-                                            server_game_dir,
-                                            server_stop_rx,
-                                            port_clone,
-                                        )
-                                        .await;
-                                    });
-                                    // Give it a moment to bind
-                                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                                } else {
-                                    println!(
-                                        "[Runner] Connected to existing Auth Server. Updating state..."
-                                    );
-
-                                    let client_sync = reqwest::Client::new();
-                                    let base_url = format!("http://127.0.0.000001:{}", port_clone);
-
-                                    // 1. Actualizar Path
-                                    let update_path_url =
-                                        format!("{}/internal/update-path", base_url);
-                                    let body_path = serde_json::json!({
-                                        "game_dir": server_game_dir.to_string_lossy().to_string()
-                                    });
-                                    let _ = client_sync
-                                        .post(update_path_url)
-                                        .json(&body_path)
-                                        .send()
-                                        .await;
-
-                                    // 2. Actualizar Identidad
-                                    let update_id_url =
-                                        format!("{}/internal/update-identity", base_url);
-                                    let body_id = serde_json::json!({
-                                        "username": server_username,
-                                        "uuid": server_uuid
-                                    });
-                                    let _ =
-                                        client_sync.post(update_id_url).json(&body_id).send().await;
-                                }
-                                server_started = true;
-                            }
-                            crate::config::OnlineFixMode::Sanasol => {
-                                // Sanasol configuration (aurora_env_value y auth_url ya configurados arriba)
-                            }
-                        }
-
-                        // LOGICA DE SWAP PERSISTENTE
-                        let output_clone = output.clone();
-                        task::spawn_blocking(move || {
-                            let original_jar_path =
-                                server_jar_path_clone.with_file_name("HytaleServer.original");
-
-                            // 1. Asegurar BACKUP: Si no existe .original, el .jar actual es el original
-                            if !original_jar_path.exists() {
-                                println!(
-                                    "[Runner] First run detected. Renaming HytaleServer.jar -> HytaleServer.original"
-                                );
-                                if let Err(e) =
-                                    std::fs::rename(&server_jar_path_clone, &original_jar_path)
-                                {
-                                    eprintln!("[Runner] Failed to backup original jar: {}", e);
-                                    return; // Critical failure
-                                }
-                            }
-
-                            // 2. Asegurar PARCHE: Si existe .original, usamos ese para generar el JAR persistente
-                            if original_jar_path.exists() {
-                                let patched_jar_name = format!(
-                                    "HytaleServer.{}.{}.{}.{}.jar",
+                        if !crate::game::server::is_server_alive(port_clone).await {
+                            println!("[Runner] Starting Auth Server on port {}", port_clone);
+                            tokio::spawn(async move {
+                                let _ = crate::game::server::start_server(
+                                    server_username,
+                                    server_uuid,
+                                    server_game_dir,
+                                    server_stop_rx,
                                     port_clone,
-                                    aurora_env_value_clone,
-                                    channel_clone,
-                                    version_clone
-                                );
-                                let patched_jar_full_path =
-                                    server_jar_path_clone.with_file_name(&patched_jar_name);
+                                )
+                                .await;
+                            });
+                            // Give it a moment to bind
+                            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                        } else {
+                            println!(
+                                "[Runner] Connected to existing Auth Server. Updating state..."
+                            );
 
-                                if !patched_jar_full_path.exists() {
-                                    println!(
-                                        "[Runner] Generating persistent JAR: {}",
-                                        patched_jar_name
-                                    );
+                            let client_sync = reqwest::Client::new();
+                            let base_url = format!("http://127.0.0.000001:{}", port_clone);
 
-                                    let progress_cb = move |p: f32| {
-                                        let mut tx = output_clone.clone();
-                                        let _ = tx.try_send(Message::ServerPatchProgress(p));
-                                    };
+                            // 1. Actualizar Path
+                            let update_path_url = format!("{}/internal/update-path", base_url);
+                            let body_path = serde_json::json!({
+                                "game_dir": server_game_dir.to_string_lossy().to_string()
+                            });
+                            let _ = client_sync
+                                .post(update_path_url)
+                                .json(&body_path)
+                                .send()
+                                .await;
 
-                                    if let Err(e) = crate::game::patcher::patch_server_jar(
-                                        &original_jar_path,
-                                        &patched_jar_full_path,
-                                        mode_fix,
-                                        port_clone,
-                                        Some(Box::new(progress_cb)),
-                                    ) {
-                                        eprintln!("[Runner] Failed to patch jar: {}", e);
-                                        return;
-                                    }
-                                } else {
-                                    println!(
-                                        "[Runner] Using existing persistent JAR: {}",
-                                        patched_jar_name
-                                    );
-                                }
-
-                                // 3. Copiar al destino final (HytaleServer.jar) que el juego espera
-                                if let Err(e) =
-                                    std::fs::copy(&patched_jar_full_path, &server_jar_path_clone)
-                                {
-                                    eprintln!(
-                                        "[Runner] Failed to copy patched jar to final destination: {}",
-                                        e
-                                    );
-                                } else {
-                                    println!("[Runner] Patched JAR ready at HytaleServer.jar");
-                                }
-                            }
-                        });
-                    } else {
-                        println!(
-                            "[Runner] ERROR: HytaleServer.jar NOT FOUND at {:?}",
-                            server_jar_path
-                        );
-                        let _ = output
-                            .send(Message::GameLaunched(Err(
-                                "Critical File Missing: HytaleServer.jar.".into(),
-                            )))
-                            .await;
-                        return;
+                            // 2. Actualizar Identidad
+                            let update_id_url = format!("{}/internal/update-identity", base_url);
+                            let body_id = serde_json::json!({
+                                "username": server_username,
+                                "uuid": server_uuid
+                            });
+                            let _ = client_sync.post(update_id_url).json(&body_id).send().await;
+                        }
+                        server_started = true;
                     }
+                } else {
+                    // Vanilla/cleanup - redundant now but kept for safety
+                    #[cfg(target_os = "windows")]
+                    {
+                        let dll_path = executable_path.parent().unwrap().join("Secur32.dll");
+                        if dll_path.exists() {
+                            let _ = std::fs::remove_file(dll_path);
+                        }
+                    }
+                }
 
-                    // =========================================================
-                    // PARALLEL PATCHING END
-                    // =========================================================
+                // =========================================================
+                // PHASE 3 END
+                // =========================================================
 
-                    // Extract DLL/SO (common for both modes)
+                // Extract DLL/SO (common for both modes)
+                if settings.enable_online_fix {
                     #[cfg(target_os = "windows")]
                     {
                         let dll_path = executable_path.parent().unwrap().join("Secur32.dll");
@@ -458,15 +387,6 @@ impl Recipe for Runner {
                         }
                         // Initialize the guard
                         _cleanup_guard = Some(FileCleanupGuard { path: so_path });
-                    }
-                } else {
-                    // Vanilla/cleanup
-                    #[cfg(target_os = "windows")]
-                    {
-                        let dll_path = executable_path.parent().unwrap().join("Secur32.dll");
-                        if dll_path.exists() {
-                            let _ = std::fs::remove_file(dll_path);
-                        }
                     }
                 }
 
@@ -592,6 +512,23 @@ impl Recipe for Runner {
                     envs.insert("RUSTALE_IS_PROXY".to_string(), "1".to_string());
                     envs.insert("AURORA_PORT".to_string(), server_port.to_string());
 
+                    // Disable Sentry
+                    envs.insert("DISABLE_SENTRY".to_string(), "1".to_string());
+
+                    // --- NUEVO: DUAL AUTH CONFIG ---
+                    if settings.online_fix_mode == crate::config::OnlineFixMode::Local {
+                        envs.insert(
+                            "HYTALE_AUTH_DOMAIN".to_string(),
+                            format!("127.0.0.000001:{}", server_port),
+                        );
+                    } else {
+                        envs.insert(
+                            "HYTALE_AUTH_DOMAIN".to_string(),
+                            "sessions.sanasol.ws".to_string(),
+                        );
+                    }
+                    // ------------------------------
+
                     let logs_dir = base_dir.join("logs");
                     if !logs_dir.exists() {
                         let _ = std::fs::create_dir_all(&logs_dir);
@@ -605,11 +542,12 @@ impl Recipe for Runner {
                     {
                         let natives_dir = base_dir.join("cache").join("natives");
                         let so_path = natives_dir.join("Aurora.so");
-                        
+
                         // En lugar de sobreescribir LD_PRELOAD, es mejor añadirla.
                         // Algunos sistemas tienen sus propias precargas (fakeroot, steam overlay, etc).
                         if let Ok(current_preload) = std::env::var("LD_PRELOAD") {
-                            let new_preload = format!("{}:{}", so_path.to_string_lossy(), current_preload);
+                            let new_preload =
+                                format!("{}:{}", so_path.to_string_lossy(), current_preload);
                             envs.insert("LD_PRELOAD".to_string(), new_preload);
                         } else {
                             envs.insert(
@@ -626,45 +564,51 @@ impl Recipe for Runner {
                     if let Some(bin_dir) = executable_path.parent() {
                         let bundled_lib = bin_dir.join("libzstd.so");
                         let backup_lib = bin_dir.join("libzstd.so.bundled");
-                        
+
                         // Lista de rutas comunes donde Ubuntu/Fedora/Arch guardan la libreria buena
                         let system_paths = [
                             "/usr/lib/x86_64-linux-gnu/libzstd.so.1", // Debian/Ubuntu moderno
-                            "/usr/lib64/libzstd.so.1",                 // Fedora/RHEL
-                            "/usr/lib/libzstd.so.1",                   // Arch/SteamDeck
-                            "/lib/x86_64-linux-gnu/libzstd.so.1"       // Fallback Ubuntu
+                            "/usr/lib64/libzstd.so.1",                // Fedora/RHEL
+                            "/usr/lib/libzstd.so.1",                  // Arch/SteamDeck
+                            "/lib/x86_64-linux-gnu/libzstd.so.1",     // Fallback Ubuntu
                         ];
 
                         // Buscar cual existe en tu sistema
-                        let system_lib = system_paths.iter().find(|p| std::path::Path::new(p).exists());
+                        let system_lib = system_paths
+                            .iter()
+                            .find(|p| std::path::Path::new(p).exists());
 
                         if let Some(sys_path) = system_lib {
-                             println!("[Linux-Fix] Found system zstd at: {}", sys_path);
+                            println!("[Linux-Fix] Found system zstd at: {}", sys_path);
 
-                             // 1. Respaldar la libreria corrupta que trae el juego (si es un archivo real)
-                             if bundled_lib.exists() {
-                                 let is_symlink = std::fs::symlink_metadata(&bundled_lib)
-                                     .map(|m| m.file_type().is_symlink())
-                                     .unwrap_or(false);
-                                 
-                                 // Si es archivo real, lo renombramos a .bundled
-                                 if !is_symlink {
-                                     println!("[Linux-Fix] Backing up bundled libzstd.so...");
-                                     let _ = std::fs::rename(&bundled_lib, &backup_lib);
-                                 }
-                             }
+                            // 1. Respaldar la libreria corrupta que trae el juego (si es un archivo real)
+                            if bundled_lib.exists() {
+                                let is_symlink = std::fs::symlink_metadata(&bundled_lib)
+                                    .map(|m| m.file_type().is_symlink())
+                                    .unwrap_or(false);
 
-                             // 2. Crear el Symlink magico si no existe o estaba roto
-                             // Si no existe (porque lo acabamos de renombrar), lo creamos.
-                             if !bundled_lib.exists() {
-                                 println!("[Linux-Fix] Creating symlink: Local/libzstd.so -> System/libzstd.so.1");
-                                 use std::os::unix::fs::symlink;
-                                 if let Err(e) = symlink(sys_path, &bundled_lib) {
-                                     eprintln!("[Linux-Fix] Failed to create symlink: {}", e);
-                                 }
-                             }
+                                // Si es archivo real, lo renombramos a .bundled
+                                if !is_symlink {
+                                    println!("[Linux-Fix] Backing up bundled libzstd.so...");
+                                    let _ = std::fs::rename(&bundled_lib, &backup_lib);
+                                }
+                            }
+
+                            // 2. Crear el Symlink magico si no existe o estaba roto
+                            // Si no existe (porque lo acabamos de renombrar), lo creamos.
+                            if !bundled_lib.exists() {
+                                println!(
+                                    "[Linux-Fix] Creating symlink: Local/libzstd.so -> System/libzstd.so.1"
+                                );
+                                use std::os::unix::fs::symlink;
+                                if let Err(e) = symlink(sys_path, &bundled_lib) {
+                                    eprintln!("[Linux-Fix] Failed to create symlink: {}", e);
+                                }
+                            }
                         } else {
-                             eprintln!("[Linux-Fix] WARNING: System libzstd.so.1 NOT FOUND. Install 'libzstd1' via apt/pacman.");
+                            eprintln!(
+                                "[Linux-Fix] WARNING: System libzstd.so.1 NOT FOUND. Install 'libzstd1' via apt/pacman."
+                            );
                         }
                     }
                 }

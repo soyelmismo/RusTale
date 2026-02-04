@@ -22,8 +22,8 @@ pub async fn initialize() -> Result<()> {
         base_dir.join("tools"),
         base_dir.join("tools").join("butler"),
         base_dir.join("tools").join("jre"),
-        base_dir.join("assets"),                    // <--- NUEVO
-        base_dir.join("assets").join("shaders"),     // <--- NUEVO
+        base_dir.join("assets"),                 // <--- NUEVO
+        base_dir.join("assets").join("shaders"), // <--- NUEVO
     ];
 
     for folder in folders {

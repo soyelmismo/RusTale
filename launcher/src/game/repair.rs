@@ -77,22 +77,16 @@ pub async fn repair_installation(
     // 4. Restore Original Server JAR
     progress_callback(80.0, "Restoring Original Server...");
     let server_folder = version_root.join("Server");
-    let potential_original = server_folder.join("HytaleServer.original");
-    let target_jar = server_folder.join("HytaleServer.jar");
+    if let Err(e) = crate::game::patcher::ensure_vanilla_jar(&server_folder) {
+        eprintln!(
+            "[Repair] Warning: Failed to restore Server folder JAR: {}",
+            e
+        );
+    }
 
-    if potential_original.exists() {
-        fs::copy(&potential_original, &target_jar)
-            .await
-            .context("Restoring HytaleServer.original")?;
-    } else {
-        // Fallback: check root
-        let potential_root = version_root.join("HytaleServer.original");
-        let target_root = version_root.join("HytaleServer.jar");
-        if potential_root.exists() {
-            fs::copy(&potential_root, &target_root)
-                .await
-                .context("Restoring HytaleServer.original (root)")?;
-        }
+    // Also check root for cases where Server folder is not used or JAR is at root
+    if let Err(e) = crate::game::patcher::ensure_vanilla_jar(&version_root) {
+        eprintln!("[Repair] Warning: Failed to restore Root folder JAR: {}", e);
     }
 
     // Limpiar cache de parches de Aurora (opcional pero recomendado)

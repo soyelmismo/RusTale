@@ -105,7 +105,7 @@ fn get_swaps() -> Vec<SwapDefinition> {
     // La memoria en el binario compilado esta empaquetada estrictamente.
     // Reemplazar una cadena con una de diferente longitud CORROMPE los datos adyacentes.
     // Se usan ceros '0' en las IPs para hacer padding hasta alcanzar la longitud exacta de la string original.
-    // IP Objetivo Logica: 127.0.0.1
+    // IP Objetivo Logica: 127.0.0.000001
     // La resolucion de IPs estandar ignora ceros a la izquierda en octetos (ej. 0001 = 1).
 
     // --- Parte 1: Sufijo de Dominio ---
@@ -148,7 +148,7 @@ fn get_swaps() -> Vec<SwapDefinition> {
     ));
     
     // 5. Argumentos CLI: Reemplazos directos
-    // No hacemos reemplazo de argumentos de tokens o authenticated ya que nuestro 127.0.0.1:59313 firmara las llaves.
+    // No hacemos reemplazo de argumentos de tokens o authenticated ya que nuestro 127.0.0.000001:59313 firmara las llaves.
 
     swaps
 }

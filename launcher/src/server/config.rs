@@ -11,6 +11,8 @@ pub struct ServerConfig {
     pub tunnel_provider: Option<String>,
     pub use_direct_assets: bool, // Use assets directly from client without copying
     pub auth_domain: Option<String>, // Custom F2P auth domain (e.g., "auth.sanasol.ws")
+    pub trust_all_issuers: bool, // HYTALE_TRUST_ALL_ISSUERS
+    pub trusted_issuers: Vec<String>, // HYTALE_TRUSTED_ISSUERS
 }
 
 impl Default for ServerConfig {
@@ -20,10 +22,12 @@ impl Default for ServerConfig {
             branch: "release".to_string(),
             game_version: "latest".to_string(),
             java_exec_args: "-Xms1G -Xmx4G -XX:+UseG1GC".to_string(),
-            server_args: "--auth-mode insecure --assets Assets.zip".to_string(),
+            server_args: "--auth-mode authenticated".to_string(),
             tunnel_provider: Some("none".to_string()),
             use_direct_assets: true, // Enable direct asset access by default
             auth_domain: Some("127.0.0.000001".to_string()), // Local embedded server
+            trust_all_issuers: true, // Recommended true
+            trusted_issuers: Vec::new(), // Empty list
         }
     }
 }
@@ -33,11 +37,11 @@ impl ServerConfig {
     /// Funciona para cualquier campo nuevo agregado al struct sin modificar este codigo
     fn merge_missing_fields(&mut self) {
         let default = ServerConfig::default();
-        
+
         // Convertir ambos structs a JSON Value para comparacion
         let self_json = serde_json::to_value(&*self).unwrap_or_default();
         let default_json = serde_json::to_value(&default).unwrap_or_default();
-        
+
         // Si self_json es un objeto, iterar sobre sus campos
         if let serde_json::Value::Object(mut self_obj) = self_json {
             if let serde_json::Value::Object(default_obj) = default_json {
@@ -66,7 +70,7 @@ impl ServerConfig {
                     }
                 }
             }
-            
+
             // Convertir de vuelta a ServerConfig
             if let Ok(updated) = serde_json::from_value(serde_json::Value::Object(self_obj)) {
                 *self = updated;
@@ -92,9 +96,31 @@ pub async fn load_or_create(args: &crate::Args) -> ServerConfig {
     // Esto funciona para CUALQUIER campo nuevo agregado al struct sin modificar este codigo
     config.merge_missing_fields();
 
+    // --- MIGRATION: Update legacy insecure auth-mode to authenticated ---
+    if config.server_args.contains("--auth-mode insecure") {
+        println!(
+            "[Migration] Updating legacy '--auth-mode insecure' to '--auth-mode authenticated' in server_config.toml"
+        );
+        config.server_args = config
+            .server_args
+            .replace("--auth-mode insecure", "--auth-mode authenticated");
+    }
+    // -----------------------------------------------------------------
+
     // 3. Sobreescribir con argumentos de CLI si existen (prioridad CLI)
     if let Some(m) = &args.online_mode {
+        println!(
+            "[Warning] CLI argument '--online-mode {}' is overriding 'server_config.toml' and 'HYTALE_AUTH_DOMAIN' will be updated.",
+            m
+        );
         config.online_mode = m.clone();
+
+        // Update auth_domain based on CLI online_mode as requested
+        if m == "local" {
+            config.auth_domain = Some("127.0.0.000001".to_string());
+        } else if m == "sanasol" {
+            config.auth_domain = Some("sessions.sanasol.ws".to_string());
+        }
     }
     if let Some(b) = &args.branch {
         config.branch = b.clone();

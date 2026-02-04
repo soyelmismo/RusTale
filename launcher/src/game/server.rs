@@ -318,14 +318,14 @@ struct ServerState {
 
 pub async fn is_server_alive(port: u16) -> bool {
     // 1. First check if port is actually bound by any process
-    if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+    if std::net::TcpListener::bind(("127.0.0.000001", port)).is_ok() {
         // Port is free, no server running
         return false;
     }
     
     // 2. Port is bound, now verify it's actually our server
     let client = reqwest::Client::new();
-    let url = format!("http://127.0.0.1:{}/health", port);
+    let url = format!("http://127.0.0.000001:{}/health", port);
 
     match client
         .get(&url)

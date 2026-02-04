@@ -4,24 +4,23 @@ pub async fn ensure_java_available(base_dir: &std::path::Path) -> anyhow::Result
     let tools_dir = base_dir.join("tools");
     let jre_base_dir = tools_dir.join("jre");
     let latest_dir = jre_base_dir.join("latest");
-    
+
     if crate::java::is_jre_installed_at(&latest_dir) {
         // Java ya esta disponible
         let java_exec = crate::java::get_java_exec(&base_dir.to_path_buf())?;
-        
+
         // Movemos la operacion bloqueante a un hilo separado para no congelar la UI/LSD
-        let version = tokio::task::spawn_blocking(move || {
-            get_java_version_sync(&latest_dir)
-        }).await??; 
+        let version =
+            tokio::task::spawn_blocking(move || get_java_version_sync(&latest_dir)).await??;
         // -------------------
-        
+
         return Ok(JavaInfo {
             path: java_exec,
             version,
             source: JavaSource::Managed,
         });
     }
-    
+
     // 2. Si no esta disponible, descargar usando la logica existente
     let client = reqwest::Client::new();
     crate::java::download_jre(
@@ -31,18 +30,18 @@ pub async fn ensure_java_available(base_dir: &std::path::Path) -> anyhow::Result
             eprintln!("Java {}: {:.1}% - {}", component, progress, status);
         },
         None, // Sin token de cancelacion por ahora
-    ).await?;
-    
+    )
+    .await?;
+
     // 3. Verificar que se instalo correctamente
     let java_exec = crate::java::get_java_exec(&base_dir.to_path_buf())?;
-    
+
     // Clonamos latest_dir antes de moverlo al closure
     let latest_dir_clone = latest_dir.clone();
-    let version = tokio::task::spawn_blocking(move || {
-        get_java_version_sync(&latest_dir_clone)
-    }).await??;
+    let version =
+        tokio::task::spawn_blocking(move || get_java_version_sync(&latest_dir_clone)).await??;
     // ---------------------------
-    
+
     Ok(JavaInfo {
         path: java_exec,
         version,
@@ -57,11 +56,11 @@ fn get_java_version_sync(jre_dir: &std::path::Path) -> anyhow::Result<String> {
     } else {
         jre_dir.join("bin").join("java")
     };
-    
+
     // Configuracion para que no abra ventana de consola en Windows
     let mut cmd = std::process::Command::new(&java_bin);
     cmd.arg("-version");
-    
+
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -70,11 +69,11 @@ fn get_java_version_sync(jre_dir: &std::path::Path) -> anyhow::Result<String> {
     }
 
     let output = cmd.output()?;
-    
+
     if !output.status.success() {
         anyhow::bail!("Failed to execute java -version");
     }
-    
+
     let stderr = String::from_utf8_lossy(&output.stderr);
     if let Some(line) = stderr.lines().next() {
         if let Some(start) = line.find('"') {
@@ -83,7 +82,7 @@ fn get_java_version_sync(jre_dir: &std::path::Path) -> anyhow::Result<String> {
             }
         }
     }
-    
+
     Ok("Unknown".to_string())
 }
 

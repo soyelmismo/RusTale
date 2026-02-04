@@ -406,118 +406,52 @@ pub async fn clean_patches_cache(progress_callback: &impl Fn(&str, f64, &str)) -
     Ok(())
 }
 
-/// Parches the HytaleServer.jar to redirect authentication URLs to localhost/sanasol.
-/// This is used by both the Runner (pre-patching) and the Proxy (JIT patching).
-pub fn patch_server_jar(
-    src: &PathBuf,
-    dst: &PathBuf,
-    online_mode: OnlineFixMode,
-    port: u16,
-    progress: Option<Box<dyn Fn(f32) + Send>>,
-) -> anyhow::Result<()> {
-    if !src.exists() {
-        anyhow::bail!("Source server JAR not found at {:?}", src);
-    }
+/// Prepares the server directory for patching.
+/// - Ensures HytaleServer.original exists (backing it up from HytaleServer.jar if needed).
+/// - Deletes old patched JARs (HytaleServer.*.jar) except the original.
+/// - Returns (source_jar, target_jar, recovered_source)
+/// Restores the original vanilla JAR if a .original backup exists.
+/// This prevents using a contaminated/patched JAR with the new agent system.
+pub fn ensure_vanilla_jar(server_dir: &std::path::Path) -> Result<()> {
+    let jar_path = server_dir.join("HytaleServer.jar");
+    let original_path = server_dir.join("HytaleServer.original");
 
-    let file_in = std::fs::File::open(src)?;
-    let reader = BufReader::new(file_in);
-    let mut archive = zip::ZipArchive::new(reader)?;
+    // 1. If .original exists, it's our source of truth
+    if original_path.exists() {
+        println!("[Patcher] Restoring HytaleServer.jar from .original backup...");
 
-    let file_out = std::fs::File::create(dst)?;
-    let writer = BufWriter::new(file_out);
-    let mut zip_writer = zip::ZipWriter::new(writer);
-
-    // Replacements logic
-    let replacements = if online_mode == OnlineFixMode::Sanasol {
-        vec![
-            (
-                "https://sessions.hytale.com",
-                "https://sessions.sanasol.ws".into(),
-            ),
-            ("https://api.hytale.com", "https://api.sanasol.ws".into()),
-            (
-                "https://account.hytale.com",
-                "https://account.sanasol.ws".into(),
-            ),
-        ]
-    } else {
-        vec![
-            (
-                "https://sessions.hytale.com",
-                format!("http://127.0.0.000001:{}", port),
-            ),
-            (
-                "https://api.hytale.com",
-                format!("http://127.0.0.1:{}", port),
-            ),
-            (
-                "https://account.hytale.com",
-                format!("http://127.0.0.00001:{}", port),
-            ),
-        ]
-    };
-
-    let mut byte_replacements = Vec::new();
-    for (target, replacement) in replacements {
-        let rep_bytes = replacement.into_bytes();
-        // Padding with 'spaces' to match length
-        //while rep_bytes.len() < target.len() {
-        //    rep_bytes.push(b' ');
-        //}
-        byte_replacements.push((target.as_bytes().to_vec(), rep_bytes));
-    }
-
-    let mut buffer = Vec::new();
-    let total_files = archive.len();
-
-    for i in 0..total_files {
-        if let Some(ref cb) = progress {
-            cb((i as f32 / total_files as f32) * 100.0);
+        // Remove potentially contaminated jar
+        if jar_path.exists() {
+            let _ = std::fs::remove_file(&jar_path);
         }
-        let mut file = archive.by_index(i)?;
-        let name = file.name().to_string();
 
-        let options = SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Stored) // Store for speed
-            .unix_permissions(file.unix_mode().unwrap_or(0o755));
+        std::fs::copy(&original_path, &jar_path)?;
+    } else if jar_path.exists() {
+        // If no original exists but we have a jar, create the backup now
+        // This should happen on first run with the new launcher
+        println!("[Patcher] Creating vanilla backup HytaleServer.original");
+        std::fs::copy(&jar_path, &original_path)?;
+    }
 
-        buffer.clear();
-        file.read_to_end(&mut buffer)?;
-
-        // Apply patch only to code/config files
-        if name.ends_with(".class") || name.ends_with(".json") || name.ends_with(".properties") {
-            for (target, replacement) in &byte_replacements {
-                replace_bytes(&mut buffer, target, replacement);
+    // 2. Cleanup: Remove any old HytaleServer.*.jar parches
+    if let Ok(entries) = std::fs::read_dir(server_dir) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                let name_low = name.to_lowercase();
+                if name_low.starts_with("hytaleserver.")
+                    && name_low.ends_with(".jar")
+                    && name_low != "hytaleserver.jar"
+                    && name_low != "hytaleserver.original"
+                {
+                    println!("[Patcher] Removing old/conflicting JAR: {}", name);
+                    let _ = std::fs::remove_file(path);
+                }
             }
         }
-
-        zip_writer.start_file(&name, options)?;
-        zip_writer.write_all(&buffer)?;
-    }
-
-    zip_writer.finish()?;
-
-    if let Some(ref cb) = progress {
-        cb(100.0);
     }
 
     Ok(())
-}
-
-fn replace_bytes(data: &mut [u8], target: &[u8], replacement: &[u8]) {
-    let len = data.len();
-    let pat_len = target.len();
-    if len < pat_len {
-        return;
-    }
-
-    for i in 0..=(len - pat_len) {
-        if data[i] == target[0] && &data[i..i + pat_len] == target {
-            for (j, &b) in replacement.iter().enumerate() {
-                data[i + j] = b;
-            }
-        }
-    }
 }
 
 pub fn setup_java_proxy(java_real: &PathBuf) -> anyhow::Result<PathBuf> {
@@ -577,141 +511,3 @@ pub fn remove_java_proxy(java_real: &PathBuf) -> anyhow::Result<()> {
     }
     Ok(())
 }
-
-/* /// Generates the AOT Cache for a specific JAR.
-/// Warning: This operation might time out or hang if the server doesn't exit automatically.
-/// Ideally interact with the process or wait for a specific log line then kill it.
-pub fn generate_server_aot(
-    java_exec: &PathBuf,
-    jar_path: &PathBuf,
-    jvm_args: &str,
-    app_args: &[String],
-) -> anyhow::Result<()> {
-    if !jar_path.exists() {
-        return Err(anyhow::anyhow!("JAR file not found"));
-    }
-
-    let aot_config = jar_path.with_extension("aot_config");
-    let aot_cache = jar_path.with_extension("aot");
-
-    // --- PHASE 1: RECORD ---
-    println!("[AOT] Phase 1: Recording configuration...");
-    let mut cmd_record = std::process::Command::new(java_exec);
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd_record.creation_flags(0x08000000);
-    }
-
-    cmd_record
-        .arg("-XX:AOTMode=record")
-        .arg(format!("-XX:AOTConfiguration={}", aot_config.to_string_lossy()))
-        .arg("-Xlog:aot");
-
-    for arg in jvm_args.split_whitespace() {
-        if !arg.starts_with("-XX:AOT") {
-            cmd_record.arg(arg);
-        }
-    }
-
-    cmd_record.arg("-jar").arg(jar_path);
-    for arg in app_args {
-        cmd_record.arg(arg);
-    }
-
-    cmd_record.stdout(std::process::Stdio::piped());
-    cmd_record.stderr(std::process::Stdio::inherit());
-
-    let mut child = cmd_record.spawn()?;
-    let stdout = child.stdout.take().unwrap();
-    let reader = std::io::BufReader::new(stdout);
-
-    use std::io::BufRead;
-    for line in reader.lines() {
-        if let Ok(l) = line {
-            println!("[AOT-Record] {}", l);
-            if l.contains("AOTConfiguration recorded") {
-                println!("[AOT] Configuration ready. Stopping record process.");
-                break;
-            }
-        }
-    }
-
-    let _ = child.kill();
-    let _ = child.wait();
-
-    if !aot_config.exists() {
-        return Err(anyhow::anyhow!("Failed to generate AOT configuration"));
-    }
-
-    // --- PHASE 2: CREATE ---
-    println!("[AOT] Phase 2: Creating cache archive...");
-    let mut cmd_create = std::process::Command::new(java_exec);
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd_create.creation_flags(0x08000000);
-    }
-
-    cmd_create
-        .arg("-XX:AOTMode=create")
-        .arg(format!("-XX:AOTConfiguration={}", aot_config.to_string_lossy()))
-        .arg(format!("-XX:AOTCache={}", aot_cache.to_string_lossy()))
-        .arg("-Xlog:aot");
-
-    for arg in jvm_args.split_whitespace() {
-        if !arg.starts_with("-XX:AOT") {
-            cmd_create.arg(arg);
-        }
-    }
-
-    cmd_create.arg("-jar").arg(jar_path);
-    for arg in app_args {
-        cmd_create.arg(arg);
-    }
-
-    cmd_create.stdout(std::process::Stdio::piped());
-    cmd_create.stderr(std::process::Stdio::inherit());
-
-    let mut child = cmd_create.spawn()?;
-    let stdout = child.stdout.take().unwrap();
-    let reader = std::io::BufReader::new(stdout);
-
-    for line in reader.lines() {
-        if let Ok(l) = line {
-            println!("[AOT-Create] {}", l);
-            if l.contains("AOTCache creation is complete") {
-                println!("[AOT] Cache ready. Stopping creation process.");
-                break;
-            }
-        }
-    }
-
-    let _ = child.kill();
-    let _ = child.wait();
-
-    if aot_cache.exists() {
-        let _ = std::fs::remove_file(aot_config);
-        println!("[AOT] Generation successful.");
-        Ok(())
-    } else {
-        Err(anyhow::anyhow!("Failed to generate AOT cache"))
-    }
-}
- */
-/* /// Helper to swap AOT files similar to the JARs, to avoid crashes.
-/// Returns true if it performed a swap (disabled original AOT).
-pub fn handle_aot_backups(server_dir: &std::path::Path) -> anyhow::Result<bool> {
-    let original_aot = server_dir.join("HytaleServer.aot");
-    let backup_aot = server_dir.join("HytaleServer.aot.original");
-
-    if original_aot.exists() && !backup_aot.exists() {
-        println!("[Patcher] Backing up original AOT cache to avoid mismatch.");
-        std::fs::rename(&original_aot, &backup_aot)?;
-        return Ok(true);
-    }
-    Ok(false)
-}
- */

@@ -101,4 +101,9 @@ impl GamePaths {
     pub fn channel_dir(&self, channel: &str) -> PathBuf {
         self.root.join(channel)
     }
+
+    /// Java Agent path
+    pub fn dualauth_agent(&self) -> PathBuf {
+        self.tools().join("dualauth-agent.jar")
+    }
 }

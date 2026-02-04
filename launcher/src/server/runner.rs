@@ -24,8 +24,11 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     } else {
         // Si el puerto guardado esta muerto, buscamos uno nuevo libre
         auth_port = crate::util::find_free_port();
-        println!("[RusTale] No active instance found. Starting new emulator on port {}", auth_port);
-        
+        println!(
+            "[RusTale] No active instance found. Starting new emulator on port {}",
+            auth_port
+        );
+
         // GUARDAMOS EL SECRETO: Escribimos el puerto para que Aurora (LD_PRELOAD) lo encuentre
         crate::util::save_active_port(auth_port);
     }
@@ -125,8 +128,18 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         .user_agent(format!("RusTale-Server/{}", env!("CARGO_PKG_VERSION")))
         .build()?;
 
-    // 2. Tools (JRE, Butler)
-    println!("[1/5] Checking tools...");
+    // 0. Ensure DualAuth Agent
+    println!("Ensuring DualAuth Agent is up to date...");
+    crate::game::agent::ensure_agent(
+        &reqwest::Client::new(),
+        &root_dir,
+        &|_, _, _| {}, // Silent progress for CLI
+        None,
+    )
+    .await?;
+
+    // 1. Tool Validation (JRE e Itch/Butler)
+    println!("[1/5] Validating tools...");
     let callback = |task: &str, pct: f64, msg: &str| {
         if pct == 0.0 || pct == 100.0 {
             println!("[{}] {}", task, msg);
@@ -310,11 +323,13 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     }
     // --------------------------------------------------------
 
-    // Handle assets regardless of whether JAR exists or not
+    // Handle assets configuration - prioritize local server assets first
     println!("Setting up assets configuration...");
-    let main_app_dir = crate::config::get_app_dir();
+    let local_assets_path = install_dir.join("Assets.zip");
+    let mut source_candidate = None;
 
-    // Find the best matching client version for assets
+    // Find the best matching client version for assets (moved to higher scope)
+    let main_app_dir = crate::config::get_app_dir();
     let best_version = match find_best_client_version(
         &main_app_dir,
         &config.branch,
@@ -330,88 +345,125 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         }
     };
 
-    // Try to find client installation
-    let mut source_candidate = None;
+    if local_assets_path.exists() {
+        println!("[Assets] Using existing Assets.zip found in server directory.");
+        // Force specific server args for the existing local file
+        config.server_args =
+            generate_server_args_with_direct_assets(&config.server_args, &local_assets_path);
+    } else {
+        println!("Assets not found in server dir, searching client installation...");
 
-    // Candidate 1: Specific version folder
-    let specific = main_app_dir.join(&config.branch).join(&best_version);
-    if specific.exists() && specific.join("Assets.zip").exists() {
-        source_candidate = Some(specific);
-    }
-
-    // Candidate 2: Latest folder
-    if source_candidate.is_none() && best_version == "latest" {
-        let latest = main_app_dir.join(&config.branch).join("latest");
-        if latest.exists() && latest.join("Assets.zip").exists() {
-            source_candidate = Some(latest);
+        // Try to find client installation
+        // Candidate 1: Specific version folder
+        let specific = main_app_dir.join(&config.branch).join(&best_version);
+        if specific.exists() && specific.join("Assets.zip").exists() {
+            source_candidate = Some(specific);
         }
-    }
 
-    // Handle assets based on source and configuration
-    if let Some(src) = source_candidate {
-        let src_assets = src.join("Assets.zip");
-        println!("Found client assets at: {:?}", src_assets);
+        // Candidate 2: Latest folder
+        if source_candidate.is_none() && best_version == "latest" {
+            let latest = main_app_dir.join(&config.branch).join("latest");
+            if latest.exists() && latest.join("Assets.zip").exists() {
+                source_candidate = Some(latest);
+            }
+        }
 
-        if config.use_direct_assets {
-            // Validate client version has required files
-            if let Err(e) = validate_client_version(&main_app_dir, &config.branch, &best_version) {
-                eprintln!("Client validation failed: {}", e);
-                eprintln!("Falling back to copying Assets.zip...");
-                // Fallback to copying if validation fails
-                let dst_assets = install_dir.join("Assets.zip");
-                if src_assets.exists() && !dst_assets.exists() {
-                    println!("Copying Assets.zip (~3GB) as fallback...");
-                    if let Err(e) = tokio::fs::copy(&src_assets, &dst_assets).await {
+        // Handle assets based on source and configuration
+        if let Some(src) = source_candidate {
+            let src_assets = src.join("Assets.zip");
+            println!("Found client assets at: {:?}", src_assets);
+
+            if config.use_direct_assets {
+                // Validate client version has required files
+                if let Err(e) =
+                    validate_client_version(&main_app_dir, &config.branch, &best_version)
+                {
+                    eprintln!("Client validation failed: {}", e);
+                    eprintln!("Falling back to copying Assets.zip...");
+                    // Fallback to copying if validation fails
+                    if src_assets.exists() && !local_assets_path.exists() {
+                        println!("Copying Assets.zip (~3GB) as fallback...");
+                        if let Err(e) = tokio::fs::copy(&src_assets, &local_assets_path).await {
+                            eprintln!("Failed to copy Assets.zip: {}", e);
+                        }
+                    }
+                    // Add --assets argument for local copy
+                    config.server_args = generate_server_args_with_direct_assets(
+                        &config.server_args,
+                        &local_assets_path,
+                    );
+                } else {
+                    println!("Using assets directly from client installation (no copying)");
+                    println!("Assets path: {:?}", src_assets);
+                    // Add --assets argument with absolute path to client assets
+                    config.server_args =
+                        generate_server_args_with_direct_assets(&config.server_args, &src_assets);
+                }
+            } else {
+                // Original behavior: copy Assets.zip
+                if src_assets.exists() && !local_assets_path.exists() {
+                    println!("Copying Assets.zip (~3GB)...");
+                    if let Err(e) = tokio::fs::copy(&src_assets, &local_assets_path).await {
                         eprintln!("Failed to copy Assets.zip: {}", e);
                     }
+                } else if !src_assets.exists() {
+                    eprintln!("WARNING: Source Assets.zip not found at {:?}", src_assets);
+                    eprintln!("This may cause Exit Code 7 - server will fail without assets!");
                 }
                 // Add --assets argument for local copy
-                config.server_args =
-                    generate_server_args_with_direct_assets(&config.server_args, &dst_assets);
-            } else {
-                println!("Using assets directly from client installation (no copying)");
-                println!("Assets path: {:?}", src_assets);
-                // Add --assets argument with absolute path to client assets
-                config.server_args =
-                    generate_server_args_with_direct_assets(&config.server_args, &src_assets);
+                config.server_args = generate_server_args_with_direct_assets(
+                    &config.server_args,
+                    &local_assets_path,
+                );
             }
         } else {
-            // Original behavior: copy Assets.zip
-            let dst_assets = install_dir.join("Assets.zip");
-            if src_assets.exists() && !dst_assets.exists() {
-                println!("Copying Assets.zip (~3GB)...");
-                if let Err(e) = tokio::fs::copy(&src_assets, &dst_assets).await {
-                    eprintln!("Failed to copy Assets.zip: {}", e);
-                }
-            } else if !src_assets.exists() {
-                eprintln!("WARNING: Source Assets.zip not found at {:?}", src_assets);
-                eprintln!("This may cause Exit Code 7 - server will fail without assets!");
-            }
-            // Add --assets argument for local copy
-            config.server_args =
-                generate_server_args_with_direct_assets(&config.server_args, &dst_assets);
-        }
-    } else {
-        eprintln!("WARNING: No client assets found! Server may fail to start.");
-        eprintln!(
-            "Looking for assets in: {:?}",
-            main_app_dir
-                .join(&config.branch)
-                .join(&best_version)
-                .join("Assets.zip")
-        );
-
-        // Try to use local assets if they exist
-        let local_assets = install_dir.join("Assets.zip");
-        if local_assets.exists() {
-            println!("Using local Assets.zip");
-            config.server_args =
-                generate_server_args_with_direct_assets(&config.server_args, &local_assets);
+            eprintln!("WARNING: No client assets found! Server may fail to start.");
+            eprintln!(
+                "Looking for assets in: {:?}",
+                main_app_dir
+                    .join(&config.branch)
+                    .join(&best_version)
+                    .join("Assets.zip")
+            );
         }
     }
 
-    if !server_jar_raw.exists() {
-        println!("Downloading server version {}...", target_ver_num);
+    // JAR recovery fallback - check for .original backup before downloading
+    let server_original_fallback = install_dir.join("Server").join("HytaleServer.original");
+
+    // New pre-check logic
+    let jar_available = if server_jar_raw.exists() {
+        true
+    } else if server_original_fallback.exists() {
+        println!("[Recovery] JAR missing but .original found. Restoring vanilla state...");
+        tokio::fs::copy(&server_original_fallback, &server_jar_raw)
+            .await
+            .is_ok()
+    } else {
+        false
+    };
+
+    // Check if we need to download based on JAR and assets availability
+    let assets_exist_in_server = local_assets_path.exists();
+    // Re-check if assets exist in client since source_candidate was consumed
+    let assets_exist_in_client = {
+        let specific = main_app_dir.join(&config.branch).join(&best_version);
+        if specific.exists() && specific.join("Assets.zip").exists() {
+            true
+        } else if best_version == "latest" {
+            let latest = main_app_dir.join(&config.branch).join("latest");
+            latest.exists() && latest.join("Assets.zip").exists()
+        } else {
+            false
+        }
+    };
+
+    // Only download if NEITHER jar NOR original exists AND no assets are available anywhere
+    if !jar_available && (!assets_exist_in_server && !assets_exist_in_client) {
+        println!(
+            "Downloading server version {} (no JAR or assets found locally)...",
+            target_ver_num
+        );
 
         let cache_dir = root_dir.join("cache");
         let _ = tokio::fs::create_dir_all(&cache_dir).await;
@@ -442,41 +494,28 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
             &callback,
         )
         .await?;
-    }
 
-    // 4. Parchear el JAR para Online Mode con Embedded Dual Auth
-    println!("[3/5] Patching JAR for {} mode...", config.online_mode);
-
-    // Crear backup del JAR original si no existe
-    let original_jar = server_jar_raw.with_extension("original");
-    if !original_jar.exists() {
-        println!("Creating backup of original JAR...");
-        std::fs::copy(&server_jar_raw, &original_jar)?;
-    }
-
-    let mode_enum = match config.online_mode.as_str() {
-        "sanasol" => OnlineFixMode::Sanasol,
-        _ => OnlineFixMode::Local,
-    };
-
-    let patched_jar_name = format!(
-        "HytaleServer.{}.{}.{}.{}.jar",
-        auth_port, config.online_mode, config.branch, target_ver_num
-    );
-    let patched_jar_path = install_dir.join("Server").join(&patched_jar_name);
-
-    if !patched_jar_path.exists() {
-        println!("Patch required. Generating JAR: {}", patched_jar_name);
-        crate::game::patcher::patch_server_jar(
-            &server_jar_raw,
-            &patched_jar_path,
-            mode_enum,
-            auth_port,
-            None,
-        )?;
+        // After patch application, update server args to use the extracted assets
+        config.server_args =
+            generate_server_args_with_direct_assets(&config.server_args, &local_assets_path);
     } else {
-        println!("Using existing patched JAR: {}", patched_jar_name);
+        if jar_available {
+            println!("[Skip] Base JAR is already available locally. Proceeding to patch check.");
+        } else {
+            println!(
+                "[Skip] Assets are available locally (server: {}, client: {}). Proceeding with existing files.",
+                assets_exist_in_server, assets_exist_in_client
+            );
+        }
     }
+
+    // 4. Preparar Directorio de Ejecucion (Ensure vanilla state)
+    let server_dir = server_jar_raw.parent().unwrap();
+    if let Err(e) = crate::game::patcher::ensure_vanilla_jar(server_dir) {
+        eprintln!("[Runner] Warning: Failed to ensure vanilla jar: {}", e);
+    }
+    let target_jar_path = server_jar_raw.clone();
+    println!("Using vanilla JAR: {:?}", target_jar_path);
 
     // 5. Preparar Entorno de Ejecucion
     println!("[4/5] Preparing Runtime...");
@@ -546,10 +585,10 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     // Final validation before launch
     println!("Final pre-launch validation:");
     println!("  - Working directory: {:?}", install_dir);
-    println!("  - Patched JAR: {:?}", patched_jar_path);
+    println!("  - Server JAR: {:?}", target_jar_path);
 
-    if !patched_jar_path.exists() {
-        eprintln!("FATAL: Patched JAR not found at {:?}", patched_jar_path);
+    if !target_jar_path.exists() {
+        eprintln!("FATAL: Patched JAR not found at {:?}", target_jar_path);
         return Err(anyhow::anyhow!(
             "Patched JAR missing - this will cause Exit Code 7"
         ));
@@ -584,8 +623,55 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         .filter(|a| !a.starts_with("-XX:AOTCache"))
         .collect();
 
-    cmd.args(java_args).arg("-jar").arg(&patched_jar_path);
+    // Inject DUAL AUTH CONFIG
+    if let Some(domain) = &config.auth_domain {
+        // If it's the "pseudo-local" one but we have a real dynamic port, update it
+        if domain == "127.0.0.000001" {
+            cmd.env(
+                "HYTALE_AUTH_DOMAIN",
+                format!("127.0.0.000001:{}", auth_port),
+            );
+        } else {
+            cmd.env("HYTALE_AUTH_DOMAIN", domain);
+        }
+    } else {
+        // Fallback safety
+        if config.online_mode == "local" {
+            cmd.env(
+                "HYTALE_AUTH_DOMAIN",
+                format!("127.0.0.000001:{}", auth_port),
+            );
+        } else if config.online_mode == "sanasol" {
+            cmd.env("HYTALE_AUTH_DOMAIN", "sessions.sanasol.ws");
+        }
+    }
+
+    // Disable Sentry for server
+    cmd.env("DISABLE_SENTRY", "1");
+
+    // Inject Omni-Auth and Trusted Issuers
+    cmd.env(
+        "HYTALE_TRUST_ALL_ISSUERS",
+        config.trust_all_issuers.to_string(),
+    );
+    if !config.trusted_issuers.is_empty() {
+        cmd.env("HYTALE_TRUSTED_ISSUERS", config.trusted_issuers.join(","));
+    }
+
+    // Inject Java Agent
+    let agent_path = crate::game::paths::GamePaths::new(root_dir.clone()).dualauth_agent();
+    if agent_path.exists() {
+        cmd.arg(format!("-javaagent:{}", agent_path.to_string_lossy()));
+    } else {
+        println!(
+            "  - WARNING: Java Agent NOT FOUND at {:?}. Authentication may fail.",
+            agent_path
+        );
+    }
+
+    cmd.args(java_args).arg("-jar").arg(&target_jar_path);
     cmd.args(config.server_args.split_whitespace());
+    cmd.arg("--disable-sentry");
 
     cmd.stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
