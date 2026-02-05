@@ -535,3 +535,20 @@ async fn remove_dir_recursive_exclude(dir: &Path, exclude_file: &Path) -> Result
 
     Ok(())
 }
+
+/// Helper para limpiar rutas, especialmente en Windows (eliminar \\?\)
+pub fn sanitize_path(path: &std::path::PathBuf) -> std::path::PathBuf {
+    // 1. Obtener ruta absoluta canónica
+    let absolute = path.canonicalize().unwrap_or(path.clone());
+    
+    // 2. Si estamos en Windows, quitar el prefijo UNC extendido
+    #[cfg(windows)]
+    {
+        let str_path = absolute.to_string_lossy().to_string();
+        if str_path.starts_with(r"\\?\") {
+            return std::path::PathBuf::from(&str_path[4..]);
+        }
+    }
+    
+    absolute
+}

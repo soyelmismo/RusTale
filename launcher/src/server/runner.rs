@@ -2,9 +2,13 @@ use crate::config::OnlineFixMode;
 use crate::server::assets::{
     find_best_client_version, generate_server_args_with_direct_assets, validate_client_version,
 };
-use crate::server::config::ServerConfig;
+use crate::config::ServerConfig;
+use crate::game::paths::GamePaths;
 use anyhow::{Context, Result};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use tokio::fs;
+use tokio::io::{BufReader, Lines};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 
@@ -606,6 +610,10 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         eprintln!("WARNING: Server directory not found at {:?}", server_dir);
     }
 
+    // SANITIZACION DE RUTAS para servidor
+    let clean_install_dir = crate::util::sanitize_path(&install_dir);
+    let clean_target_jar = crate::util::sanitize_path(&target_jar_path);
+
     // DEBUG: Show final server arguments
     println!("  - Final server args: {}", config.server_args);
 
@@ -614,7 +622,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     // Inject AURORA_MODE so the Proxy knows what to do
     cmd.env("AURORA_MODE", &config.online_mode);
 
-    cmd.current_dir(&install_dir);
+    cmd.current_dir(&clean_install_dir);
 
     // Filter out AOT args explicitly to avoid errors
     let java_args: Vec<&str> = config
@@ -669,7 +677,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         );
     }
 
-    cmd.args(java_args).arg("-jar").arg(&target_jar_path);
+    cmd.args(java_args).arg("-jar").arg(&clean_target_jar_path);
     cmd.args(config.server_args.split_whitespace());
     cmd.arg("--disable-sentry");
 
