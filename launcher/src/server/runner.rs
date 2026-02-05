@@ -698,14 +698,14 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     tokio::spawn(async move {
         let mut reader = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = reader.next_line().await {
-            println!("[Java-Out] {}", line);
+            println!("[Server] {}", line);
         }
     });
 
     tokio::spawn(async move {
         let mut reader = BufReader::new(stderr).lines();
         while let Ok(Some(line)) = reader.next_line().await {
-            eprintln!("[Java-Err] {}", line);
+            eprintln!("[Server-Err] {}", line);
         }
     });
     // ---------------------------------------
