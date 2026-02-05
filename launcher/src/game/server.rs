@@ -357,7 +357,7 @@ pub async fn start_server(
     port: u16,
 ) -> anyhow::Result<()> {
     // 0. Inicializar claves
-    println!("Initializing constant JWKS (RAM-Only)...");
+    println!("Initializing constant JWKS...");
     crypto::initialize_constant_keys();
 
     // 1. CARGA DE SKINS (Persistencia)

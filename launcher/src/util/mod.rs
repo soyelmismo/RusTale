@@ -3,6 +3,7 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::io::{Read, Write};
 
 #[cfg(target_os = "linux")]
 use libc;
@@ -296,90 +297,127 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
     cmd.args(&args).arg("--disable-sentry");
     println!("Launching real java...");
 
-    #[cfg(target_os = "windows")]
-    {
-        // Forzamos la NO creacion de ventana independientemente de si es servidor.
-        // Esto se debe a que el Proxy ya se encarga de heredar los canales de logs.
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-
-    // Explicitly inherit stdio to ensure logs pass through the proxy
+    // [BLOQUE FINAL PARA SERVER RUNNER]
+    
+    // 1. Configuramos PIPED solo para stdin (necesitamos inyectar comandos).
+    // stdout/stderr se heredan para que veas el log, pero Java será tolerante si la ventana se cierra.
+    cmd.stdin(std::process::Stdio::piped());
     cmd.stdout(std::process::Stdio::inherit());
     cmd.stderr(std::process::Stdio::inherit());
-    cmd.stdin(std::process::Stdio::inherit());
 
+    // === WINDOWS ISOLATION ===
     #[cfg(target_os = "windows")]
     {
-        let mut child = cmd.spawn()?;
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+        cmd.creation_flags(CREATE_NEW_PROCESS_GROUP);
+    }
 
-        // Use JobObject to ensure child survives or dies with the proxy
-        let job = if let Ok(job) = win_job::JobObject::new() {
-            use std::os::windows::io::AsRawHandle;
-            let handle = child.as_raw_handle() as _;
-            if let Err(e) = job.add_process(handle) {
-                println!("[WARN] Failed to assign child to JobObject: {}", e);
-                None
-            } else {
-                println!("[INFO] Child assigned to JobObject (auto-kill enabled)");
-                Some(job)
-            }
-        } else {
-            println!("[ERROR] Failed to create JobObject. Child might become orphan.");
-            None
-        };
-
-        // --- PARENT WATCHDOG START ---
+    // === LINUX/MAC ISOLATION ===
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        use std::os::unix::process::CommandExt;
+        // setpgid(0, 0) crea un nuevo Grupo de Procesos donde el líder es el hijo.
+        // Esto aisla al hijo de las señales broadcast (SIGHUP/SIGINT) que recibe el padre.
         unsafe {
-            use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
-            use windows_sys::Win32::System::Threading::{
-                INFINITE, OpenProcess, WaitForMultipleObjects,
-            };
-            const SYNCHRONIZE: u32 = 1048576; // 0x00100000
-            use std::os::windows::io::AsRawHandle;
-
-            let parent_pid = get_parent_pid();
-            if parent_pid != 0 {
-                let parent_handle = OpenProcess(SYNCHRONIZE, 0, parent_pid);
-                if !parent_handle.is_null() {
-                    let child_handle =
-                        child.as_raw_handle() as windows_sys::Win32::Foundation::HANDLE;
-                    let handles = [child_handle, parent_handle];
-
-                    // Wait for either the child to exit (normal) or parent to exit (orphan scenario)
-                    let result = WaitForMultipleObjects(2, handles.as_ptr(), 0, INFINITE);
-
-                    if result == WAIT_OBJECT_0 + 1 {
-                        // Parent died (Index 1)
-                        println!("[INFO] Parent process died. Killing child...");
-                        let _ = child.kill();
-                    }
-
-                    windows_sys::Win32::Foundation::CloseHandle(parent_handle);
-                }
-            }
-        }
-        // --- PARENT WATCHDOG END ---
-
-        let status = child.wait()?;
-
-        // Explicitly drop job after wait
-        drop(job);
-
-        if let Some(code) = status.code() {
-            std::process::exit(code);
+            cmd.pre_exec(|| {
+                // Importante: Esto requiere que tu Cargo.toml tenga "libc"
+                libc::setpgid(0, 0); 
+                Ok(())
+            });
         }
     }
 
-    #[cfg(not(target_os = "windows"))]
-    {
-        let status = cmd.status()?;
-        if let Some(code) = status.code() {
-            std::process::exit(code);
+    // Ahora lanzamos. 
+    // En Linux: Java estará en su propio PGID y no morirá al cerrar la terminal.
+    // Rust recibirá la señal, escribirá "shutdown", Java obedecerá.
+    let mut child = cmd.spawn().context("Failed to spawn server process")?;
+
+    // Capturamos el stdin de Java para uso exclusivo de Rust
+    let child_stdin = child.stdin.take().context("Failed to open child stdin")?;
+    
+    // Compartimos el stdin entre el usuario (teclado) y el sistema de emergencia
+    let shared_stdin = Arc::new(std::sync::Mutex::new(child_stdin));
+    
+    let stdin_writer_user = shared_stdin.clone();
+    let stdin_writer_signal = shared_stdin.clone();
+
+    // HILO 1: Pasarela de Comandos (Usuario escribe -> Java recibe)
+    std::thread::spawn(move || {
+        let mut buffer = [0u8; 1024];
+        let mut console_in = std::io::stdin();
+        loop {
+            // Si la ventana se cierra, 'read' devolverá error o 0 inmediatamente.
+            // Manejamos eso silenciosamente para que el hilo simplemente muera sin pánico.
+            match console_in.read(&mut buffer) {
+                Ok(0) => break, // EOF (Consola cerrada o Ctrl+Z)
+                Ok(n) => {
+                    if let Ok(mut writer) = stdin_writer_user.lock() {
+                        if writer.write_all(&buffer[..n]).is_err() { break; }
+                        if writer.flush().is_err() { break; }
+                    }
+                }
+                Err(_) => break, // Error de lectura (ej: ventana destruida)
+            }
         }
+    });
+
+    // HILO 2: Guardián de Cierre (Detecta X, Alt+F4, Ctrl+C)
+    // Usamos una variable atómica para asegurar que solo enviamos el comando una vez.
+    let stop_sent = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stop_sent_c = stop_sent.clone();
+
+    // CONFIGURAMOS EL TRAPO DE SEÑALES (Funciona para Click en X en Windows también)
+    let _ = ctrlc::set_handler(move || {
+        // Evitamos enviar el comando múltiples veces si el usuario spamea Ctrl+C
+        if stop_sent_c.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+        stop_sent_c.store(true, std::sync::atomic::Ordering::Relaxed);
+
+        // Intentamos imprimir alerta. Si la ventana ya no existe (click en X), 
+        // println! podría fallar, así que ignoramos errores.
+        let _ = std::panic::catch_unwind(|| {
+            println!("\n[RusTale] CLOSING EVENT DETECTED!");
+            println!("[RusTale] Injecting 'shutdown' command to safeguard world data...");
+        });
+
+        // INYECCIÓN QUIRÚRGICA: Escribimos "shutdown" directo a la memoria de Java
+        if let Ok(mut writer) = stdin_writer_signal.lock() {
+            // Escribimos "shutdown" + salto de linea explícito
+            // Ignoramos resultado por si Java ya murió antes que nosotros.
+            let _ = writer.write_all(b"shutdown\n");
+            let _ = writer.flush();
+        }
+        
+        // NO hacemos exit(). Dejamos que este closure termine. 
+        // El hilo principal (abajo) está esperando a Java (child.wait()).
+        // Al enviar 'shutdown', Java empezará a guardar y cerrarse solo.
+    });
+
+    // [WINDOWS SAFETY] Vinculamos el proceso al JobObject.
+    // Esto asegura que si Rust crashea fuerte o es asesinado por el Admin de Tareas, Java muere también.
+    // Evita servidores zombies consumiendo RAM en segundo plano.
+    #[cfg(target_os = "windows")]
+    let _job = if let Ok(job) = win_job::JobObject::new() {
+        use std::os::windows::io::AsRawHandle;
+        let _ = job.add_process(child.as_raw_handle() as _);
+        Some(job)
+    } else {
+        None
+    };
+
+    // --- BLOQUEO PRINCIPAL ---
+    // Rust se quedará congelado aquí hasta que Java termine.
+    // Como inyectamos "shutdown" arriba, Java terminará voluntariamente pronto.
+    let status = child.wait()?;
+
+    if let Some(code) = status.code() {
+        std::process::exit(code);
     }
 
     Ok(())
+    // [MODIFICACIÓN FIN]
 }
 
 pub async fn dir_size(path: impl AsRef<Path>) -> Result<u64> {

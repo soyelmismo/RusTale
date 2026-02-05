@@ -48,6 +48,7 @@ directories = "6.0.0"
 open = "5.3.3"
 uuid = { version = "1.19.0", features = ["v4", "v5", "fast-rng", "serde"] }
 sha2 = "0.10.9"
+ctrlc = { version = "3.5.1", features = ["termination"] }
 
 # Utilities
 hex = "0.4.3"

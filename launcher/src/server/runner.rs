@@ -1,14 +1,11 @@
-use crate::config::OnlineFixMode;
 use crate::server::assets::{
     find_best_client_version, generate_server_args_with_direct_assets, validate_client_version,
 };
-use crate::config::ServerConfig;
+use crate::server::config::ServerConfig;
 use crate::game::paths::GamePaths;
 use anyhow::{Context, Result};
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use tokio::fs;
-use tokio::io::{BufReader, Lines};
+use std::path::PathBuf;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 
@@ -624,13 +621,6 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
 
     cmd.current_dir(&clean_install_dir);
 
-    // Filter out AOT args explicitly to avoid errors
-    let java_args: Vec<&str> = config
-        .java_exec_args
-        .split_whitespace()
-        .filter(|a| !a.starts_with("-XX:AOTCache"))
-        .collect();
-
     // Inject DUAL AUTH CONFIG
     if let Some(domain) = &config.auth_domain {
         // If it's the "pseudo-local" one but we have a real dynamic port, update it
@@ -677,7 +667,13 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         );
     }
 
-    cmd.args(java_args).arg("-jar").arg(&clean_target_jar_path);
+    // Filter out AOT args explicitly to avoid errors
+    let java_args: Vec<&str> = config
+        .java_exec_args
+        .split_whitespace()
+        .collect();
+
+    cmd.args(java_args).arg("-jar").arg(&clean_target_jar);
     cmd.args(config.server_args.split_whitespace());
     cmd.arg("--disable-sentry");
 
@@ -700,8 +696,6 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     // --- NUEVO: Captura manual de logs ---
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
-
-    use tokio::io::{AsyncBufReadExt, BufReader};
 
     tokio::spawn(async move {
         let mut reader = BufReader::new(stdout).lines();
@@ -759,12 +753,28 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
 
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
-            println!("\n[RusTale] Stop signal received. Closing server...");
+            println!("\n[RusTale] Stop signal detected in the main process.");
+            println!("[RusTale] NO KILL. Waiting for the Proxy to save the world and close Java...");
 
-            let _ = child.kill().await;
+            // CRITICAL FIX:
+            // Before you were killing the Proxy (src/util/mod.rs) 
+            // right when it was trying to save you.
+            
+            // Now we wait up to 60 seconds for the Proxy (which already received the OS signal)
+            // to finish talking to Java and close voluntarily.
+            match tokio::time::timeout(std::time::Duration::from_secs(60), child.wait()).await {
+                Ok(status) => {
+                    println!("[RusTale] Server closed cleanly with code: {:?}", status);
+                },
+                Err(_) => {
+                    // If after 60 seconds it's still stuck, then kill it.
+                    eprintln!("[RusTale] The server took too long to save. FORCING CLOSE.");
+                    let _ = child.kill().await;
+                }
+            }
         }
         status = child.wait() => {
-            println!("[RusTale] Server process terminated: {:?}", status?);
+            println!("[RusTale] Server process terminated: {:?}", status);
         }
     }
 
