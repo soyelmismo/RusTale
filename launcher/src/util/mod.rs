@@ -261,7 +261,7 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
     // Disable Sentry for proxy
     cmd.env("DISABLE_SENTRY", "1");
 
-    // --- NEW: JAVA AGENT INJECTION ---
+    // --- NEW: JAVA AGENT INJECTION (SMART CHECK) ---
     // The agent is located at RusTale/tools/dualauth-agent.jar
     // We are at RusTale/tools/jre/latest/bin/java.exe (Proxy)
     // Hierarchy: tools -> jre -> latest -> bin -> java.exe
@@ -270,8 +270,21 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
             if let Some(tools_dir) = jre_dir.parent() { // tools
                 let agent_path = tools_dir.join("dualauth-agent.jar");
                 if agent_path.exists() {
-                    println!("[Proxy] Injecting Java Agent: {:?}", agent_path);
-                    cmd.arg(format!("-javaagent:{}", agent_path.to_string_lossy()));
+                    // FIX CRÍTICO: Verificar si el argumento YA ESTÁ PRESENTE.
+                    // Esto evita la duplicación cuando server/runner.rs ya lo ha añadido.
+                    let agent_filename = agent_path.file_name().and_then(|f| f.to_str()).unwrap_or("dualauth-agent.jar");
+                    let already_present = args.iter().any(|a| a.contains("-javaagent") && a.contains(agent_filename));
+
+                    if !already_present {
+                        println!("[Proxy] Injecting Java Agent: {:?}", agent_path);
+                        // IMPORTANTE: Usamos un método que pone el agente AL PRINCIPIO de los args internos
+                        // Sin embargo, Command no tiene 'prepend'.
+                        // Dado que args se añade despues, cmd.arg aqui añade ANTES de los argumentos del juego.
+                        // Correcto orden: java [proxy_args] [runner_args]
+                        cmd.arg(format!("-javaagent:{}", agent_path.to_string_lossy()));
+                    } else {
+                        println!("[Proxy] Java Agent already present in arguments. Skipping proxy injection.");
+                    }
                 } else {
                     println!("[Proxy] WARNING: Java Agent NOT FOUND at {:?}", agent_path);
                 }
