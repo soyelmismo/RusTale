@@ -227,63 +227,75 @@ unsafe fn patch_offline_check(region: &MemoryRegion) {
 
     let mut checks_patched = 0;
 
+    // OPTIMIZACIoN: Buscamos el opcode JZ (0x0F 0x84) en lugar de LEA (0x48).
+    // El JZ es mucho mas raro y nos permite saltar bloques grandes de codigo irrelevante.
     while i < region.size - 17 {
-        let is_match;
-        
+        // En lugar de verificar el inicio (i), verificamos el final del patron (JZ)
+        // Linux: JZ esta en offset +13. Windows: JZ esta en offset +15.
         #[cfg(target_os = "linux")]
-        {
-            // Linux Pattern: 48 8D ?? ?? E8 ?? ?? ?? 00 80 ?? ?? 00 0F 84
-            is_match = slice[i] == 0x48 && slice[i+1] == 0x8D && slice[i+4] == 0xE8 
-                      && slice[i+8] == 0x00 && slice[i+9] == 0x80 && slice[i+12] == 0x00
-                      && slice[i+13] == 0x0F && slice[i+14] == 0x84;
-        }
-
+        let jz_offset = 13;
         #[cfg(target_os = "windows")]
-        {
-             // Windows Pattern: 48 8D ?? ?? ?? E8 ?? ?? ?? ?? 80 ?? ?? ?? 00 0F 84
-             is_match = slice[i] == 0x48 && slice[i+1] == 0x8D && slice[i+5] == 0xE8
-                       && slice[i+10] == 0x80 && slice[i+14] == 0x00
-                       && slice[i+15] == 0x0F && slice[i+16] == 0x84;
-        }
+        let jz_offset = 15;
 
-        if is_match {
-            log!("[Aurora] Check de singleplayer encontrado en offset +{:X}", i);
-
-            // Busqueda de JZs cercanos para parchear (NOP = 0x90)
-            // Se necesitan encontrar 2 JZs.
-            let mut cursor = i;
-            let mut jz_found = 0;
-            
-            // Permitimos acceso RW
+        if slice[i + jz_offset] == 0x0F && slice[i + jz_offset + 1] == 0x84 {
+            // Un JZ potencial! Ahora verificamos especulativamente si el resto coincide
+            let is_match;
+        
             #[cfg(target_os = "linux")]
-            let _guard = unsafe { ScopedProtect::new(region.addr.add(i), 500, region.prot) };
-            #[cfg(target_os = "windows")]
-            let _guard = unsafe { ScopedProtect::new(region.addr.add(i), 500) };
-
-            let writable_slice = unsafe { slice::from_raw_parts_mut(region.addr, region.size) };
-
-            while jz_found < 2 && cursor < region.size - 6 && cursor < i + 500 {
-                 if writable_slice[cursor] == 0x0F && writable_slice[cursor+1] == 0x84 {
-                     // Rellenar con NOPs
-                     for k in 0..6 {
-                         writable_slice[cursor + k] = 0x90;
-                     }
-                     
-                     // !!! NUEVO: FLUSH DE CACHe !!!
-                     // Critico en Linux para que la CPU no ejecute los bytes viejos que tiene en cache
-                     unsafe { flush_instruction_cache(region.addr.add(cursor) as *mut c_void, 6); }
-                     
-                     log!("[Aurora] JZ parcheado en offset +{:X}", cursor);
-                     jz_found += 1;
-                     cursor += 6; 
-                 } else {
-                     cursor += 1;
-                 }
+            {
+                // Linux Pattern: 48 8D ?? ?? E8 ?? ?? ?? 00 80 ?? ?? 00 0F 84
+                is_match = slice[i] == 0x48 && slice[i+1] == 0x8D && slice[i+4] == 0xE8 
+                          && slice[i+8] == 0x00 && slice[i+9] == 0x80 && slice[i+12] == 0x00
+                          && slice[i+13] == 0x0F && slice[i+14] == 0x84;
             }
-            
-            if jz_found > 0 {
-                checks_patched += 1;
-                log!("[Aurora] {} JZs parcheados en este check", jz_found);
+
+            #[cfg(target_os = "windows")]
+            {
+                 // Windows Pattern: 48 8D ?? ?? ?? E8 ?? ?? ?? ?? 80 ?? ?? ?? 00 0F 84
+                 is_match = slice[i] == 0x48 && slice[i+1] == 0x8D && slice[i+5] == 0xE8
+                           && slice[i+10] == 0x80 && slice[i+14] == 0x00
+                           && slice[i+15] == 0x0F && slice[i+16] == 0x84;
+            }
+
+            if is_match {
+                log!("[Aurora] Check de singleplayer encontrado en offset +{:X}", i);
+
+                // Busqueda de JZs cercanos para parchear (NOP = 0x90)
+                // Se necesitan encontrar 2 JZs.
+                let mut cursor = i;
+                let mut jz_found = 0;
+                
+                // Permitimos acceso RW
+                #[cfg(target_os = "linux")]
+                let _guard = unsafe { ScopedProtect::new(region.addr.add(i), 500, region.prot) };
+                #[cfg(target_os = "windows")]
+                let _guard = unsafe { ScopedProtect::new(region.addr.add(i), 500) };
+
+                let writable_slice = unsafe { slice::from_raw_parts_mut(region.addr, region.size) };
+
+                while jz_found < 2 && cursor < region.size - 6 && cursor < i + 500 {
+                     if writable_slice[cursor] == 0x0F && writable_slice[cursor+1] == 0x84 {
+                         // Rellenar con NOPs
+                         for k in 0..6 {
+                             writable_slice[cursor + k] = 0x90;
+                         }
+                         
+                         // !!! NUEVO: FLUSH DE CACHe !!!
+                         // Critico en Linux para que la CPU no ejecute los bytes viejos que tiene en cache
+                         unsafe { flush_instruction_cache(region.addr.add(cursor) as *mut c_void, 6); }
+                         
+                         log!("[Aurora] JZ parcheado en offset +{:X}", cursor);
+                         jz_found += 1;
+                         cursor += 6; 
+                     } else {
+                         cursor += 1;
+                     }
+                }
+                
+                if jz_found > 0 {
+                    checks_patched += 1;
+                    log!("[Aurora] {} JZs parcheados en este check", jz_found);
+                }
             }
         }
         i += 1;
@@ -292,92 +304,70 @@ unsafe fn patch_offline_check(region: &MemoryRegion) {
     log!("[Aurora] Busqueda de checks completada: {} grupos de JZs parcheados", checks_patched);
 }
 
-// Intercambio de Strings
-unsafe fn apply_swaps(region: &MemoryRegion) {
-    init_logging();
-    log!("[Aurora] Iniciando busqueda y reemplazo de strings");
-    let mut swaps = Vec::new();
-    let mode = std::env::var("AURORA_MODE").unwrap_or_else(|_| "local".to_string());
-    
-    if mode == "sanasol" {
-        swaps.push(SwapDefinition::new(
-            "hytale.com",
-            "sanasol.ws"
-        ));
-        // Agregar aqui los mismos dominios que Windows si sanasol.ws usa subdominios estandar
-    } else {
-        swaps = get_swaps()
-    }
-    let mem = unsafe { slice::from_raw_parts(region.addr, region.size) };
+// Intercambio de Strings con busqueda especulativa
+unsafe fn apply_swaps(region: &MemoryRegion, swaps: &[SwapDefinition], first_byte_filter: &[bool; 256]) {
+    let slice = unsafe { slice::from_raw_parts(region.addr, region.size) };
     let mut replacements_found = 0;
     let mut replacements_applied = 0;
     
-    // Itera sobre la memoria buscando headers de strings
-    for i in 0..region.size {
-        // Optimizacion rapida: verifica si podria ser un string (longitud posible?)
-        if i + 4 >= region.size { break; }
-        
-        // El primer u32 es la longitud en caracteres.
-        // Hytale (Mono/C#) strings struct: [u32 Length] [u16 Char] ...
-        // No leemos la longitud directamente para saltar, buscamos byte-a-byte patrones conocidos.
-        
-        for swap in &swaps {
-            let pattern = &swap.pattern_bytes;
-            if i + pattern.len() > region.size { continue; }
+    let mut i = 0;
+    // Busqueda Optimizada: Usamos el filtro de primer byte para saltar el 99% de la memoria
+    while i < region.size.saturating_sub(24) { // Buffer para el patron mas corto
+        let len_byte = slice[i];
 
-            // IMPORTANTE: Reproducir la logica del codigo C original (get_size_ptr)
-            // El codigo C hacia memcmp de: 4 + (2*Len) - 1.
-            // Es decir, ignoraba el uLTIMO byte del string en la comparacion.
-            // Esto permite "matchear" incluso si hay basura o un null terminator raro en el ultimo byte high.
-            
-            let compare_len = pattern.len() - 1; // Magic trick de C para Linux matching
-            
-            if &mem[i..i+compare_len] == &pattern[0..compare_len] {
-                replacements_found += 1;
-                
-                // Extraer el string original para logging
-                let original_str = if i + 4 <= region.size {
-                    let len_bytes = &mem[i..i+4];
-                    let len = u32::from_le_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]]) as usize;
-                    if i + 4 + len * 2 <= region.size {
-                        let utf16_bytes = &mem[i+4..i+4+len*2];
-                        let mut utf16_vec = Vec::new();
-                        for chunk in utf16_bytes.chunks_exact(2) {
-                            utf16_vec.push(u16::from_le_bytes([chunk[0], chunk[1]]));
-                        }
-                        String::from_utf16_lossy(&utf16_vec)
-                    } else {
-                        "<invalid length>".to_string()
+        // FASE 1: FILTRO RAPIIDO (Shortcut)
+        // Solo procedemos si el primer byte coincide con alguna de las longitudes de nuestros patrones
+        if !first_byte_filter[len_byte as usize] {
+            i += 1;
+            continue;
+        }
+
+        // FASE 2: VERIFICACION DE ESTRUCTURA C# [Len:u32][UTF16...]
+        // Los strings que buscamos son cortos, asi que los bytes 1, 2 y 3 del header DEBEN ser 0
+        if slice[i+1] == 0 && slice[i+2] == 0 && slice[i+3] == 0 {
+            // FASE 3: SEARCH ESPECULATIVO
+            for swap in swaps {
+                let pattern = &swap.pattern_bytes;
+                if len_byte == pattern[0] && i + pattern.len() <= region.size {
+                    // Magic Trick: Comparamos el contenido (saltando el header ya validado)
+                    // Hytale strings: [Len u32] [Data u16...]
+                    // Comparamos len-1 para evitar tocar el byte de guarda del siguiente objeto
+                    let compare_len = pattern.len() - 1;
+                    
+                    if &slice[i+4..i+compare_len] == &pattern[4..compare_len] {
+                        replacements_found += 1;
+                        
+                        // Extraer original (solo si hay match, ahorro de CPU)
+                        let utf16_bytes = &slice[i+4..i+4+((len_byte as usize)*2)];
+                        let utf16_vec: Vec<u16> = utf16_bytes.chunks_exact(2)
+                            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                            .collect();
+                        let original_str = String::from_utf16_lossy(&utf16_vec);
+                        
+                        log!("[Aurora] String Match at {:p}: '{}'", unsafe { region.addr.add(i) }, original_str);
+
+                        // Aplicar Parche
+                        #[cfg(target_os = "linux")]
+                        let _guard = unsafe { ScopedProtect::new(region.addr.add(i), pattern.len(), region.prot) };
+                        #[cfg(target_os = "windows")]
+                        let _guard = unsafe { ScopedProtect::new(region.addr.add(i), pattern.len()) };
+                        
+                        let writable_mem = unsafe { slice::from_raw_parts_mut(region.addr, region.size) };
+                        writable_mem[i..i+compare_len].copy_from_slice(&swap.replacement_bytes[0..compare_len]);
+                        
+                        replacements_applied += 1;
+                        i += pattern.len(); // SALTO EXPONENCIAL: Saltamos todo el string ya procesado
+                        continue;
                     }
-                } else {
-                    "<invalid header>".to_string()
-                };
-                
-                log!("[Aurora] String encontrado en {:p}: '{}' -> reemplazando", unsafe { region.addr.add(i) }, original_str);
-
-                // Abrir candado de memoria
-                #[cfg(target_os = "linux")]
-                let _guard = unsafe { ScopedProtect::new(region.addr.add(i), swap.replacement_bytes.len(), region.prot) };
-                #[cfg(target_os = "windows")]
-                let _guard = unsafe { ScopedProtect::new(region.addr.add(i), swap.replacement_bytes.len()) };
-                
-                let writable_mem = unsafe { slice::from_raw_parts_mut(region.addr, region.size) };
-                
-                // !!! CORRECCIoN CRiTICA !!!
-                // Usamos length - 1 tambien para escritura. 
-                // Esto protege el byte limite del objeto siguiente en memoria compactada.
-                let safe_copy_len = compare_len; 
-                
-                // Sobrescribimos header + data pero sin tocar el ultimo byte "peligroso"
-                writable_mem[i..i+safe_copy_len].copy_from_slice(&swap.replacement_bytes[0..safe_copy_len]);
-                
-                replacements_applied += 1;
-                log!("[Aurora] Replacement applied successfully");
+                }
             }
         }
+        i += 1;
     }
     
-    log!("[Aurora] Search completed: {} strings found, {} replacements applied", replacements_found, replacements_applied);
+    if replacements_applied > 0 {
+        log!("[Aurora] Region {:p} patched: {}/{} applied", region.addr, replacements_applied, replacements_found);
+    }
 }
 
 
@@ -388,6 +378,21 @@ unsafe fn scan_and_patch() {
     use std::io::{BufRead, BufReader};
     use std::fs::File;
     use libc::{PROT_READ, PROT_WRITE, PROT_EXEC};
+
+    // PRE-CALCULO: Generamos los patrones una sola vez
+    let mode = std::env::var("AURORA_MODE").unwrap_or_else(|_| "local".to_string());
+    let mut swaps = Vec::new();
+    if mode == "sanasol" {
+        swaps.push(SwapDefinition::new("hytale.com", "sanasol.ws"));
+    } else {
+        swaps = get_swaps();
+    }
+
+    // Filtro de primer byte para apply_swaps
+    let mut filter = [false; 256];
+    for s in &swaps {
+        filter[s.pattern_bytes[0] as usize] = true;
+    }
 
     // Obtener path del exe actual para filtrar regiones
     let mut exe_path = [0u8; 1024];
@@ -426,7 +431,7 @@ unsafe fn scan_and_patch() {
                 if (prot & PROT_READ) != 0 {
                      let region = MemoryRegion { addr: start as *mut u8, size: end - start, prot };
                      unsafe { patch_offline_check(&region) };
-                     unsafe { apply_swaps(&region) };
+                     unsafe { apply_swaps(&region, &swaps, &filter) };
                 }
             }
         }
@@ -440,13 +445,27 @@ unsafe fn scan_and_patch() {
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleA;
     use windows_sys::Win32::System::Threading::GetCurrentProcess;
     
+    // PRE-CALCULO: Generamos los patrones una sola vez
+    let mode = std::env::var("AURORA_MODE").unwrap_or_else(|_| "local".to_string());
+    let mut swaps = Vec::new();
+    if mode == "sanasol" {
+        swaps.push(SwapDefinition::new("hytale.com", "sanasol.ws"));
+    } else {
+        swaps = get_swaps();
+    }
+    
+    let mut filter = [false; 256];
+    for s in &swaps {
+        filter[s.pattern_bytes[0] as usize] = true;
+    }
+
     let h_mod = unsafe { GetModuleHandleA(std::ptr::null()) };
     let mut info: MODULEINFO = unsafe {std::mem::zeroed()};
     unsafe { K32GetModuleInformation(GetCurrentProcess(), h_mod, &mut info, std::mem::size_of::<MODULEINFO>() as u32) };
     
     let region = MemoryRegion { addr: info.lpBaseOfDll as *mut u8, size: info.SizeOfImage as usize };
     unsafe { patch_offline_check(&region) };
-    unsafe { apply_swaps(&region) };
+    unsafe { apply_swaps(&region, &swaps, &filter) };
 }
 
 // ==================== ENTRY POINTS ====================
