@@ -132,6 +132,20 @@ impl Default for ModsState {
 }
 
 impl ModsState {
+    /// Helper: Obtiene string de versión sin clonar innecesariamente
+    fn version_str(version: u32) -> String {
+        if version == 0 {
+            "latest".to_string()
+        } else {
+            version.to_string()
+        }
+    }
+
+    /// Helper: Crea tupla (channel, version) para pasar a async blocks
+    fn cv_tuple(settings: &GameSettings) -> (String, String) {
+        (settings.channel.clone(), Self::version_str(settings.game_version))
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -262,13 +276,8 @@ impl ModsState {
             }
             ModsMessage::ToggleLocal(mod_info) => {
                 self.loading = true;
-                let bd = base_dir.clone();
-                let ch = settings.channel.clone();
-                let v = if settings.game_version == 0 {
-                    "latest".to_string()
-                } else {
-                    settings.game_version.to_string()
-                };
+                let bd = base_dir;
+                let (ch, v) = Self::cv_tuple(&settings);
                 Task::perform(
                     async move {
                         let _ = crate::game::mods::toggle_mod(&bd, &ch, &v, &mod_info).await;
@@ -292,7 +301,7 @@ impl ModsState {
             }
             ModsMessage::DeleteLocal(mod_info) => {
                 self.loading = true;
-                let bd = base_dir.clone();
+                let bd = base_dir;
                 let s = settings.clone();
                 Task::perform(
                     async move {
@@ -301,11 +310,7 @@ impl ModsState {
 
                         // Tambien eliminar del manifest si tiene metadatos
                         if let Some(meta) = &mod_info.metadata {
-                            let version_str = if s.game_version == 0 {
-                                "latest".to_string()
-                            } else {
-                                s.game_version.to_string()
-                            };
+                            let version_str = Self::version_str(s.game_version);
 
                             let mut manifest =
                                 crate::game::mods::load_manifest(&bd, &s.channel, &version_str)
@@ -329,32 +334,20 @@ impl ModsState {
             }
             ModsMessage::OpenFolder => {
                 let p = crate::game::GamePaths::new(base_dir);
-                let v = if settings.game_version == 0 {
-                    "latest"
-                } else {
-                    &settings.game_version.to_string()
-                };
-                crate::util::open_path(p.mods_dir(&settings.channel, v));
+                let v = Self::version_str(settings.game_version);
+                crate::util::open_path(p.mods_dir(&settings.channel, &v));
                 Task::none()
             }
             ModsMessage::OpenPatchFolder => {
                 let p = crate::game::GamePaths::new(base_dir);
-                let v = if settings.game_version == 0 {
-                    "latest"
-                } else {
-                    &settings.game_version.to_string()
-                };
-                crate::util::open_path(p.core_patches_dir(&settings.channel, v));
+                let v = Self::version_str(settings.game_version);
+                crate::util::open_path(p.core_patches_dir(&settings.channel, &v));
                 Task::none()
             }
             ModsMessage::OpenJarFolder => {
                 let p = crate::game::GamePaths::new(base_dir);
-                let v = if settings.game_version == 0 {
-                    "latest"
-                } else {
-                    &settings.game_version.to_string()
-                };
-                crate::util::open_path(p.mods_dir(&settings.channel, v));
+                let v = Self::version_str(settings.game_version);
+                crate::util::open_path(p.mods_dir(&settings.channel, &v));
                 Task::none()
             }
             ModsMessage::SwitchTab(tab) => {
@@ -658,29 +651,21 @@ impl ModsState {
             }
             ModsMessage::ToggleZipPatch(id, en) => {
                 self.loading = true;
-                let bd = base_dir.clone();
-                let s = settings.clone();
+                let bd = base_dir;
+                let (c, v) = Self::cv_tuple(&settings);
                 Task::perform(
                     async move {
                         let p = crate::game::GamePaths::new(bd);
-                        let (c, v) = (
-                            s.channel,
-                            if s.game_version == 0 {
-                                "latest".to_string()
-                            } else {
-                                s.game_version.to_string()
-                            },
-                        );
                         let (gd, pd) = (p.version_dir(&c, &v), p.core_patches_dir(&c, &v));
                         tokio::task::spawn_blocking(move || {
                             if en {
-                                crate::game::zip_mods::enable_patch(gd, pd, c.clone(), v.clone(), &id)
+                                crate::game::zip_mods::enable_patch(gd, pd, c, v, &id)
                             } else {
                                 crate::game::zip_mods::disable_patch(gd, pd, &id)
                             }
                         })
                         .await
-                        .unwrap()
+                        .map_err(|e| format!("Task failed: {}", e))?
                         .map_err(|e| e.to_string())
                     },
                     ModsMessage::PatchOperationFinished,

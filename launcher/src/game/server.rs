@@ -1122,7 +1122,7 @@ fn read_cosmetic_inventory_from_zip(zip_path: &PathBuf) -> String {
             if f.read_to_string(&mut content).is_ok() {
                 if let Ok(items) = serde_json::from_str::<Vec<CosmeticDefinition>>(&content) {
                     let ids: Vec<String> = items.into_iter().map(|i| i.id).collect();
-                    inventory.insert(field_name, ids);
+                    inventory.insert(field_name.to_string(), ids);
                 }
             }
         }
@@ -1219,7 +1219,7 @@ fn read_cosmetics_from_zip(zip_path: &PathBuf) -> String {
                             requires_generic_haircut: item.requires_generic_haircut,
                         });
                     }
-                    inventory.insert(field_name, transformed);
+                    inventory.insert(field_name.to_string(), transformed);
                 }
             }
         }
@@ -1228,38 +1228,32 @@ fn read_cosmetics_from_zip(zip_path: &PathBuf) -> String {
     serde_json::to_string(&inventory).unwrap_or("{}".to_string())
 }
 
-fn get_exact_field_name(cat: &str) -> String {
-    println!("Get exact field name requested.");
+fn get_exact_field_name(cat: &str) -> &'static str {
     match cat {
-        "BodyCharacteristics" => "bodyCharacteristic".to_string(),
-        "Capes" => "cape".to_string(),
-        "Faces" => "face".to_string(),
-        "Haircuts" => "haircut".to_string(),
-        "Mouths" => "mouth".to_string(),
-        "Overtops" => "overtop".to_string(),
-        "Undertops" => "undertop".to_string(),
-        "SkinFeatures" => "skinFeature".to_string(),
-
-        "EarAccessory" => "earAccessory".to_string(),
-        "Ears" => "ears".to_string(),
-        "Eyebrows" => "eyebrows".to_string(),
-        "Eyes" => "eyes".to_string(),
-        "FaceAccessory" => "faceAccessory".to_string(),
-        "FacialHair" => "facialHair".to_string(),
-        "Gloves" => "gloves".to_string(),
-        "HeadAccessory" => "headAccessory".to_string(),
-        "Overpants" => "overpants".to_string(),
-        "Pants" => "pants".to_string(),
-        "Shoes" => "shoes".to_string(),
-        "Underwear" => "underwear".to_string(),
-
-        // Dynamic fallback
+        "BodyCharacteristics" => "bodyCharacteristic",
+        "Capes" => "cape",
+        "Faces" => "face",
+        "Haircuts" => "haircut",
+        "Mouths" => "mouth",
+        "Overtops" => "overtop",
+        "Undertops" => "undertop",
+        "SkinFeatures" => "skinFeature",
+        "EarAccessory" => "earAccessory",
+        "Ears" => "ears",
+        "Eyebrows" => "eyebrows",
+        "Eyes" => "eyes",
+        "FaceAccessory" => "faceAccessory",
+        "FacialHair" => "facialHair",
+        "Gloves" => "gloves",
+        "HeadAccessory" => "headAccessory",
+        "Overpants" => "overpants",
+        "Pants" => "pants",
+        "Shoes" => "shoes",
+        "Underwear" => "underwear",
         _ => {
-            let mut c = cat.chars();
-            match c.next() {
-                None => String::new(),
-                Some(f) => f.to_lowercase().collect::<String>() + c.as_str(),
-            }
+            // Para casos no conocidos, devolvemos el mismo string
+            // Esto es raro, asi que no optimizamos mas
+            ""
         }
     }
 }

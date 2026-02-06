@@ -272,7 +272,9 @@ impl Recipe for Runner {
                         for loc in locations {
                             if loc.exists() {
                                 server_jar_path = loc;
-                                server_dir = server_jar_path.parent().unwrap().to_path_buf();
+                                server_dir = server_jar_path.parent()
+                                    .map(|p| p.to_path_buf())
+                                    .unwrap_or_else(|| game_working_dir.clone());
                                 break;
                             }
                         }
@@ -301,6 +303,8 @@ impl Recipe for Runner {
 
                     // --- [RESTORED]: Authentication & Server Logic ---
                     if settings.online_fix_mode == crate::config::OnlineFixMode::Local {
+                        // NOTA: Estos clones son necesarios porque las variables se usan
+                        // tanto en el async block como más adelante en la función
                         let server_username = player_name.clone();
                         let server_uuid = player_uuid.clone();
                         let server_game_dir = game_working_dir.clone();
@@ -353,7 +357,9 @@ impl Recipe for Runner {
                     // Vanilla/cleanup - redundant now but kept for safety
                     #[cfg(target_os = "windows")]
                     {
-                        let dll_path = executable_path.parent().unwrap().join("Secur32.dll");
+                        let dll_path = executable_path.parent()
+                            .map(|p| p.join("Secur32.dll"))
+                            .unwrap_or_else(|| executable_path.join("Secur32.dll"));
                         if dll_path.exists() {
                             let _ = std::fs::remove_file(dll_path);
                         }
@@ -368,7 +374,9 @@ impl Recipe for Runner {
                 if settings.enable_online_fix {
                     #[cfg(target_os = "windows")]
                     {
-                        let dll_path = executable_path.parent().unwrap().join("Secur32.dll");
+                        let dll_path = executable_path.parent()
+                            .map(|p| p.join("Secur32.dll"))
+                            .unwrap_or_else(|| executable_path.join("Secur32.dll"));
                         if let Ok(mut file) = std::fs::File::create(&dll_path) {
                             let _ = file.write_all(AURORA_BIN);
                         }

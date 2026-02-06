@@ -184,12 +184,12 @@ pub struct SettingsState {
 }
 
 impl SettingsState {
-    pub fn new(current_settings: GameSettings) -> Self {
+    pub fn new(current_settings: &GameSettings) -> Self {
         let initial_java_args = current_settings.java_args.clone();
 
         Self {
             current_tab: Tab::Game,
-            temp_settings: current_settings,
+            temp_settings: current_settings.clone(),
             available_versions: Vec::new(),
             installed_versions: Vec::new(),
             is_open: false,

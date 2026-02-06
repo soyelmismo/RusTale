@@ -565,7 +565,7 @@ impl RusTale {
                 settings: initial_settings.clone(),
                 status: LauncherStatus::Checking,
                 news_section: NewsSection::new(),
-                settings_state: SettingsState::new(initial_settings.clone()),
+                settings_state: SettingsState::new(&initial_settings),
                 download_progress: 0.0,
                 sub_progress: 0.0,
                 status_text: "Initializing...".to_string(),

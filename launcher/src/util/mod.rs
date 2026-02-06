@@ -1,5 +1,6 @@
 use crate::config::OnlineFixMode;
 use anyhow::{Context, Result};
+use once_cell::sync::Lazy;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -11,6 +12,16 @@ use libc;
 pub mod icons;
 pub mod image_cache;
 pub mod win_job;
+
+/// Cache global para evitar syscalls repetidas de current_exe()
+static CURRENT_EXE: Lazy<anyhow::Result<PathBuf>> = Lazy::new(|| {
+    std::env::current_exe().context("Failed to get current executable path")
+});
+
+/// Obtiene la ruta del ejecutable actual (cacheada)
+pub fn get_current_exe() -> anyhow::Result<&'static PathBuf> {
+    CURRENT_EXE.as_ref().map_err(|e| anyhow::anyhow!("{}", e))
+}
 
 /// Validates that the Java executable path is within expected bounds
 fn validate_java_executable(java_path: &PathBuf, bin_dir: &Path) -> Result<()> {
@@ -202,8 +213,8 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
     println!("--- PROXY STARTED ---");
     println!("Raw Args: {:?}", args);
 
-    let current_exe = std::env::current_exe()?;
-    let bin_dir = current_exe.parent().unwrap();
+    let current_exe = get_current_exe()?;
+    let bin_dir = current_exe.parent().context("Failed to get executable directory")?;
 
     let java_original_name = if cfg!(windows) {
         "java_original.exe"
@@ -218,7 +229,7 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
         println!("[WARN] java_original not found, checking side-by-side java...");
         java_real = bin_dir.join(java_default_name);
 
-        if java_real == current_exe {
+        if java_real == *current_exe {
             println!(
                 "[CRITICAL] Recursive loop detected! We are java.exe but java_original is missing.",
             );
@@ -464,8 +475,10 @@ where
     }
 
     // 1. Detect if we are running inside the source folder
-    let current_exe = std::env::current_exe().unwrap_or_default();
-    let is_self_contained = current_exe.starts_with(&src);
+    let is_self_contained = match get_current_exe() {
+        Ok(exe) => exe.starts_with(&src),
+        Err(_) => false,
+    };
 
     // 2. Calculate total size
     let total_bytes = dir_size(&src).await?;
@@ -523,9 +536,11 @@ where
             "[Migration] Running executable is inside source dir. Performing selective cleanup."
         );
         // Delete everything EXCEPT the current executable
-        if let Err(e) = remove_dir_recursive_exclude(&src, &current_exe).await {
-            eprintln!("[Migration] Warning during cleanup: {}", e);
-            // We don't return fatal error here, because the copy (the important data) is already done.
+        if let Ok(exe) = get_current_exe() {
+            if let Err(e) = remove_dir_recursive_exclude(&src, exe).await {
+                eprintln!("[Migration] Warning during cleanup: {}", e);
+                // We don't return fatal error here, because the copy (the important data) is already done.
+            }
         }
     } else {
         // Standard full deletion
