@@ -1851,6 +1851,22 @@ impl RusTale {
                 // Reconciliar estado del servidor local
                 self.reconcile_local_server();
 
+                let channel_changed = old_settings.channel != self.settings.channel;
+                if channel_changed {
+                    // Si el modal ya cargó las versiones del nuevo canal, las promovemos
+                    // para evitar el doble check de red al guardar.
+                    if !self.settings_state.available_versions.is_empty() {
+                        println!("[Settings] Promoting version cache from modal for branch: {}", self.settings.channel);
+                        self.available_versions = self.settings_state.available_versions.clone();
+                        self.latest_version = self.available_versions.first().cloned();
+                    } else {
+                        // Si no están listas (ej. el usuario guardó muy rápido), 
+                        // reseteamos para que CheckStatus haga el fetch limpio.
+                        self.latest_version = None;
+                        self.available_versions = Vec::new();
+                    }
+                }
+
                 let news_action = if s.enable_news && !old_settings.enable_news {
                     Task::done(Message::News(NewsMessage::LoadNews))
                 } else {
@@ -2123,6 +2139,10 @@ impl RusTale {
             }
             Message::RequestVersionCheck(chan) => {
                 let client = self.api_client.clone();
+                // Clear state while loading to avoid showing old branch data
+                self.settings_state.available_versions = Vec::new();
+                self.settings_state.is_loading_versions = true;
+
                 Task::perform(
                     async move {
                         let v = game::patcher::find_latest_version(&client, &chan, None)
