@@ -192,11 +192,11 @@ pub async fn find_latest_version(
     // --- PHASE 1: SPECULATIVE EXPONENTIAL SEARCH ---
     let mut lower = found_base;
     let mut step = 1;
+    let mut upper_bound = found_base + 100; // Safe default
     
     println!("Exponential Search Phase (Speculative)...");
     loop {
         // Speculatively check next 3 powers of 2 jumps in parallel
-        // e.g. if step is 1, check +1, +3 (+1+2), +7 (+1+2+4)
         let jumps = vec![step, step * 2 + step, step * 4 + step * 2 + step];
         let mut futures = Vec::new();
         for &j in &jumps {
@@ -206,16 +206,28 @@ pub async fn find_latest_version(
         let results = futures::future::join_all(futures).await;
         
         let mut highest_jump = 0;
+        let mut first_fail = 0;
         for (j, exists) in results {
-            if exists { highest_jump = j; }
+            if exists { 
+                highest_jump = j; 
+            } else if first_fail == 0 {
+                first_fail = j;
+            }
         }
         
         if highest_jump == 0 {
-            // No jumps succeeded, we found the upper bound
+            // All immediate jumps failed, the bound is somewhere in [lower, lower + jumps[0]]
+            upper_bound = lower + jumps[0];
             break;
         } else {
             lower += highest_jump;
-            step *= 4; // We jumped far, increase velocity
+            if first_fail > 0 {
+                // We found a transition: latest is in [lower, lower + (first_fail - highest_jump)]
+                upper_bound = lower + (first_fail - highest_jump);
+                break;
+            }
+            // All jumps succeeded, increase velocity and continue
+            step *= 4; 
             println!("Found version {}, jumping further...", lower);
         }
         
@@ -224,7 +236,7 @@ pub async fn find_latest_version(
 
     // --- PHASE 2: PARALLEL BINARY SEARCH (4-WAY) ---
     let mut left = lower;
-    let mut right = lower + (step * 2); // Initial upper bound from last failed jump
+    let mut right = upper_bound;
     let mut latest = lower;
 
     println!("Refining search in range [{}, {}] (4-Way Parallel)...", left, right);
@@ -233,12 +245,17 @@ pub async fn find_latest_version(
         if right - left < 4 {
             // Very small range, just linear check in parallel
             let mut futures = Vec::new();
-            for v in (left + 1)..=right {
-                futures.push(async move { (v, version_exists(v).await) });
+            // FIX: Must include 'left' because after left = best_mid + 1, 'left' is unconfirmed
+            for v in left..=right {
+                if v > latest { // Avoid re-checking if we already know 'latest'
+                    futures.push(async move { (v, version_exists(v).await) });
+                }
             }
-            let results = futures::future::join_all(futures).await;
-            for (v, exists) in results {
-                if exists && v > latest { latest = v; }
+            if !futures.is_empty() {
+                let results = futures::future::join_all(futures).await;
+                for (v, exists) in results {
+                    if exists && v > latest { latest = v; }
+                }
             }
             break;
         }
@@ -263,11 +280,10 @@ pub async fn find_latest_version(
         }
 
         if best_mid != 0 {
-            // Latest is at least best_mid, search in [best_mid, right]
             latest = best_mid;
             left = best_mid + 1;
         } else {
-            // All mid-points failed, must be in [left, p1-1]
+            // All mid-points failed, so it must be below p1
             right = p1 - 1;
         }
     }
