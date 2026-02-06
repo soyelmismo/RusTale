@@ -179,7 +179,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     println!("[2/5] Checking Game Server files...");
 
     let target_ver_num = if config.game_version == "latest" {
-        crate::game::patcher::find_latest_version(&client, &config.branch).await?
+        crate::game::patcher::find_latest_version(&client, &config.branch, None).await?
     } else {
         config
             .game_version
@@ -208,7 +208,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
                 println!("Warning: {}", e);
                 // Fallback to original logic
                 let target_ver_num = if config.game_version == "latest" {
-                    crate::game::patcher::find_latest_version(&client, &config.branch).await?
+                    crate::game::patcher::find_latest_version(&client, &config.branch, None).await?
                 } else {
                     config
                         .game_version

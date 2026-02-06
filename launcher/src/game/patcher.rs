@@ -26,7 +26,7 @@ pub async fn get_version_manifest(
     let local_version = crate::game::install::get_local_version(base_dir, channel)
         .await
         .unwrap_or(0);
-    let latest = find_latest_version(client, channel).await?;
+    let latest = find_latest_version(client, channel, Some(local_version)).await?;
 
     // Generates a list of available versions (from 1 to latest)
     let mut available: Vec<i32> = (1..=latest).collect();
@@ -118,63 +118,158 @@ pub async fn install_butler(
 }
 
 /// Finds the latest available game version from the server
-pub async fn find_latest_version(client: &reqwest::Client, channel: &str) -> Result<i32> {
+/// Optimized with speculative parallelism and hinting
+pub async fn find_latest_version(
+    client: &reqwest::Client,
+    channel: &str,
+    start_hint: Option<i32>,
+) -> Result<i32> {
     let os_name = std::env::consts::OS;
     let arch = get_arch_name();
 
-    // Try known versions first
-    let known_versions = vec![100, 50, 25, 10, 5, 1];
-    let mut found_base = 0;
-
-    println!("Searching for base version...");
-    for version in known_versions {
+    // Helper to check if a version exists on the server
+    let version_exists = |version| {
         let url = format!(
             "https://game-patches.hytale.com/patches/{}/{}/{}/0/{}.pwr",
             os_name, arch, channel, version
         );
-
-        if let Ok(resp) = client.head(&url).send().await {
-            if resp.status().is_success() {
-                found_base = version;
-                println!("Found base version {}", version);
-                break;
+        let client = client.clone();
+        async move {
+            match client.head(&url).send().await {
+                Ok(resp) => resp.status().is_success(),
+                Err(_) => false,
             }
         }
+    };
 
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let mut found_base = 0;
+
+    // --- STEP 0: HINTING ---
+    if let Some(hint) = start_hint {
+        if hint > 0 {
+            if version_exists(hint).await {
+                found_base = hint;
+                println!("Starting from hint: version {}", hint);
+            }
+        }
+    }
+
+    // --- STEP 1: PARALLEL SHORTCUTS ---
+    if found_base == 0 {
+        let shortcuts = vec![3000, 2000, 1000, 500, 250, 100, 50, 25, 10, 5, 1];
+        println!("Probing version shortcuts in parallel...");
+        
+        let mut futures = Vec::new();
+        for &v in &shortcuts {
+            futures.push(async move { (v, version_exists(v).await) });
+        }
+        
+        let results = futures::future::join_all(futures).await;
+        for (v, exists) in results {
+            if exists && v > found_base {
+                found_base = v;
+            }
+        }
+        
+        if found_base > 0 {
+            println!("Found base version via parallel probe: {}", found_base);
+        }
     }
 
     if found_base == 0 {
-        anyhow::bail!(
-            "Cannot reach game server or no versions available for {}/{}",
-            os_name,
-            arch
-        );
+        // Double check if at least version 1 exists to ensure server is reachable
+        if version_exists(1).await {
+            found_base = 1;
+        } else {
+            anyhow::bail!(
+                "Cannot reach game server or no versions available for {}/{}",
+                os_name,
+                arch
+            );
+        }
     }
 
-    // Linear search for latest version
-    let mut latest = found_base;
-    let max_check = found_base + 50;
-
-    println!("Searching for latest version...");
-    for version in (found_base + 1)..=max_check.min(200) {
-        let url = format!(
-            "https://game-patches.hytale.com/patches/{}/{}/{}/0/{}.pwr",
-            os_name, arch, channel, version
-        );
-
-        if let Ok(resp) = client.head(&url).send().await {
-            if resp.status().is_success() {
-                latest = version;
-                println!("Found version {}", version);
-            } else {
-                break;
-            }
+    // --- PHASE 1: SPECULATIVE EXPONENTIAL SEARCH ---
+    let mut lower = found_base;
+    let mut step = 1;
+    
+    println!("Exponential Search Phase (Speculative)...");
+    loop {
+        // Speculatively check next 3 powers of 2 jumps in parallel
+        // e.g. if step is 1, check +1, +3 (+1+2), +7 (+1+2+4)
+        let jumps = vec![step, step * 2 + step, step * 4 + step * 2 + step];
+        let mut futures = Vec::new();
+        for &j in &jumps {
+            futures.push(async move { (j, version_exists(lower + j).await) });
+        }
+        
+        let results = futures::future::join_all(futures).await;
+        
+        let mut highest_jump = 0;
+        for (j, exists) in results {
+            if exists { highest_jump = j; }
+        }
+        
+        if highest_jump == 0 {
+            // No jumps succeeded, we found the upper bound
+            break;
         } else {
+            lower += highest_jump;
+            step *= 4; // We jumped far, increase velocity
+            println!("Found version {}, jumping further...", lower);
+        }
+        
+        if lower > 10000 { break; }
+    }
+
+    // --- PHASE 2: PARALLEL BINARY SEARCH (4-WAY) ---
+    let mut left = lower;
+    let mut right = lower + (step * 2); // Initial upper bound from last failed jump
+    let mut latest = lower;
+
+    println!("Refining search in range [{}, {}] (4-Way Parallel)...", left, right);
+    
+    while left <= right {
+        if right - left < 4 {
+            // Very small range, just linear check in parallel
+            let mut futures = Vec::new();
+            for v in (left + 1)..=right {
+                futures.push(async move { (v, version_exists(v).await) });
+            }
+            let results = futures::future::join_all(futures).await;
+            for (v, exists) in results {
+                if exists && v > latest { latest = v; }
+            }
             break;
         }
 
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        // Split the range into 4 segments and check the 3 mid-points
+        let d = (right - left) / 4;
+        let p1 = left + d;
+        let p2 = left + 2 * d;
+        let p3 = left + 3 * d;
+        
+        let m_points = vec![p1, p2, p3];
+        let mut futures = Vec::new();
+        for &p in &m_points {
+            futures.push(async move { (p, version_exists(p).await) });
+        }
+        
+        let results = futures::future::join_all(futures).await;
+        
+        let mut best_mid = 0;
+        for (p, exists) in results {
+            if exists { best_mid = p; }
+        }
+
+        if best_mid != 0 {
+            // Latest is at least best_mid, search in [best_mid, right]
+            latest = best_mid;
+            left = best_mid + 1;
+        } else {
+            // All mid-points failed, must be in [left, p1-1]
+            right = p1 - 1;
+        }
     }
 
     println!("Latest version found: {}", latest);
