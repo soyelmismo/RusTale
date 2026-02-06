@@ -160,28 +160,40 @@ struct AuthTokenPayload {
     entitlements: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     cnf: Option<Confirmation>, // <--- Certificate Binding
+    #[serde(skip_serializing_if = "Option::is_none")]
+    skin: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 struct LauncherData {
-    #[serde(rename = "EulaAcceptedAt")] 
+    #[serde(rename = "EulaAcceptedAt")]
     eula_accepted_at: DateTime<Utc>,
-    
-    #[serde(rename = "Owner")] 
+
+    #[serde(rename = "Owner")]
     owner: String,
-    
+
     #[serde(rename = "Patchlines")]
     patchlines: Patchlines,
-    
+
     #[serde(rename = "Profiles")]
     profiles: Vec<LauncherProfileInfo>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct LauncherProfileInfo {
+    #[serde(rename = "UUID")]
+    uuid: String,
+    #[serde(rename = "Username")]
+    username: String,
+    #[serde(rename = "Entitlements")]
+    entitlements: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 struct Patchlines {
     #[serde(rename = "PreRelease")]
     pre_release: GameVersionInfo,
-    
+
     #[serde(rename = "Release")]
     release: GameVersionInfo,
 }
@@ -190,7 +202,7 @@ struct Patchlines {
 struct GameVersionInfo {
     #[serde(rename = "BuildVersion")]
     build_version: String,
-    
+
     #[serde(rename = "Newest")]
     newest: i32,
 }
@@ -202,24 +214,110 @@ pub struct AccountInfo {
 
     #[serde(alias = "Entitlements")]
     entitlements: Vec<String>,
-    
+
     #[serde(rename = "nextNameChangeAt")]
     next_name_change_at: DateTime<Utc>,
-    
+
     #[serde(skip_serializing_if = "Option::is_none")]
     skin: Option<String>,
-    
+
     #[serde(alias = "Username")]
     username: String,
-    
+
     #[serde(alias = "UUID")]
     uuid: String,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct PlayerSkin {
+    id: String,
+    name: String,
+    #[serde(rename = "skinData")]
+    skin_data: String,
+    #[serde(rename = "createdAt")]
+    created_at: DateTime<Utc>,
+    #[serde(rename = "updatedAt", skip_serializing_if = "Option::is_none")]
+    updated_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+struct UserSkinsData {
+    #[serde(rename = "playerSkins")]
+    player_skins: Vec<PlayerSkin>,
+    #[serde(rename = "activeSkin")]
+    active_skin: Option<String>,
+    #[serde(default)]
+    skin: serde_json::Value,
+}
+
+#[derive(Serialize)]
+struct PlayerSkinsResponse {
+    #[serde(rename = "activeSkin")]
+    active_skin: Option<String>,
+    #[serde(rename = "maxSkins")]
+    max_skins: i32,
+    skins: Vec<PlayerSkin>,
+}
+
 #[derive(Deserialize)]
+struct PlayerSkinsPostRequest {
+    name: Option<String>,
+    #[serde(rename = "skinData")]
+    skin_data: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct PlayerSkinsSetActiveRequest {
+    #[serde(rename = "skinId")]
+    skin_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct CosmeticDefinition {
     #[serde(rename = "Id")]
     id: String,
+    #[serde(rename = "Name", default)]
+    name: Option<String>,
+    #[serde(rename = "Model", default)]
+    model: Option<String>,
+    #[serde(rename = "GreyscaleTexture", default)]
+    greyscale_texture: Option<String>,
+    #[serde(rename = "Textures", default)]
+    textures: Option<serde_json::Value>,
+    #[serde(rename = "GradientSet", default)]
+    gradient_set: Option<String>,
+    #[serde(rename = "Variants", default)]
+    variants: Option<serde_json::Value>,
+    #[serde(rename = "HeadAccessoryType", default)]
+    head_accessory_type: Option<String>,
+    #[serde(rename = "HairType", default)]
+    hair_type: Option<String>,
+    #[serde(rename = "RequiresGenericHaircut", default)]
+    requires_generic_haircut: Option<bool>,
+}
+
+#[derive(Serialize)]
+struct CosmeticItemResponse {
+    id: String,
+    name: String,
+    thumbnail: Option<String>,
+    colors: Vec<String>,
+    #[serde(rename = "gradientSet")]
+    gradient_set: Option<String>,
+    model: Option<String>,
+    variants: Option<Vec<CosmeticVariant>>,
+    #[serde(rename = "headAccessoryType", skip_serializing_if = "Option::is_none")]
+    head_accessory_type: Option<String>,
+    #[serde(rename = "hairType", skip_serializing_if = "Option::is_none")]
+    hair_type: Option<String>,
+    #[serde(rename = "requiresGenericHaircut", skip_serializing_if = "Option::is_none")]
+    requires_generic_haircut: Option<bool>,
+}
+
+#[derive(Serialize)]
+struct CosmeticVariant {
+    id: String,
+    name: String,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -268,8 +366,8 @@ struct SessionTokenPayload {
 #[derive(Serialize, Deserialize)]
 struct ProfileInfo {
     username: String,
-    //entitlements: Vec<String>,
-    //skin: serde_json::Value, // Changed from String to Value to ensure JSON object
+    entitlements: Vec<String>,
+    skin: serde_json::Value,
 }
 
 // ==================== SERVER LOGIC ====================
@@ -322,7 +420,7 @@ pub async fn is_server_alive(port: u16) -> bool {
         // Port is free, no server running
         return false;
     }
-    
+
     // 2. Port is bound, now verify it's actually our server
     let client = reqwest::Client::new();
     let url = format!("http://127.0.0.000001:{}/health", port);
@@ -344,7 +442,7 @@ pub async fn is_server_alive(port: u16) -> bool {
             } else {
                 false
             }
-        },
+        }
         Err(_) => false,
     }
 }
@@ -364,13 +462,13 @@ pub async fn start_server(
     let identity_dir = crate::config::get_identity_dir();
     let skin_file = identity_dir.join("skins.json");
 
-    let skins: HashMap<String, serde_json::Value> = if skin_file.exists() {
+    let mut skins: HashMap<String, serde_json::Value> = if skin_file.exists() {
         // Leemos el archivo
         match tokio::fs::read_to_string(&skin_file).await {
             Ok(content) => {
                 // Intentamos parsear. Si falla (archivo corrupto), iniciamos vacio.
                 serde_json::from_str(&content).unwrap_or_default()
-            },
+            }
             Err(e) => {
                 eprintln!("[Server] Error reading skins.json: {}", e);
                 HashMap::new()
@@ -379,6 +477,47 @@ pub async fn start_server(
     } else {
         HashMap::new()
     };
+
+    // --- GLOBAL MIGRATION (Persistence upgrade) ---
+    let mut modified = false;
+    let uuids: Vec<String> = skins.keys().cloned().collect();
+    for uuid in uuids {
+        let mut user_data = get_user_skins_data(&uuid, &skins);
+        let mut local_modified = false;
+
+        // 1. Check if 'playerSkins' is missing
+        match skins.get(&uuid) {
+            Some(val) if val.get("playerSkins").is_none() => {
+                println!("[Server] Migrating legacy skin format for {}", uuid);
+                local_modified = true;
+            }
+            _ => {}
+        }
+
+        // 2. Check for invalid UUIDs (Fix for client crash)
+        for skin in &mut user_data.player_skins {
+            if uuid::Uuid::parse_str(&skin.id).is_err() {
+                println!("[Server] Fixing invalid skin ID '{}' for {}", skin.id, uuid);
+                let old_id = skin.id.clone();
+                let new_id = uuid::Uuid::new_v4().to_string();
+                skin.id = new_id.clone();
+                if user_data.active_skin.as_ref() == Some(&old_id) {
+                    user_data.active_skin = Some(new_id);
+                }
+                local_modified = true;
+            }
+        }
+
+        if local_modified {
+            skins.insert(uuid, serde_json::to_value(&user_data).unwrap_or_default());
+            modified = true;
+        }
+    }
+
+    if modified {
+        save_skins_to_disk(&skins).await;
+        println!("[Server] Global migration completed and saved to disk.");
+    }
 
     // Shared state inicializado con las skins cargadas
     let state = Arc::new(tokio::sync::Mutex::new(ServerState {
@@ -427,13 +566,63 @@ pub async fn start_server(
     let cosmetics_get = warp::path!("my-account" / "cosmetics")
         .and(warp::get())
         .and(state_filter.clone())
-        .then(handle_cosmetics_get);
+        .then(handle_cosmetics_inventory_get);
+
+    let cosmetics_list = warp::path!("cosmetics" / "list")
+        .and(warp::get())
+        .and(state_filter.clone())
+        .then(handle_cosmetics_list_get);
 
     // 4. GET /my-account/get-launcher-data
     let launcher_data = warp::path!("my-account" / "get-launcher-data")
         .and(warp::get())
         .and(state_filter.clone())
         .then(handle_launcher_data);
+
+    let get_profiles = warp::path!("my-account" / "get-profiles")
+        .and(warp::get())
+        .and(auth_header.clone())
+        .and(state_filter.clone())
+        .then(handle_get_profiles);
+
+    let account_data_skin = warp::path!("account-data" / "skin" / String)
+        .and(warp::get())
+        .and(state_filter.clone())
+        .then(handle_account_data_skin_get);
+
+    // --- PLAYER SKINS ROUTES ---
+    let player_skins_get = warp::path!("player-skins")
+        .and(warp::get())
+        .and(auth_header.clone())
+        .and(state_filter.clone())
+        .then(handle_player_skins_get);
+
+    let player_skins_post = warp::path!("player-skins")
+        .and(warp::post())
+        .and(auth_header.clone())
+        .and(warp::body::json())
+        .and(state_filter.clone())
+        .then(handle_player_skins_post);
+
+    let player_skins_active = warp::path!("player-skins" / "active")
+        .and(warp::put())
+        .and(auth_header.clone())
+        .and(warp::body::json())
+        .and(state_filter.clone())
+        .then(handle_player_skins_set_active);
+
+    let player_skins_update = warp::path!("player-skins" / String)
+        .and(warp::put())
+        .and(auth_header.clone())
+        .and(warp::body::json())
+        .and(state_filter.clone())
+        .then(handle_player_skins_update);
+
+    let player_skins_delete = warp::path!("player-skins" / String)
+        .and(warp::delete())
+        .and(auth_header.clone())
+        .and(state_filter.clone())
+        .then(handle_player_skins_delete);
 
     // 5. POST /game-session/child (Auth)
     let session_child = warp::path!("game-session" / "child")
@@ -573,11 +762,29 @@ pub async fn start_server(
         .allow_methods(vec!["GET", "POST", "PUT", "DELETE"]);
 
     let log = warp::log::custom(|info| {
+        let path = info.path();
+        if path.starts_with("/telemetry") || path.starts_with("/analytics") || path.starts_with("/event") {
+            return;
+        }
+
+        let mut filtered_headers = HashMap::new();
+        for (name, value) in info.request_headers() {
+            let name_str = name.as_str();
+            let mut val_str = value.to_str().unwrap_or("[invalid]").to_string();
+
+            if name_str.eq_ignore_ascii_case("authorization") && val_str.starts_with("Bearer ") {
+                if val_str.len() > 15 {
+                    val_str = format!("{}...", &val_str[..15]);
+                }
+            }
+            filtered_headers.insert(name_str.to_string(), val_str);
+        }
+
         println!(
             "Request: {} {}\n    Headers: {:?}",
             info.method(),
-            info.path(),
-            info.request_headers()
+            path,
+            filtered_headers
         );
     });
 
@@ -591,7 +798,17 @@ pub async fn start_server(
     let account_routes = game_profile
         .or(skin_put)
         .or(cosmetics_get)
+        .or(cosmetics_list)
         .or(launcher_data)
+        .or(get_profiles)
+        .or(account_data_skin)
+        .boxed();
+
+    let player_skins_routes = player_skins_get
+        .or(player_skins_post)
+        .or(player_skins_active)
+        .or(player_skins_update)
+        .or(player_skins_delete)
         .boxed();
 
     let session_routes = session_child
@@ -618,11 +835,13 @@ pub async fn start_server(
     // Combinar los grupos ya "cajitas" (boxed)
     let routes = account_routes
         .or(session_routes)
+        .or(player_skins_routes)
         .or(profile_routes)
         .or(system_routes)
         .or(misc_routes)
         .with(cors)
-        .with(log);
+        .with(log)
+        .boxed();
 
     // Start server on 127.0.0.1:{port} - BLINDAJE ESTRICTO A LOOPBACK
     // Esto es CLAVE en Linux para pasar desapercibido por el firewall
@@ -642,10 +861,10 @@ pub async fn start_server(
 
     println!("Seamless Server listening on loopback: http://{}", addr);
     let server = warp::serve(routes).bind(addr).await;
-
+    
     let graceful_server = server.graceful(async {
-        shutdown_rx.await.ok();
-    });
+            shutdown_rx.await.ok();
+        });
 
     tokio::spawn(graceful_server.run());
     Ok(())
@@ -660,14 +879,11 @@ async fn handle_game_profile(
     let state = state.lock().await;
     let target_uuid = extract_uuid_from_auth(auth, &state.uuid);
 
-    // 1. Obtener la skin (Value/Objeto) del mapa en memoria
-    let skin_obj = state.skins.get(&target_uuid)
-        .cloned()
-        .unwrap_or_else(|| serde_json::from_str(DEFAULT_SKIN).unwrap_or_default());
+    // 1. Obtener los datos de skins (con migración si es necesario)
+    let user_data = get_user_skins_data(&target_uuid, &state.skins);
+    let skin_obj = user_data.skin;
 
     // 2. CONVERTIR A STRING (Crucial para cliente de Hytale)
-    // El cliente espera: "skin": "{\"hair\":...}"
-    // NO: "skin": { "hair": ... }
     let skin_string = serde_json::to_string(&skin_obj).ok();
 
     let info = AccountInfo {
@@ -676,22 +892,25 @@ async fn handle_game_profile(
         entitlements: vec!["game.base".to_string()],
         created_at: Utc::now(),
         next_name_change_at: Utc::now() + chrono::Duration::days(30),
-        skin: skin_string, // String o None
+        skin: skin_string,
     };
 
-    // 3. Crear respuesta JSON
     let json_resp = warp::reply::json(&info);
 
-    // 4. Agregar headers anti-cache para que los cambios se vean instantaneamente
     warp::reply::with_header(
         warp::reply::with_header(
-            warp::reply::with_header(json_resp, "Cache-Control", "no-store, no-cache, must-revalidate"),
-            "Pragma", "no-cache"
+            warp::reply::with_header(
+                json_resp,
+                "Cache-Control",
+                "no-store, no-cache, must-revalidate",
+            ),
+            "Pragma",
+            "no-cache",
         ),
-        "Expires", "0"
+        "Expires",
+        "0",
     )
 }
-
 
 async fn handle_skin_put(
     auth: Option<String>,
@@ -699,23 +918,17 @@ async fn handle_skin_put(
     state: Arc<tokio::sync::Mutex<ServerState>>,
 ) -> impl warp::Reply {
     let mut state = state.lock().await;
-    
-    // Identificar usuario desde el token (o usar el default del estado)
     let target_uuid = extract_uuid_from_auth(auth, &state.uuid);
 
     if let Ok(json_str) = String::from_utf8(body.to_vec()) {
-        // Intentar parsear el body como Objeto JSON
-        if let Ok(serde_json::Value::Object(new_parts)) = serde_json::from_str::<serde_json::Value>(&json_str) {
-            
+        if let Ok(serde_json::Value::Object(new_parts)) =
+            serde_json::from_str::<serde_json::Value>(&json_str)
+        {
             println!(">>> [SKIN UPDATE] Received update for {}", target_uuid);
 
-            // 1. Obtener la skin actual de memoria, o la default si no existe
-            let mut current_skin = state.skins.get(&target_uuid)
-                .cloned()
-                .unwrap_or_else(|| serde_json::from_str(DEFAULT_SKIN).unwrap_or_default());
+            let mut user_data = get_user_skins_data(&target_uuid, &state.skins);
+            let mut current_skin = user_data.skin.clone();
 
-            // 2. MERGE INTELIGENTE:
-            // Si la actual es un objeto, iteramos sobre los campos nuevos y actualizamos/insertamos.
             if let serde_json::Value::Object(ref mut current_map) = current_skin {
                 for (k, v) in new_parts {
                     // Sobrescribe el campo existente o agrega el nuevo
@@ -726,105 +939,112 @@ async fn handle_skin_put(
                 current_skin = serde_json::Value::Object(new_parts);
             }
 
-            // 3. Actualizar memoria RAM
-            state.skins.insert(target_uuid.clone(), current_skin);
-
-            // 4. PERSISTENCIA EN DISCO (Async)
-            let identity_dir = crate::config::get_identity_dir();
-            let save_path = identity_dir.join("skins.json");
-            
-            // Creamos carpeta si no existe
-            if let Some(parent) = save_path.parent() {
-                let _ = tokio::fs::create_dir_all(parent).await;
-            }
-
-            // Serializar el mapa completo de todas las skins
-            if let Ok(serialized) = serde_json::to_string_pretty(&state.skins) {
-                if let Err(e) = tokio::fs::write(&save_path, serialized).await {
-                    eprintln!("[Server] Error saving skins.json: {}", e);
-                } else {
-                    println!("[Server] Skin saved to disk successfully.");
+            // Sync with multi-avatar system
+            user_data.skin = current_skin.clone();
+            if let Some(ref active_id) = user_data.active_skin {
+                if let Some(skin) = user_data
+                    .player_skins
+                    .iter_mut()
+                    .find(|s| s.id == *active_id)
+                {
+                    skin.skin_data = serde_json::to_string(&current_skin).unwrap_or_default();
+                    skin.updated_at = Some(Utc::now());
                 }
             }
+
+            state.skins.insert(
+                target_uuid.clone(),
+                serde_json::to_value(&user_data).unwrap_or_default(),
+            );
+            save_skins_to_disk(&state.skins).await;
 
             return warp::reply::with_status("Skin saved", warp::http::StatusCode::NO_CONTENT);
         }
     }
-    
+
     println!("[Server] Invalid skin payload received");
     warp::reply::with_status("Invalid Data", warp::http::StatusCode::BAD_REQUEST)
 }
 
-async fn handle_cosmetics_get(state: Arc<tokio::sync::Mutex<ServerState>>) -> impl warp::Reply {
+async fn handle_cosmetics_inventory_get(
+    state: Arc<tokio::sync::Mutex<ServerState>>,
+) -> impl warp::Reply {
     let state = state.lock().await;
-    println!("Cosmetics get endpoint requested.");
-    // Read Assets.zip from the game folder
     let assets_zip_path = state.game_dir.join("Assets.zip");
 
-    // Execute ZIP reading in a blocking thread because 'zip' is synchronous
-    let cosmetics_json =
-        tokio::task::spawn_blocking(move || read_cosmetics_from_zip(&assets_zip_path))
-            .await
-            .unwrap_or_else(|_| "{}".to_string());
+    let inventory_json = tokio::task::spawn_blocking(move || {
+        read_cosmetic_inventory_from_zip(&assets_zip_path)
+    })
+    .await
+    .unwrap_or_else(|_| "{}".to_string());
 
-    // Return raw JSON (it's already a JSON string)
-    warp::reply::with_header(cosmetics_json, "Content-Type", "application/json")
+    warp::reply::with_header(inventory_json, "Content-Type", "application/json")
 }
 
-// Struct especifico para la respuesta de LauncherData (Campos en mayuscula)
-#[derive(Serialize, Deserialize, Clone)]
-struct LauncherProfileInfo {
-    #[serde(rename = "CreatedAt")]
-    created_at: DateTime<Utc>,
-    #[serde(rename = "Entitlements")]
-    entitlements: Vec<String>,
-    #[serde(rename = "NextNameChangeAt")]
-    next_name_change_at: DateTime<Utc>,
-    #[serde(rename = "Skin", skip_serializing_if = "Option::is_none")]
-    skin: Option<String>,
-    #[serde(rename = "Username")]
-    username: String,
-    #[serde(rename = "UUID")]
-    uuid: String,
+async fn handle_cosmetics_list_get(
+    state: Arc<tokio::sync::Mutex<ServerState>>,
+) -> impl warp::Reply {
+    let state = state.lock().await;
+    let assets_zip_path = state.game_dir.join("Assets.zip");
+
+    let list_json = tokio::task::spawn_blocking(move || {
+        read_cosmetics_from_zip(&assets_zip_path)
+    })
+    .await
+    .unwrap_or_else(|_| "{}".to_string());
+
+    warp::reply::with_header(list_json, "Content-Type", "application/json")
 }
+
 async fn handle_launcher_data(state: Arc<tokio::sync::Mutex<ServerState>>) -> impl warp::Reply {
     let state = state.lock().await;
-    
-    // Recuperar
-    let skin_obj = state.skins.get(&state.uuid)
-        .cloned()
-        .unwrap_or_else(|| serde_json::from_str(DEFAULT_SKIN).unwrap_or_default());
-
-    // Convertir a String
-    let skin_string = serde_json::to_string(&skin_obj).ok();
 
     let data = LauncherData {
         eula_accepted_at: Utc::now(),
         owner: state.uuid.clone(),
         patchlines: Patchlines {
             pre_release: GameVersionInfo {
-                build_version: "2026.01.14".into(), // Ejemplo
-                newest: 99,
+                build_version: "1.0.0".to_string(),
+                newest: 1,
             },
             release: GameVersionInfo {
-                build_version: "2026.01.13".into(),
-                newest: 99,
+                build_version: "1.0.0".to_string(),
+                newest: 1,
             },
         },
-        profiles: vec![
-            LauncherProfileInfo {
-                uuid: state.uuid.clone(),
-                username: state.username.clone(),
-                entitlements: vec!["game.base".to_string()],
-                created_at: Utc::now(),
-                next_name_change_at: Utc::now() + chrono::Duration::days(30),
-                // Aqui va la String serializada
-                skin: skin_string 
-            }
-        ],
+        profiles: vec![LauncherProfileInfo {
+            uuid: state.uuid.clone(),
+            username: state.username.clone(),
+            entitlements: vec!["game.base".to_string()],
+        }],
     };
 
     warp::reply::json(&data)
+}
+
+async fn handle_get_profiles(
+    auth: Option<String>,
+    state: Arc<tokio::sync::Mutex<ServerState>>,
+) -> impl warp::Reply {
+    let state = state.lock().await;
+    let target_uuid = extract_uuid_from_auth(auth, &state.uuid);
+
+    warp::reply::json(&json!({
+        "profiles": [{
+            "uuid": target_uuid,
+            "username": state.username.clone(),
+            "entitlements": ["game.base"]
+        }]
+    }))
+}
+
+async fn handle_account_data_skin_get(
+    target_uuid: String,
+    state: Arc<tokio::sync::Mutex<ServerState>>,
+) -> impl warp::Reply {
+    let state = state.lock().await;
+    let user_data = get_user_skins_data(&target_uuid, &state.skins);
+    warp::reply::json(&user_data.skin)
 }
 
 async fn handle_session_child(
@@ -841,12 +1061,16 @@ async fn handle_session_child(
     let requested_uuid = body.uuid.clone().unwrap_or_else(|| state.uuid.clone());
     let requested_name = body.name.clone().unwrap_or_else(|| state.username.clone());
 
+    let user_data = get_user_skins_data(&requested_uuid, &state.skins);
+    let skin_val = Some(user_data.skin);
+
     let identity_token = generate_jwt(
         &requested_name,
         &requested_uuid,
         "hytale:server hytale:client",
         true,
         actual_port,
+        skin_val,
     );
     let session_token = generate_jwt(
         &requested_name,
@@ -854,6 +1078,7 @@ async fn handle_session_child(
         "hytale:server",
         false,
         actual_port,
+        None,
     );
 
     let resp = SessionNewResponse {
@@ -865,12 +1090,9 @@ async fn handle_session_child(
     warp::reply::json(&resp)
 }
 
-// --- UTILITIES ---
-
-fn read_cosmetics_from_zip(zip_path: &PathBuf) -> String {
-    println!("Assets.zip requested.");
+// Returns simple category -> [id1, id2] map
+fn read_cosmetic_inventory_from_zip(zip_path: &PathBuf) -> String {
     if !zip_path.exists() {
-        println!("Assets.zip not found at: {:?}", zip_path);
         return "{}".to_string();
     }
 
@@ -885,43 +1107,119 @@ fn read_cosmetics_from_zip(zip_path: &PathBuf) -> String {
     };
 
     let mut inventory: HashMap<String, Vec<String>> = HashMap::new();
-
-    // List of JSON files inside Assets.zip
     let categories = vec![
-        "BodyCharacteristics",
-        "Capes",
-        "EarAccessory",
-        "Ears",
-        "Eyebrows",
-        "Eyes",
-        "Faces",
-        "FaceAccessory",
-        "FacialHair",
-        "Gloves",
-        "Haircuts",
-        "HeadAccessory",
-        "Mouths",
-        "Overpants",
-        "Overtops",
-        "Pants",
-        "Shoes",
-        "SkinFeatures",
-        "Undertops",
-        "Underwear",
+        "BodyCharacteristics", "Capes", "EarAccessory", "Ears", "Eyebrows", "Eyes",
+        "Faces", "FaceAccessory", "FacialHair", "Gloves", "Haircuts", "HeadAccessory",
+        "Mouths", "Overpants", "Overtops", "Pants", "Shoes", "SkinFeatures", "Undertops", "Underwear",
     ];
 
     for category in categories {
         let inner_path = format!("Cosmetics/CharacterCreator/{}.json", category);
-
-        if let Ok(mut file) = archive.by_name(&inner_path) {
+        let field_name = get_exact_field_name(category);
+        
+        if let Ok(mut f) = archive.by_name(&inner_path) {
             let mut content = String::new();
-            if file.read_to_string(&mut content).is_ok() {
-                if let Ok(defs) = serde_json::from_str::<Vec<CosmeticDefinition>>(&content) {
-                    let ids: Vec<String> = defs.into_iter().map(|d| d.id).collect();
-
-                    // Here we use the strict mapping
-                    let field_name = get_exact_field_name(category);
+            if f.read_to_string(&mut content).is_ok() {
+                if let Ok(items) = serde_json::from_str::<Vec<CosmeticDefinition>>(&content) {
+                    let ids: Vec<String> = items.into_iter().map(|i| i.id).collect();
                     inventory.insert(field_name, ids);
+                }
+            }
+        }
+    }
+
+    serde_json::to_string(&inventory).unwrap_or("{}".to_string())
+}
+
+// Returns detailed metadata for customizer
+fn read_cosmetics_from_zip(zip_path: &PathBuf) -> String {
+    println!("Loading structured cosmetics from Assets.zip...");
+    if !zip_path.exists() {
+        return "{}".to_string();
+    }
+
+    let file = match std::fs::File::open(zip_path) {
+        Ok(f) => f,
+        Err(_) => return "{}".to_string(),
+    };
+
+    let mut archive = match zip::ZipArchive::new(file) {
+        Ok(a) => a,
+        Err(_) => return "{}".to_string(),
+    };
+
+    // 1. Load GradientSets
+    let mut gradient_data = HashMap::new();
+    if let Ok(mut g_file) = archive.by_name("Cosmetics/CharacterCreator/GradientSets.json") {
+        let mut content = String::new();
+        if g_file.read_to_string(&mut content).is_ok() {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(sets) = val.as_array() {
+                    for set in sets {
+                        if let (Some(id), Some(gradients)) = (set.get("Id"), set.get("Gradients")) {
+                            if let (Some(id_str), Some(grad_obj)) = (id.as_str(), gradients.as_object()) {
+                                let color_ids: Vec<String> = grad_obj.keys().cloned().collect();
+                                gradient_data.insert(id_str.to_string(), color_ids);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut inventory: HashMap<String, Vec<CosmeticItemResponse>> = HashMap::new();
+
+    let categories = vec![
+        "BodyCharacteristics", "Capes", "EarAccessory", "Ears", "Eyebrows", "Eyes",
+        "Faces", "FaceAccessory", "FacialHair", "Gloves", "Haircuts", "HeadAccessory",
+        "Mouths", "Overpants", "Overtops", "Pants", "Shoes", "SkinFeatures", "Undertops", "Underwear",
+    ];
+
+    for category in categories {
+        let inner_path = format!("Cosmetics/CharacterCreator/{}.json", category);
+        let field_name = get_exact_field_name(category);
+        
+        if let Ok(mut f) = archive.by_name(&inner_path) {
+            let mut content = String::new();
+            if f.read_to_string(&mut content).is_ok() {
+                if let Ok(items) = serde_json::from_str::<Vec<CosmeticDefinition>>(&content) {
+                    let mut transformed = Vec::new();
+                    for item in items {
+                        // Skip incomplete or hidden items
+                        if item.name.is_none() && item.model.is_none() && item.variants.is_none() {
+                            continue;
+                        }
+
+                        // Determine colors
+                        let mut colors = Vec::new();
+                        if let Some(ref gs_id) = item.gradient_set {
+                            if let Some(c) = gradient_data.get(gs_id) {
+                                colors = c.clone();
+                            }
+                        } else if let Some(ref tex) = item.textures {
+                             if let Some(obj) = tex.as_object() {
+                                 colors = obj.keys().cloned().collect();
+                             }
+                        }
+                        
+                        // Fallback thumbnail
+                        let thumbnail = item.greyscale_texture.clone();
+
+                        transformed.push(CosmeticItemResponse {
+                            id: item.id.clone(),
+                            name: item.name.unwrap_or_else(|| item.id.clone()),
+                            thumbnail,
+                            colors,
+                            gradient_set: item.gradient_set,
+                            model: item.model,
+                            variants: None, // Simplified
+                            head_accessory_type: item.head_accessory_type,
+                            hair_type: item.hair_type,
+                            requires_generic_haircut: item.requires_generic_haircut,
+                        });
+                    }
+                    inventory.insert(field_name, transformed);
                 }
             }
         }
@@ -980,11 +1278,8 @@ async fn handle_session_new(
     println!("    Scopes solicitados: {:?}", body.scopes);
     println!("    Extra fields: {:?}", body.extra);
 
-    let skin = state
-        .skins
-        .get(&state.uuid)
-        .cloned()
-        .unwrap_or_else(|| serde_json::from_str(DEFAULT_SKIN).unwrap_or_default());
+    let user_data = get_user_skins_data(&state.uuid, &state.skins);
+    let skin_val = Some(user_data.skin);
 
     // Si el cliente pide scopes especificos, los usamos, si no, ponemos los default
     let scope_str = body
@@ -998,6 +1293,7 @@ async fn handle_session_new(
         &format!("{} hytale:server", scope_str),
         true,
         actual_port,
+        skin_val,
     );
     let session_token = generate_jwt(
         &state.username,
@@ -1005,6 +1301,7 @@ async fn handle_session_new(
         "hytale:server",
         false,
         actual_port,
+        None,
     );
 
     let resp = SessionNewResponse {
@@ -1030,11 +1327,8 @@ async fn handle_session_refresh(
     println!("    Token anterior (prefix): {:.15}...", body.session_token);
     println!("    Extra fields: {:?}", body.extra);
 
-    let skin = state
-        .skins
-        .get(&state.uuid)
-        .cloned()
-        .unwrap_or_else(|| serde_json::from_str(DEFAULT_SKIN).unwrap_or_default());
+    let user_data = get_user_skins_data(&state.uuid, &state.skins);
+    let skin_val = Some(user_data.skin);
 
     // En un refresh, generalmente se renuevan los mismos permisos
     let identity_token = generate_jwt(
@@ -1043,6 +1337,7 @@ async fn handle_session_refresh(
         "hytale:server hytale:client",
         true,
         actual_port,
+        skin_val,
     );
     let session_token = generate_jwt(
         &state.username,
@@ -1050,6 +1345,7 @@ async fn handle_session_refresh(
         "hytale:server",
         false,
         actual_port,
+        None,
     );
 
     let resp = SessionNewResponse {
@@ -1125,6 +1421,9 @@ async fn handle_session_authorize(
         .unwrap_or_else(|| "hytale:server hytale:client".to_string());
 
     // Generamos un "Authorization Grant" que contiene el AUD del servidor de destino
+    let user_data = get_user_skins_data(&state.uuid, &state.skins);
+    let skin_val = Some(user_data.skin);
+
     let auth_grant = generate_advanced_jwt(
         &state.username,
         &state.uuid,
@@ -1132,6 +1431,7 @@ async fn handle_session_authorize(
         &scope_str,
         actual_port,
         None,
+        skin_val,
     );
 
     let resp = AuthorizeResponse {
@@ -1178,6 +1478,9 @@ async fn handle_session_exchange(
         .map(|s| s.join(" "))
         .unwrap_or_else(|| "hytale:server hytale:client".to_string());
 
+    let user_data = get_user_skins_data(&state.uuid, &state.skins);
+    let skin_val = Some(user_data.skin);
+
     // Generamos el Access Token final incluyendo el fingerprint si existe
     let access_token = generate_advanced_jwt(
         &state.username,
@@ -1186,6 +1489,7 @@ async fn handle_session_exchange(
         &scope_str,
         actual_port,
         fingerprint, // <--- Pasamos el fingerprint
+        skin_val,
     );
 
     let refresh_token = generate_jwt(
@@ -1194,6 +1498,7 @@ async fn handle_session_exchange(
         "hytale:server",
         false,
         actual_port,
+        None,
     );
 
     let resp = ExchangeResponse {
@@ -1293,6 +1598,7 @@ async fn handle_server_auto_auth(
         "hytale:server", // Server scope only
         true,            // Include profile info
         actual_port,
+        None, // Servers typically don't have skins
     );
 
     let session_token = generate_jwt(
@@ -1301,6 +1607,7 @@ async fn handle_server_auto_auth(
         "hytale:server",
         false, // No profile needed for session token
         actual_port,
+        None,
     );
 
     let expires_at = Utc::now() + chrono::Duration::hours(10); // 10 hours TTL
@@ -1330,12 +1637,13 @@ fn generate_jwt(
     scope: &str,
     include_profile: bool,
     port: u16,
+    skin: Option<serde_json::Value>,
 ) -> String {
     println!("JWT generation requested with fresh server keys.");
-    
+
     // Asegurar que tenemos capacidad de firmar localmente
     crypto::ensure_local_signing_capability();
-    
+
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 
     let header = JwtHeader {
@@ -1364,8 +1672,8 @@ fn generate_jwt(
             entitlements: ENTITLEMENTS.iter().map(|&s| s.to_string()).collect(),
             profile: ProfileInfo {
                 username: username.to_string(),
-                //entitlements: ENTITLEMENTS.iter().map(|&s| s.to_string()).collect(),
-                //skin: serde_json::from_str(skin).unwrap_or_else(|_| serde_json::json!({})),
+                entitlements: ENTITLEMENTS.iter().map(|&s| s.to_string()).collect(),
+                skin: skin.unwrap_or_else(|| serde_json::from_str(DEFAULT_SKIN).unwrap_or_else(|_| serde_json::json!({}))),
             },
         };
         serde_json::to_string(&p).unwrap()
@@ -1397,10 +1705,11 @@ fn generate_advanced_jwt(
     scope: &str,
     port: u16,
     fingerprint: Option<String>, // <--- NUEVO
+    skin: Option<serde_json::Value>,
 ) -> String {
     // Asegurar que tenemos capacidad de firmar localmente
     crypto::ensure_local_signing_capability();
-    
+
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 
     let header = JwtHeader {
@@ -1427,6 +1736,7 @@ fn generate_advanced_jwt(
         username: Some(username.to_string()), // <--- Replicar para compatibilidad
         entitlements: Some(vec!["game.base".to_string()]),
         cnf: fingerprint.map(|f| Confirmation { x5t_s256: f }), // <--- NUEVO
+        skin: skin,
     };
 
     let payload_json = serde_json::to_string(&payload).unwrap();
@@ -1502,4 +1812,219 @@ async fn handle_update_identity(
 
 fn extract_port(host: Option<String>) -> Option<u16> {
     host.and_then(|h| h.split(':').nth(1).and_then(|p| p.parse::<u16>().ok()))
+}
+
+// --- PLAYER SKINS HANDLERS ---
+
+async fn handle_player_skins_get(
+    auth: Option<String>,
+    state: Arc<tokio::sync::Mutex<ServerState>>,
+) -> impl warp::Reply {
+    let state = state.lock().await;
+    let target_uuid = extract_uuid_from_auth(auth, &state.uuid);
+
+    let user_data = get_user_skins_data(&target_uuid, &state.skins);
+
+    warp::reply::json(&PlayerSkinsResponse {
+        active_skin: user_data.active_skin,
+        max_skins: 10,
+        skins: user_data.player_skins,
+    })
+}
+
+async fn handle_player_skins_post(
+    auth: Option<String>,
+    body: PlayerSkinsPostRequest,
+    state: Arc<tokio::sync::Mutex<ServerState>>,
+) -> impl warp::Reply {
+    let mut state = state.lock().await;
+    let target_uuid = extract_uuid_from_auth(auth, &state.uuid);
+
+    let mut user_data = get_user_skins_data(&target_uuid, &state.skins);
+
+    let skin_id = Uuid::new_v4().to_string();
+    let skin_name = body.name.unwrap_or_else(|| "New Avatar".to_string());
+    let skin_data_str = body.skin_data.unwrap_or_default();
+
+    let new_skin = PlayerSkin {
+        id: skin_id.clone(),
+        name: skin_name,
+        skin_data: skin_data_str.clone(),
+        created_at: Utc::now(),
+        updated_at: None,
+    };
+
+    user_data.player_skins.push(new_skin);
+    user_data.active_skin = Some(skin_id);
+
+    // Update legacy field
+    if let Ok(parsed) = serde_json::from_str(&skin_data_str) {
+        user_data.skin = parsed;
+    }
+
+    state.skins.insert(
+        target_uuid.clone(),
+        serde_json::to_value(&user_data).unwrap_or_default(),
+    );
+    save_skins_to_disk(&state.skins).await;
+
+    warp::reply::with_status(
+        warp::reply::json(&json!({ "skinId": user_data.active_skin })),
+        warp::http::StatusCode::CREATED,
+    )
+}
+
+async fn handle_player_skins_set_active(
+    auth: Option<String>,
+    body: PlayerSkinsSetActiveRequest,
+    state: Arc<tokio::sync::Mutex<ServerState>>,
+) -> impl warp::Reply {
+    let mut state = state.lock().await;
+    let target_uuid = extract_uuid_from_auth(auth, &state.uuid);
+
+    let mut user_data = get_user_skins_data(&target_uuid, &state.skins);
+
+    if let Some(skin) = user_data.player_skins.iter().find(|s| s.id == body.skin_id) {
+        user_data.active_skin = Some(body.skin_id.clone());
+        // Update legacy field
+        if let Ok(parsed) = serde_json::from_str(&skin.skin_data) {
+            user_data.skin = parsed;
+        }
+
+        state.skins.insert(
+            target_uuid.clone(),
+            serde_json::to_value(&user_data).unwrap_or_default(),
+        );
+        save_skins_to_disk(&state.skins).await;
+    }
+
+    warp::reply::with_status("", warp::http::StatusCode::NO_CONTENT)
+}
+
+async fn handle_player_skins_update(
+    skin_id: String,
+    auth: Option<String>,
+    body: PlayerSkinsPostRequest,
+    state: Arc<tokio::sync::Mutex<ServerState>>,
+) -> impl warp::Reply {
+    let mut state = state.lock().await;
+    let target_uuid = extract_uuid_from_auth(auth, &state.uuid);
+
+    let mut user_data = get_user_skins_data(&target_uuid, &state.skins);
+
+    if let Some(skin) = user_data.player_skins.iter_mut().find(|s| s.id == skin_id) {
+        if let Some(name) = body.name {
+            skin.name = name;
+        }
+        if let Some(data) = body.skin_data {
+            skin.skin_data = data.clone();
+            // If this is the active skin, update the legacy field
+            if Some(skin_id.clone()) == user_data.active_skin {
+                if let Ok(parsed) = serde_json::from_str(&data) {
+                    user_data.skin = parsed;
+                }
+            }
+        }
+        skin.updated_at = Some(Utc::now());
+
+        // Set updated skin as active (matches JS implementation)
+        user_data.active_skin = Some(skin_id);
+
+        state.skins.insert(
+            target_uuid.clone(),
+            serde_json::to_value(&user_data).unwrap_or_default(),
+        );
+        save_skins_to_disk(&state.skins).await;
+    }
+
+    warp::reply::with_status("", warp::http::StatusCode::NO_CONTENT)
+}
+
+async fn handle_player_skins_delete(
+    skin_id: String,
+    auth: Option<String>,
+    state: Arc<tokio::sync::Mutex<ServerState>>,
+) -> impl warp::Reply {
+    let mut state = state.lock().await;
+    let target_uuid = extract_uuid_from_auth(auth, &state.uuid);
+
+    let mut user_data = get_user_skins_data(&target_uuid, &state.skins);
+
+    let initial_len = user_data.player_skins.len();
+    user_data.player_skins.retain(|s| s.id != skin_id);
+
+    if user_data.player_skins.len() < initial_len {
+        // If we deleted the active skin, pick a new one
+        if user_data.active_skin == Some(skin_id) {
+            if let Some(first) = user_data.player_skins.first() {
+                user_data.active_skin = Some(first.id.clone());
+                if let Ok(parsed) = serde_json::from_str(&first.skin_data) {
+                    user_data.skin = parsed;
+                }
+            } else {
+                user_data.active_skin = None;
+            }
+        }
+
+        state.skins.insert(
+            target_uuid.clone(),
+            serde_json::to_value(&user_data).unwrap_or_default(),
+        );
+        save_skins_to_disk(&state.skins).await;
+    }
+
+    warp::reply::with_status("", warp::http::StatusCode::NO_CONTENT)
+}
+
+// --- HELPERS ---
+
+fn get_user_skins_data(uuid: &str, skins_map: &HashMap<String, serde_json::Value>) -> UserSkinsData {
+    match skins_map.get(uuid) {
+        Some(val) => {
+            if val.get("playerSkins").is_some() {
+                // Formato nuevo detectado
+                serde_json::from_value(val.clone()).unwrap_or_else(|_| create_default_user_skins(val.clone()))
+            } else if let Some(skin_field) = val.get("skin") {
+                // Formato híbrido/parcial: tiene un campo 'skin' pero no 'playerSkins'
+                create_default_user_skins(skin_field.clone())
+            } else {
+                // Formato legacy puro: el valor es directamente el objeto de la skin
+                create_default_user_skins(val.clone())
+            }
+        }
+        None => {
+            let default_skin = serde_json::from_str(DEFAULT_SKIN).unwrap_or_default();
+            create_default_user_skins(default_skin)
+        }
+    }
+}
+
+fn create_default_user_skins(skin_val: serde_json::Value) -> UserSkinsData {
+    let skin_id = Uuid::new_v4().to_string();
+    UserSkinsData {
+        player_skins: vec![PlayerSkin {
+            id: skin_id.clone(),
+            name: "Default Avatar".to_string(),
+            skin_data: serde_json::to_string(&skin_val).unwrap_or_default(),
+            created_at: Utc::now(),
+            updated_at: None,
+        }],
+        active_skin: Some(skin_id),
+        skin: skin_val,
+    }
+}
+
+async fn save_skins_to_disk(skins: &HashMap<String, serde_json::Value>) {
+    let identity_dir = crate::config::get_identity_dir();
+    let save_path = identity_dir.join("skins.json");
+
+    if let Some(parent) = save_path.parent() {
+        let _ = tokio::fs::create_dir_all(parent).await;
+    }
+
+    if let Ok(serialized) = serde_json::to_string_pretty(skins) {
+        if let Err(e) = tokio::fs::write(&save_path, serialized).await {
+            eprintln!("[Server] Error saving skins.json: {}", e);
+        }
+    }
 }
