@@ -135,36 +135,7 @@ struct HealthResponse {
     server: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct Confirmation {
-    #[serde(rename = "x5t#S256")]
-    pub x5t_s256: String,
-}
-
-// Payload especifico para JWT de Auth Grant y Access Token
-#[derive(Debug, Serialize, Deserialize)]
-struct AuthTokenPayload {
-    exp: i64,
-    iat: i64,
-    iss: String,
-    jti: String,
-    scope: String,
-    sub: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    aud: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    username: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    entitlements: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    cnf: Option<Confirmation>, // <--- Certificate Binding
-    #[serde(skip_serializing_if = "Option::is_none")]
-    skin: Option<serde_json::Value>,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct LauncherData {
     #[serde(rename = "EulaAcceptedAt")]
     eula_accepted_at: DateTime<Utc>,
@@ -179,7 +150,7 @@ struct LauncherData {
     profiles: Vec<LauncherProfileInfo>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 struct LauncherProfileInfo {
     #[serde(rename = "UUID")]
     uuid: String,
@@ -189,7 +160,7 @@ struct LauncherProfileInfo {
     entitlements: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 struct Patchlines {
     #[serde(rename = "PreRelease")]
     pre_release: GameVersionInfo,
@@ -310,7 +281,10 @@ struct CosmeticItemResponse {
     head_accessory_type: Option<String>,
     #[serde(rename = "hairType", skip_serializing_if = "Option::is_none")]
     hair_type: Option<String>,
-    #[serde(rename = "requiresGenericHaircut", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "requiresGenericHaircut",
+        skip_serializing_if = "Option::is_none"
+    )]
     requires_generic_haircut: Option<bool>,
 }
 
@@ -336,40 +310,19 @@ struct JwtHeader {
     kid: String,
     typ: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+}
+
+// ==================== SERVER LOGIC ====================
+// ==================== SERVER LOGIC ====================
+=======
     jwk: Option<serde_json::Value>,
 }
 
-#[derive(Serialize, Deserialize)]
-struct IdentityTokenPayload {
-    exp: i64,
-    iat: i64,
-    iss: String,
-    jti: String,
-    scope: String,
-    sub: String,
-    name: String,
-    username: String,
-    entitlements: Vec<String>,
-    profile: ProfileInfo,
+// ==================== SERVER LOGIC ====================
+=======
 }
 
-#[derive(Serialize, Deserialize)]
-struct SessionTokenPayload {
-    exp: i64,
-    iat: i64,
-    iss: String,
-    jti: String,
-    scope: String,
-    sub: String,
-}
-
-#[derive(Serialize, Deserialize)]
-struct ProfileInfo {
-    username: String,
-    entitlements: Vec<String>,
-    skin: serde_json::Value,
-}
-
+// ==================== SERVER LOGIC ====================
 // ==================== SERVER LOGIC ====================
 
 const ENTITLEMENTS: &[&str] = &["game.base", "game.deluxe", "game.founder", "game.server"];
@@ -763,7 +716,10 @@ pub async fn start_server(
 
     let log = warp::log::custom(|info| {
         let path = info.path();
-        if path.starts_with("/telemetry") || path.starts_with("/analytics") || path.starts_with("/event") {
+        if path.starts_with("/telemetry")
+            || path.starts_with("/analytics")
+            || path.starts_with("/event")
+        {
             return;
         }
 
@@ -861,10 +817,10 @@ pub async fn start_server(
 
     println!("Seamless Server listening on loopback: http://{}", addr);
     let server = warp::serve(routes).bind(addr).await;
-    
+
     let graceful_server = server.graceful(async {
-            shutdown_rx.await.ok();
-        });
+        shutdown_rx.await.ok();
+    });
 
     tokio::spawn(graceful_server.run());
     Ok(())
@@ -972,11 +928,10 @@ async fn handle_cosmetics_inventory_get(
     let state = state.lock().await;
     let assets_zip_path = state.game_dir.join("Assets.zip");
 
-    let inventory_json = tokio::task::spawn_blocking(move || {
-        read_cosmetic_inventory_from_zip(&assets_zip_path)
-    })
-    .await
-    .unwrap_or_else(|_| "{}".to_string());
+    let inventory_json =
+        tokio::task::spawn_blocking(move || read_cosmetic_inventory_from_zip(&assets_zip_path))
+            .await
+            .unwrap_or_else(|_| "{}".to_string());
 
     warp::reply::with_header(inventory_json, "Content-Type", "application/json")
 }
@@ -987,11 +942,9 @@ async fn handle_cosmetics_list_get(
     let state = state.lock().await;
     let assets_zip_path = state.game_dir.join("Assets.zip");
 
-    let list_json = tokio::task::spawn_blocking(move || {
-        read_cosmetics_from_zip(&assets_zip_path)
-    })
-    .await
-    .unwrap_or_else(|_| "{}".to_string());
+    let list_json = tokio::task::spawn_blocking(move || read_cosmetics_from_zip(&assets_zip_path))
+        .await
+        .unwrap_or_else(|_| "{}".to_string());
 
     warp::reply::with_header(list_json, "Content-Type", "application/json")
 }
@@ -1064,21 +1017,33 @@ async fn handle_session_child(
     let user_data = get_user_skins_data(&requested_uuid, &state.skins);
     let skin_val = Some(user_data.skin);
 
-    let identity_token = generate_jwt(
+    let identity_token = create_auth_token(
         &requested_name,
         &requested_uuid,
-        "hytale:server hytale:client",
-        true,
         actual_port,
-        skin_val,
+        TokenConfig {
+            scope: "hytale:server hytale:client".to_string(),
+            has_profile: true,
+            audience: None,
+            fingerprint: None,
+            skin: skin_val,
+            duration_seconds: 36000,
+            is_advanced: false,
+        },
     );
-    let session_token = generate_jwt(
+    let session_token = create_auth_token(
         &requested_name,
         &requested_uuid,
-        "hytale:server",
-        false,
         actual_port,
-        None,
+        TokenConfig {
+            scope: "hytale:server".to_string(),
+            has_profile: false,
+            audience: None,
+            fingerprint: None,
+            skin: None,
+            duration_seconds: 36000,
+            is_advanced: false,
+        },
     );
 
     let resp = SessionNewResponse {
@@ -1108,15 +1073,32 @@ fn read_cosmetic_inventory_from_zip(zip_path: &PathBuf) -> String {
 
     let mut inventory: HashMap<String, Vec<String>> = HashMap::new();
     let categories = vec![
-        "BodyCharacteristics", "Capes", "EarAccessory", "Ears", "Eyebrows", "Eyes",
-        "Faces", "FaceAccessory", "FacialHair", "Gloves", "Haircuts", "HeadAccessory",
-        "Mouths", "Overpants", "Overtops", "Pants", "Shoes", "SkinFeatures", "Undertops", "Underwear",
+        "BodyCharacteristics",
+        "Capes",
+        "EarAccessory",
+        "Ears",
+        "Eyebrows",
+        "Eyes",
+        "Faces",
+        "FaceAccessory",
+        "FacialHair",
+        "Gloves",
+        "Haircuts",
+        "HeadAccessory",
+        "Mouths",
+        "Overpants",
+        "Overtops",
+        "Pants",
+        "Shoes",
+        "SkinFeatures",
+        "Undertops",
+        "Underwear",
     ];
 
     for category in categories {
         let inner_path = format!("Cosmetics/CharacterCreator/{}.json", category);
         let field_name = get_exact_field_name(category);
-        
+
         if let Ok(mut f) = archive.by_name(&inner_path) {
             let mut content = String::new();
             if f.read_to_string(&mut content).is_ok() {
@@ -1157,7 +1139,9 @@ fn read_cosmetics_from_zip(zip_path: &PathBuf) -> String {
                 if let Some(sets) = val.as_array() {
                     for set in sets {
                         if let (Some(id), Some(gradients)) = (set.get("Id"), set.get("Gradients")) {
-                            if let (Some(id_str), Some(grad_obj)) = (id.as_str(), gradients.as_object()) {
+                            if let (Some(id_str), Some(grad_obj)) =
+                                (id.as_str(), gradients.as_object())
+                            {
                                 let color_ids: Vec<String> = grad_obj.keys().cloned().collect();
                                 gradient_data.insert(id_str.to_string(), color_ids);
                             }
@@ -1171,15 +1155,32 @@ fn read_cosmetics_from_zip(zip_path: &PathBuf) -> String {
     let mut inventory: HashMap<String, Vec<CosmeticItemResponse>> = HashMap::new();
 
     let categories = vec![
-        "BodyCharacteristics", "Capes", "EarAccessory", "Ears", "Eyebrows", "Eyes",
-        "Faces", "FaceAccessory", "FacialHair", "Gloves", "Haircuts", "HeadAccessory",
-        "Mouths", "Overpants", "Overtops", "Pants", "Shoes", "SkinFeatures", "Undertops", "Underwear",
+        "BodyCharacteristics",
+        "Capes",
+        "EarAccessory",
+        "Ears",
+        "Eyebrows",
+        "Eyes",
+        "Faces",
+        "FaceAccessory",
+        "FacialHair",
+        "Gloves",
+        "Haircuts",
+        "HeadAccessory",
+        "Mouths",
+        "Overpants",
+        "Overtops",
+        "Pants",
+        "Shoes",
+        "SkinFeatures",
+        "Undertops",
+        "Underwear",
     ];
 
     for category in categories {
         let inner_path = format!("Cosmetics/CharacterCreator/{}.json", category);
         let field_name = get_exact_field_name(category);
-        
+
         if let Ok(mut f) = archive.by_name(&inner_path) {
             let mut content = String::new();
             if f.read_to_string(&mut content).is_ok() {
@@ -1198,11 +1199,11 @@ fn read_cosmetics_from_zip(zip_path: &PathBuf) -> String {
                                 colors = c.clone();
                             }
                         } else if let Some(ref tex) = item.textures {
-                             if let Some(obj) = tex.as_object() {
-                                 colors = obj.keys().cloned().collect();
-                             }
+                            if let Some(obj) = tex.as_object() {
+                                colors = obj.keys().cloned().collect();
+                            }
                         }
-                        
+
                         // Fallback thumbnail
                         let thumbnail = item.greyscale_texture.clone();
 
@@ -1281,21 +1282,33 @@ async fn handle_session_new(
         .map(|s| s.join(" "))
         .unwrap_or_else(|| "hytale:server hytale:client".to_string());
 
-    let identity_token = generate_jwt(
+    let identity_token = create_auth_token(
         &state.username,
         &state.uuid,
-        &format!("{} hytale:server", scope_str),
-        true,
         actual_port,
-        skin_val,
+        TokenConfig {
+            scope: format!("{} hytale:server", scope_str),
+            has_profile: true,
+            audience: None,
+            fingerprint: None,
+            skin: skin_val,
+            duration_seconds: 36000,
+            is_advanced: false,
+        },
     );
-    let session_token = generate_jwt(
+    let session_token = create_auth_token(
         &state.username,
         &state.uuid,
-        "hytale:server",
-        false,
         actual_port,
-        None,
+        TokenConfig {
+            scope: "hytale:server".to_string(),
+            has_profile: false,
+            audience: None,
+            fingerprint: None,
+            skin: None,
+            duration_seconds: 36000,
+            is_advanced: false,
+        },
     );
 
     let resp = SessionNewResponse {
@@ -1325,21 +1338,33 @@ async fn handle_session_refresh(
     let skin_val = Some(user_data.skin);
 
     // En un refresh, generalmente se renuevan los mismos permisos
-    let identity_token = generate_jwt(
+    let identity_token = create_auth_token(
         &state.username,
         &state.uuid,
-        "hytale:server hytale:client",
-        true,
         actual_port,
-        skin_val,
+        TokenConfig {
+            scope: "hytale:server hytale:client".to_string(),
+            has_profile: true,
+            audience: None,
+            fingerprint: None,
+            skin: skin_val,
+            duration_seconds: 36000,
+            is_advanced: false,
+        },
     );
-    let session_token = generate_jwt(
+    let session_token = create_auth_token(
         &state.username,
         &state.uuid,
-        "hytale:server",
-        false,
         actual_port,
-        None,
+        TokenConfig {
+            scope: "hytale:server".to_string(),
+            has_profile: false,
+            audience: None,
+            fingerprint: None,
+            skin: None,
+            duration_seconds: 36000,
+            is_advanced: false,
+        },
     );
 
     let resp = SessionNewResponse {
@@ -1418,14 +1443,19 @@ async fn handle_session_authorize(
     let user_data = get_user_skins_data(&state.uuid, &state.skins);
     let skin_val = Some(user_data.skin);
 
-    let auth_grant = generate_advanced_jwt(
+    let auth_grant = create_auth_token(
         &state.username,
         &state.uuid,
-        Some(audience),
-        &scope_str,
         actual_port,
-        None,
-        skin_val,
+        TokenConfig {
+            scope: scope_str,
+            has_profile: true,
+            audience: Some(audience),
+            fingerprint: None,
+            skin: skin_val,
+            duration_seconds: 3600,
+            is_advanced: true,
+        },
     );
 
     let resp = AuthorizeResponse {
@@ -1476,23 +1506,34 @@ async fn handle_session_exchange(
     let skin_val = Some(user_data.skin);
 
     // Generamos el Access Token final incluyendo el fingerprint si existe
-    let access_token = generate_advanced_jwt(
+    let access_token = create_auth_token(
         &state.username,
         &state.uuid,
-        granted_audience,
-        &scope_str,
         actual_port,
-        fingerprint, // <--- Pasamos el fingerprint
-        skin_val,
+        TokenConfig {
+            scope: scope_str.clone(),
+            has_profile: true,
+            audience: granted_audience,
+            fingerprint,
+            skin: skin_val,
+            duration_seconds: 3600,
+            is_advanced: true,
+        },
     );
 
-    let refresh_token = generate_jwt(
+    let refresh_token = create_auth_token(
         &state.username,
         &state.uuid,
-        "hytale:server",
-        false,
         actual_port,
-        None,
+        TokenConfig {
+            scope: "hytale:server".to_string(),
+            has_profile: false,
+            audience: None,
+            fingerprint: None,
+            skin: None,
+            duration_seconds: 36000,
+            is_advanced: false,
+        },
     );
 
     let resp = ExchangeResponse {
@@ -1586,22 +1627,34 @@ async fn handle_server_auto_auth(
         .unwrap_or_else(|| format!("Server-{}", &server_id[..8]));
 
     // Generate tokens with server scope
-    let identity_token = generate_jwt(
+    let identity_token = create_auth_token(
         &server_name,
         &server_uuid,
-        "hytale:server", // Server scope only
-        true,            // Include profile info
         actual_port,
-        None, // Servers typically don't have skins
+        TokenConfig {
+            scope: "hytale:server".to_string(),
+            has_profile: true,
+            audience: None,
+            fingerprint: None,
+            skin: None,
+            duration_seconds: 36000,
+            is_advanced: false,
+        },
     );
 
-    let session_token = generate_jwt(
+    let session_token = create_auth_token(
         &server_name,
         &server_uuid,
-        "hytale:server",
-        false, // No profile needed for session token
         actual_port,
-        None,
+        TokenConfig {
+            scope: "hytale:server".to_string(),
+            has_profile: false,
+            audience: None,
+            fingerprint: None,
+            skin: None,
+            duration_seconds: 36000,
+            is_advanced: false,
+        },
     );
 
     let expires_at = Utc::now() + chrono::Duration::hours(10); // 10 hours TTL
@@ -1625,83 +1678,17 @@ async fn handle_server_auto_auth(
     warp::reply::json(&resp)
 }
 
-fn generate_jwt(
-    username: &str,
-    uuid: &str,
-    scope: &str,
-    include_profile: bool,
-    port: u16,
-    skin: Option<serde_json::Value>,
-) -> String {
-    println!("JWT generation requested with fresh server keys.");
-
-    // Asegurar que tenemos capacidad de firmar localmente
-    crypto::ensure_local_signing_capability();
-
-    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-
-    let header = JwtHeader {
-        alg: "EdDSA".to_string(),
-        kid: crypto::KEY_ID.to_string(),
-        typ: "JWT".to_string(),
-        jwk: Some(crypto::get_server_public_jwk_as_value()),
-    };
-
-    let now = Utc::now().timestamp();
-    let exp = (Utc::now() + chrono::Duration::hours(10)).timestamp();
-    let sub = uuid.to_string();
-
-    let issuer_url = format!("http://127.0.0.000001:{}", port);
-
-    let payload_str = if include_profile {
-        let p = IdentityTokenPayload {
-            exp,
-            iat: now,
-            iss: issuer_url,
-            jti: Uuid::new_v4().to_string(),
-            scope: scope.to_string(),
-            sub,
-            name: username.to_string(),
-            username: username.to_string(),
-            entitlements: ENTITLEMENTS.iter().map(|&s| s.to_string()).collect(),
-            profile: ProfileInfo {
-                username: username.to_string(),
-                entitlements: ENTITLEMENTS.iter().map(|&s| s.to_string()).collect(),
-                skin: skin.unwrap_or_else(|| serde_json::from_str(DEFAULT_SKIN).unwrap_or_else(|_| serde_json::json!({}))),
-            },
-        };
-        serde_json::to_string(&p).unwrap()
-    } else {
-        let p = SessionTokenPayload {
-            exp,
-            iat: now,
-            iss: issuer_url,
-            jti: Uuid::new_v4().to_string(),
-            scope: scope.to_string(),
-            sub,
-        };
-        serde_json::to_string(&p).unwrap()
-    };
-
-    let header_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&header).unwrap());
-    let payload_b64 = URL_SAFE_NO_PAD.encode(payload_str);
-
-    let to_sign = format!("{}.{}", header_b64, payload_b64);
-    let signature = crypto::sign_message_with_server_keys(&to_sign);
-
-    format!("{}.{}", to_sign, signature)
+struct TokenConfig {
+    pub scope: String,
+    pub has_profile: bool, // For IdentityTokenPayload
+    pub audience: Option<String>,
+    pub fingerprint: Option<String>,
+    pub skin: Option<serde_json::Value>,
+    pub duration_seconds: i64,
+    pub is_advanced: bool, // Switch between Identity/Session layout and Auth layout
 }
 
-fn generate_advanced_jwt(
-    username: &str,
-    uuid: &str,
-    audience: Option<String>,
-    scope: &str,
-    port: u16,
-    fingerprint: Option<String>, // <--- NUEVO
-    skin: Option<serde_json::Value>,
-) -> String {
-    // Asegurar que tenemos capacidad de firmar localmente
+fn create_auth_token(username: &str, uuid: &str, port: u16, config: TokenConfig) -> String {
     crypto::ensure_local_signing_capability();
 
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -1714,29 +1701,59 @@ fn generate_advanced_jwt(
     };
 
     let now = Utc::now().timestamp();
-    let exp = (Utc::now() + chrono::Duration::hours(1)).timestamp();
-
+    let exp = (Utc::now() + chrono::Duration::seconds(config.duration_seconds)).timestamp();
     let issuer_url = format!("http://127.0.0.000001:{}", port);
 
-    let payload = AuthTokenPayload {
-        exp,
-        iat: now,
-        iss: issuer_url,
-        jti: Uuid::new_v4().to_string(),
-        scope: scope.to_string(),
-        sub: uuid.to_string(),
-        aud: audience,
-        name: Some(username.to_string()),
-        username: Some(username.to_string()), // <--- Replicar para compatibilidad
-        entitlements: Some(vec!["game.base".to_string()]),
-        cnf: fingerprint.map(|f| Confirmation { x5t_s256: f }), // <--- NUEVO
-        skin: skin,
-    };
+    // Build payload dynamically
+    let mut payload = serde_json::Map::new();
+    payload.insert("exp".into(), serde_json::json!(exp));
+    payload.insert("iat".into(), serde_json::json!(now));
+    payload.insert("iss".into(), serde_json::json!(issuer_url));
+    payload.insert("jti".into(), serde_json::json!(Uuid::new_v4().to_string()));
+    payload.insert("scope".into(), serde_json::json!(config.scope));
+    payload.insert("sub".into(), serde_json::json!(uuid));
 
-    let payload_json = serde_json::to_string(&payload).unwrap();
+    if config.is_advanced {
+        // Advanced JWT (Exchange Response)
+        if let Some(aud) = config.audience {
+            payload.insert("aud".into(), serde_json::json!(aud));
+        }
+        payload.insert("name".into(), serde_json::json!(username));
+        payload.insert("username".into(), serde_json::json!(username));
+        // Hardcoded entitlement for advanced token as per original code
+        payload.insert("entitlements".into(), serde_json::json!(vec!["game.base"]));
 
+        if let Some(fp) = config.fingerprint {
+            payload.insert("cnf".into(), serde_json::json!({ "x5t#S256": fp }));
+        }
+        if let Some(s) = config.skin {
+            payload.insert("skin".into(), s);
+        }
+    } else {
+        // Standard JWT (Identity or Session)
+        if config.has_profile {
+            payload.insert("name".into(), serde_json::json!(username));
+            payload.insert("username".into(), serde_json::json!(username));
+
+            let entitlements: Vec<String> = ENTITLEMENTS.iter().map(|&s| s.to_string()).collect();
+            payload.insert("entitlements".into(), serde_json::json!(entitlements));
+
+            let skin_val = config.skin.unwrap_or_else(|| {
+                serde_json::from_str(DEFAULT_SKIN).unwrap_or_else(|_| serde_json::json!({}))
+            });
+
+            let profile = serde_json::json!({
+                "username": username,
+                "entitlements": entitlements,
+                "skin": skin_val
+            });
+            payload.insert("profile".into(), profile);
+        }
+    }
+
+    let payload_str = serde_json::to_string(&payload).unwrap();
     let header_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&header).unwrap());
-    let payload_b64 = URL_SAFE_NO_PAD.encode(payload_json);
+    let payload_b64 = URL_SAFE_NO_PAD.encode(payload_str);
 
     let to_sign = format!("{}.{}", header_b64, payload_b64);
     let signature = crypto::sign_message_with_server_keys(&to_sign);
@@ -1972,12 +1989,16 @@ async fn handle_player_skins_delete(
 
 // --- HELPERS ---
 
-fn get_user_skins_data(uuid: &str, skins_map: &HashMap<String, serde_json::Value>) -> UserSkinsData {
+fn get_user_skins_data(
+    uuid: &str,
+    skins_map: &HashMap<String, serde_json::Value>,
+) -> UserSkinsData {
     match skins_map.get(uuid) {
         Some(val) => {
             if val.get("playerSkins").is_some() {
                 // Formato nuevo detectado
-                serde_json::from_value(val.clone()).unwrap_or_else(|_| create_default_user_skins(val.clone()))
+                serde_json::from_value(val.clone())
+                    .unwrap_or_else(|_| create_default_user_skins(val.clone()))
             } else if let Some(skin_field) = val.get("skin") {
                 // Formato híbrido/parcial: tiene un campo 'skin' pero no 'playerSkins'
                 create_default_user_skins(skin_field.clone())

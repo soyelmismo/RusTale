@@ -40,14 +40,16 @@ pub async fn repair_installation(
         if let Ok(patches) = crate::game::zip_mods::list_patches(patches_dir.clone()) {
             for patch in patches {
                 if patch.enabled {
-                    let root_clone = version_root.clone();
-                    let patches_clone = patches_dir.clone();
+                    let paths_clone = paths.clone();
+                    let channel_clone = channel.clone();
+                    let version_clone = version_str.clone();
                     let mod_id = patch.mod_id.clone();
 
                     tokio::task::spawn_blocking(move || {
                         let _ = crate::game::zip_mods::disable_patch(
-                            root_clone,
-                            patches_clone,
+                            &paths_clone,
+                            channel_clone,
+                            version_clone,
                             &mod_id,
                         );
                     })

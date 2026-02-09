@@ -58,15 +58,12 @@ async fn get_image_path(client: &Client, url: &str, cache_subdir: &str) -> Resul
         fs::create_dir_all(&cache_dir).await?;
     }
 
-    // El hashing es CPU intensive, lo movemos a un thread pool para no laggear la UI
-    let url_string = url.to_string();
-    let hash = tokio::task::spawn_blocking(move || {
+    // Hashing directo en el thread actual (es muy rapido para strings cortos)
+    let hash = {
         let mut hasher = Sha256::new();
-        hasher.update(url_string.as_bytes());
+        hasher.update(url.as_bytes());
         hex::encode(hasher.finalize())
-    })
-    .await
-    .context("Hashing task failed")?;
+    };
 
     let file_path = cache_dir.join(format!("{}.jpg", hash));
 

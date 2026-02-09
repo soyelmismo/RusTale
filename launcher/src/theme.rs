@@ -30,7 +30,7 @@ pub struct UIContext {
     pub time: f32,
     pub mouse_pos: Point,     // Posicion real del raton para efectos magneticos
     pub mouse_stillness: f32, // 0.0 (se mueve) a 1.0 (quieto por X segundos)
-    pub is_resizing: bool,     // <--- NUEVO CAMPO
+    pub is_resizing: bool,    // <--- NUEVO CAMPO
 }
 
 // --- PALETTE SYSTEM ---
@@ -78,7 +78,7 @@ impl SmoothTranslateState {
         intensity: f32,
         lsd_enabled: bool,
         offset: Vector,
-        is_resizing: bool, // <--- NUEVO PARaMETRO
+        is_resizing: bool,    // <--- NUEVO PARaMETRO
         mouse_stillness: f32, // <--- NUEVO PARaMETRO
     ) -> Vector {
         // CAMBIO CRiTICO PARA WAYLAND:
@@ -90,11 +90,12 @@ impl SmoothTranslateState {
 
         // Actualizamos intensidad en el estado
         self.intensity.set(intensity);
-        
+
         // Actualizar smoothed_stillness con suavizado exponencial
         let current_stillness = self.smoothed_stillness.get();
         let smoothing_factor = 0.1; // Suavizado gradual
-        let new_stillness = current_stillness + (mouse_stillness - current_stillness) * smoothing_factor;
+        let new_stillness =
+            current_stillness + (mouse_stillness - current_stillness) * smoothing_factor;
         self.smoothed_stillness.set(new_stillness);
 
         // --- 1. LoGICA DE REPULSIoN (Bordes) + ATRACCIoN (Centro) ---
@@ -159,7 +160,7 @@ impl SmoothTranslateState {
         // Factor de intensificacion: cuando el mouse esta quieto, multiplica la fuerza magnetica
         let intensify_factor = 1.0 + (new_stillness * 1.5); // Multiplica hasta 2.5x cuando esta completamente quieto
         let adjusted_intensity = intensity * intensify_factor;
-        
+
         let target_repulsion = Vector::new(
             target_displacement.x * adjusted_intensity,
             target_displacement.y * adjusted_intensity,
@@ -172,7 +173,7 @@ impl SmoothTranslateState {
         // Aceleracion que se intensifica con la quietud del mouse
         let base_accel = 0.005;
         let intensify_accel = base_accel * (1.0 + (new_stillness * 3.0)); // Hasta 4x mas aceleracion cuando esta quieto
-        
+
         let accel_x = (target_repulsion.x - current_pos.x) * intensify_accel;
         let accel_y = (target_repulsion.y - current_pos.y) * intensify_accel;
 
@@ -193,16 +194,24 @@ impl SmoothTranslateState {
         // --- 3. JITTER "HIPNoTICO" (Frecuencia que se intensifica con la quietud) ---
         let center_dist = mouse_pos.distance(bounds.center());
         let jitter_multiplier = (1.0 + (center_dist / 200.0)).min(2.5);
-        
+
         // Intensificar jitter basado en la quietud del mouse
         let jitter_intensify_factor = 1.0 + (new_stillness * 2.0); // Multiplica hasta 3x el jitter cuando esta quieto
 
-        // CAMBIO: Multiplicamos el resultado del seno/coseno por `intensity` 
+        // CAMBIO: Multiplicamos el resultado del seno/coseno por `intensity`
         // Esto asegura que si intensity es 0.0 (inicio de la transicion),
         // el jitter sea matematicamente 0.0 (quietud total).
         let jitter = Vector::new(
-            (time * 3.5 + offset.x * 0.1).sin() * 0.15 * jitter_multiplier * intensity * jitter_intensify_factor,
-            (time * 4.2 + offset.y * 0.13).cos() * 0.15 * jitter_multiplier * intensity * jitter_intensify_factor,
+            (time * 3.5 + offset.x * 0.1).sin()
+                * 0.15
+                * jitter_multiplier
+                * intensity
+                * jitter_intensify_factor,
+            (time * 4.2 + offset.y * 0.13).cos()
+                * 0.15
+                * jitter_multiplier
+                * intensity
+                * jitter_intensify_factor,
         );
 
         Vector::new(
@@ -221,7 +230,7 @@ pub struct SmoothTranslate<'a, Message> {
     time: f32,
     lsd_intensity: f32,
     lsd_enabled: bool,
-    is_resizing: bool, // <--- NUEVO CAMPO
+    is_resizing: bool,    // <--- NUEVO CAMPO
     mouse_stillness: f32, // <--- NUEVO CAMPO
 }
 
@@ -331,13 +340,19 @@ pub fn card_style(palette: &Palette, _t: &Theme) -> container::Style {
         background: Some(Background::Color(palette.surface)), // Ya trae alfa dinamico
         border: Border {
             // El borde ahora se desvanece con el texto
-            color: Color { a: palette.text_primary.a * 0.1, ..palette.text_primary },
+            color: Color {
+                a: palette.text_primary.a * 0.1,
+                ..palette.text_primary
+            },
             width: 1.0,
             radius: 12.0.into(),
         },
         shadow: Shadow {
             // La sombra desaparece cuando el fondo es 0.0
-            color: Color { a: alpha * 0.2, ..Color::BLACK },
+            color: Color {
+                a: alpha * 0.2,
+                ..Color::BLACK
+            },
             offset: Vector::new(0.0, 4.0),
             blur_radius: 10.0,
         },
@@ -352,13 +367,22 @@ pub fn danger_button_style(
     _status: button::Status,
 ) -> button::Style {
     button::Style {
-        background: Some(Background::Color(Color { a: palette.danger.a, ..palette.danger })),
+        background: Some(Background::Color(Color {
+            a: palette.danger.a,
+            ..palette.danger
+        })),
         border: Border {
-            color: Color { a: 0.2 * palette.background.a, ..Color::WHITE },
+            color: Color {
+                a: 0.2 * palette.background.a,
+                ..Color::WHITE
+            },
             width: 1.0,
             radius: 8.0.into(),
         },
-        text_color: Color { a: palette.text_on_accent.a, ..Color::WHITE },
+        text_color: Color {
+            a: palette.text_on_accent.a,
+            ..Color::WHITE
+        },
         ..Default::default()
     }
 }
@@ -377,14 +401,18 @@ pub fn magic_column<'a, M: 'a + Clone>(
             // Esto hace que la columna parezca gelatina en lugar de un bloque rigido
             let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, i + 10, ctx.lsd_intensity);
 
-            let wrapped_item = Element::new(SmoothTranslate::new(
-                item,
-                (vx, vy),
-                ctx.mouse_pos,
-                false,
-                ctx.lsd_intensity,
-                ctx.lsd_enabled,
-            ).resizing(ctx.is_resizing).with_stillness(ctx.mouse_stillness));
+            let wrapped_item = Element::new(
+                SmoothTranslate::new(
+                    item,
+                    (vx, vy),
+                    ctx.mouse_pos,
+                    false,
+                    ctx.lsd_intensity,
+                    ctx.lsd_enabled,
+                )
+                .resizing(ctx.is_resizing)
+                .with_stillness(ctx.mouse_stillness),
+            );
 
             col = col.push(wrapped_item);
         }
@@ -410,14 +438,18 @@ pub fn magic_row<'a, M: 'a + Clone>(
             // Esto hace que la columna parezca gelatina en lugar de un bloque rigido
             let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, i + 12, ctx.lsd_intensity);
 
-            let wrapped_item = Element::new(SmoothTranslate::new(
-                item,
-                (vx, vy),
-                ctx.mouse_pos,
-                false,
-                ctx.lsd_intensity,
-                ctx.lsd_enabled,
-            ).resizing(ctx.is_resizing).with_stillness(ctx.mouse_stillness));
+            let wrapped_item = Element::new(
+                SmoothTranslate::new(
+                    item,
+                    (vx, vy),
+                    ctx.mouse_pos,
+                    false,
+                    ctx.lsd_intensity,
+                    ctx.lsd_enabled,
+                )
+                .resizing(ctx.is_resizing)
+                .with_stillness(ctx.mouse_stillness),
+            );
 
             col = col.push(wrapped_item);
         }
@@ -507,14 +539,18 @@ pub fn lsd_magic_text<'a, M: 'a>(
             // Color neon que resalta sobre el fondo
             .color(Color::from_rgb(1.0, 0.4, 0.2));
 
-        row = row.push(Element::new(SmoothTranslate::new(
-            char_el.into(),
-            (off_x, off_y),
-            ctx.mouse_pos,
-            false, // Que se mueva siempre
-            1.0,   // Fuerza maxima
-            true,  // Ignorar modo global OFF
-        ).resizing(ctx.is_resizing).with_stillness(ctx.mouse_stillness)));
+        row = row.push(Element::new(
+            SmoothTranslate::new(
+                char_el.into(),
+                (off_x, off_y),
+                ctx.mouse_pos,
+                false, // Que se mueva siempre
+                1.0,   // Fuerza maxima
+                true,  // Ignorar modo global OFF
+            )
+            .resizing(ctx.is_resizing)
+            .with_stillness(ctx.mouse_stillness),
+        ));
     }
 
     row.into()
@@ -603,16 +639,25 @@ pub fn labeled_input<'a, M: 'a + Clone>(
 pub fn glass_container(palette: &Palette, _t: &Theme) -> container::Style {
     // Tomamos el alpha actual de la paleta (que ya viene multiplicado en main.rs)
     let current_alpha = palette.background.a;
-    
+
     container::Style {
-        background: Some(Background::Color(Color { a: current_alpha * 0.85, ..palette.background })),
+        background: Some(Background::Color(Color {
+            a: current_alpha * 0.85,
+            ..palette.background
+        })),
         border: Border {
-            color: Color { a: palette.text_primary.a * 0.1, ..palette.text_primary },
+            color: Color {
+                a: palette.text_primary.a * 0.1,
+                ..palette.text_primary
+            },
             width: 1.0,
             radius: 12.0.into(),
         },
         shadow: Shadow {
-            color: Color { a: current_alpha * 0.2, ..Color::BLACK }, // <--- CLAVE: sombra dinamica
+            color: Color {
+                a: current_alpha * 0.2,
+                ..Color::BLACK
+            }, // <--- CLAVE: sombra dinamica
             offset: Vector::new(0.0, 4.0),
             blur_radius: 10.0,
         },
@@ -629,7 +674,10 @@ pub fn icon_button_style(palette: &Palette, _t: &Theme, status: button::Status) 
     match status {
         button::Status::Hovered | button::Status::Pressed => button::Style {
             text_color: palette.accent, // Ya tiene alfa modificado
-            background: Some(Background::Color(Color { a: palette.surface_hover.a, ..palette.surface_hover })),
+            background: Some(Background::Color(Color {
+                a: palette.surface_hover.a,
+                ..palette.surface_hover
+            })),
             border: Border {
                 radius: 4.0.into(),
                 ..Default::default()
@@ -646,9 +694,15 @@ pub fn icon_button_style(palette: &Palette, _t: &Theme, status: button::Status) 
 
 pub fn play_button_style(palette: &Palette, _t: &Theme, status: button::Status) -> button::Style {
     let base = button::Style {
-        background: Some(Background::Color(Color { a: palette.background.a * 0.8, ..palette.background })),
+        background: Some(Background::Color(Color {
+            a: palette.background.a * 0.8,
+            ..palette.background
+        })),
         border: Border {
-            color: Color { a: palette.accent.a * 0.3, ..palette.accent },
+            color: Color {
+                a: palette.accent.a * 0.3,
+                ..palette.accent
+            },
             width: 1.0,
             radius: 8.0.into(),
         },
@@ -657,7 +711,10 @@ pub fn play_button_style(palette: &Palette, _t: &Theme, status: button::Status) 
     };
     match status {
         button::Status::Hovered => button::Style {
-            background: Some(Background::Color(Color { a: palette.surface.a * 0.9, ..palette.surface })),
+            background: Some(Background::Color(Color {
+                a: palette.surface.a * 0.9,
+                ..palette.surface
+            })),
             border: Border {
                 color: palette.accent, // Ya tiene alfa modificado
                 width: 1.0,
@@ -665,7 +722,10 @@ pub fn play_button_style(palette: &Palette, _t: &Theme, status: button::Status) 
             },
             text_color: palette.accent, // Ya tiene alfa modificado
             shadow: Shadow {
-                color: Color { a: palette.accent.a * 0.2, ..palette.accent },
+                color: Color {
+                    a: palette.accent.a * 0.2,
+                    ..palette.accent
+                },
                 blur_radius: 10.0,
                 ..Default::default()
             },
@@ -691,29 +751,47 @@ pub fn play_button_style_active(
     status: button::Status,
 ) -> button::Style {
     let ui_a = palette.background.a; // Para modo LSD/Transparencia
-    
+
     // Base: Color de superficie pero con borde "peligro" sutil
     let base = button::Style {
-        background: Some(Background::Color(Color { a: 0.4 * ui_a, ..palette.surface })),
+        background: Some(Background::Color(Color {
+            a: 0.4 * ui_a,
+            ..palette.surface
+        })),
         border: Border {
-            color: Color { a: 0.5 * ui_a, ..palette.danger },
+            color: Color {
+                a: 0.5 * ui_a,
+                ..palette.danger
+            },
             width: 1.0,
             radius: 8.0.into(),
         },
-        text_color: Color { a: 0.9 * ui_a, ..palette.danger }, // Texto rojo suave
+        text_color: Color {
+            a: 0.9 * ui_a,
+            ..palette.danger
+        }, // Texto rojo suave
         ..button::Style::default()
     };
 
     match status {
         button::Status::Hovered | button::Status::Pressed => button::Style {
-            background: Some(Background::Color(Color { a: 0.1 * ui_a, ..palette.danger })),
+            background: Some(Background::Color(Color {
+                a: 0.1 * ui_a,
+                ..palette.danger
+            })),
             border: Border {
                 color: palette.danger,
                 ..base.border
             },
-            text_color: Color { a: 1.0 * ui_a, ..Color::WHITE },
+            text_color: Color {
+                a: 1.0 * ui_a,
+                ..Color::WHITE
+            },
             shadow: Shadow {
-                color: Color { a: 0.2 * ui_a, ..palette.danger },
+                color: Color {
+                    a: 0.2 * ui_a,
+                    ..palette.danger
+                },
                 blur_radius: 10.0,
                 ..Default::default()
             },
@@ -729,11 +807,17 @@ pub fn blocked_button_style(
     _status: button::Status,
 ) -> button::Style {
     let ui_a = palette.background.a;
-    
+
     button::Style {
-        background: Some(Background::Color(Color { a: 0.1 * ui_a, ..palette.text_primary })),
+        background: Some(Background::Color(Color {
+            a: 0.1 * ui_a,
+            ..palette.text_primary
+        })),
         border: Border {
-            color: Color { a: 0.05 * ui_a, ..palette.text_primary },
+            color: Color {
+                a: 0.05 * ui_a,
+                ..palette.text_primary
+            },
             width: 1.0,
             radius: 8.0.into(),
         },
@@ -749,10 +833,13 @@ pub fn secondary_button_style(
 ) -> button::Style {
     let ui_a = palette.text_primary.a; // Nuestra referencia de visibilidad total
     let is_light = palette.background.r > 0.5;
-    
+
     match status {
         button::Status::Hovered | button::Status::Pressed => button::Style {
-            background: Some(Background::Color(Color { a: palette.surface_hover.a, ..palette.surface_hover })),
+            background: Some(Background::Color(Color {
+                a: palette.surface_hover.a,
+                ..palette.surface_hover
+            })),
             text_color: palette.accent, // Ya tiene alfa modificado
             border: Border {
                 color: palette.accent, // Ya tiene alfa modificado
@@ -762,14 +849,17 @@ pub fn secondary_button_style(
             ..Default::default()
         },
         _ => button::Style {
-            background: Some(Background::Color(Color { 
+            background: Some(Background::Color(Color {
                 // CLAVE: Multiplicar el alfa deseado (0.05) por el alfa dinamico (ui_a)
-                a: (if is_light { 0.03 } else { 0.05 }) * ui_a, 
+                a: (if is_light { 0.03 } else { 0.05 }) * ui_a,
                 ..if is_light { Color::BLACK } else { Color::WHITE }
             })),
             text_color: palette.text_secondary, // Ya tiene alfa modificado
             border: Border {
-                color: Color { a: 0.05 * ui_a, ..palette.text_primary },
+                color: Color {
+                    a: 0.05 * ui_a,
+                    ..palette.text_primary
+                },
                 width: 1.0,
                 radius: 8.0.into(),
             },
@@ -886,9 +976,9 @@ pub fn success_button_style(
 
 pub fn active_tab_style(palette: &Palette, _t: &Theme, _status: button::Status) -> button::Style {
     button::Style {
-        background: Some(Background::Color(Color { 
+        background: Some(Background::Color(Color {
             a: palette.accent.a * 0.15, // Alfa dinamico relativo al acento
-            ..palette.accent 
+            ..palette.accent
         })),
         border: Border {
             color: palette.accent, // Ya trae alfa
@@ -902,9 +992,9 @@ pub fn active_tab_style(palette: &Palette, _t: &Theme, _status: button::Status) 
 
 pub fn active_tab_container_style(palette: &Palette, _t: &Theme) -> container::Style {
     container::Style {
-        background: Some(Background::Color(Color { 
-            a: palette.accent.a * 0.15, 
-            ..palette.accent 
+        background: Some(Background::Color(Color {
+            a: palette.accent.a * 0.15,
+            ..palette.accent
         })),
         border: Border {
             color: palette.accent,
@@ -992,13 +1082,19 @@ pub fn text_input_style(
         background: Background::Color(if is_light {
             Color::from_rgb(0.92, 0.93, 0.95)
         } else {
-            Color { a: 0.3 * palette.background.a, ..Color::BLACK }
+            Color {
+                a: 0.3 * palette.background.a,
+                ..Color::BLACK
+            }
         }),
         border: Border {
             color: if matches!(status, text_input::Status::Focused { .. }) {
                 palette.accent
             } else {
-                Color { a: 0.1 * ui_a, ..palette.text_primary }
+                Color {
+                    a: 0.1 * ui_a,
+                    ..palette.text_primary
+                }
             },
             width: 1.0,
             radius: 6.0.into(),
@@ -1093,21 +1189,17 @@ pub fn sub_bar_style(_palette: &Palette, _t: &Theme) -> progress_bar::Style {
     }
 }
 
-pub fn update_button_style(
-    palette: &Palette,
-    _t: &Theme,
-    status: button::Status,
-) -> button::Style {
+pub fn update_button_style(palette: &Palette, _t: &Theme, status: button::Status) -> button::Style {
     let ui_a = palette.background.a;
-    
+
     // En lugar de azul, usamos el color del tema pero con un estilo "brillante"
     let mut s = primary_button_style(palette, _t, status);
-    
+
     if status != button::Status::Hovered {
         // Hacemos que parpadee levemente o sea un poco mas claro que el play normal
-        s.background = Some(Background::Color(Color { 
-            a: 0.8 * ui_a, 
-            ..palette.accent 
+        s.background = Some(Background::Color(Color {
+            a: 0.8 * ui_a,
+            ..palette.accent
         }));
     }
     s
@@ -1124,13 +1216,22 @@ pub fn dropdown_trigger_style(
     let base = button::Style {
         text_color: palette.text_primary,
         background: Some(Background::Color(if is_light {
-            Color { a: 1.0 * ui_a, ..Color::from_rgb(0.92, 0.93, 0.95) }
+            Color {
+                a: 1.0 * ui_a,
+                ..Color::from_rgb(0.92, 0.93, 0.95)
+            }
         } else {
             // Reemplazar Color::from_rgba fijo por dinamico
-            Color { a: 0.3 * ui_a, ..Color::BLACK }
+            Color {
+                a: 0.3 * ui_a,
+                ..Color::BLACK
+            }
         })),
         border: Border {
-            color: Color { a: 0.1 * ui_a, ..palette.text_primary },
+            color: Color {
+                a: 0.1 * ui_a,
+                ..palette.text_primary
+            },
             width: 1.0,
             radius: 8.0.into(),
         },
@@ -1242,14 +1343,17 @@ where
 {
     // SIEMPRE envolvemos en SmoothTranslate para mantener estabilidad del arbol
     let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 9, ctx.lsd_intensity);
-    Element::new(SmoothTranslate::new(
-        element,
-        (vx, vy), // Pasar vectores directos
-        ctx.mouse_pos,
-        false,
-        ctx.lsd_intensity,
-        ctx.lsd_enabled,
-    ).resizing(ctx.is_resizing))
+    Element::new(
+        SmoothTranslate::new(
+            element,
+            (vx, vy), // Pasar vectores directos
+            ctx.mouse_pos,
+            false,
+            ctx.lsd_intensity,
+            ctx.lsd_enabled,
+        )
+        .resizing(ctx.is_resizing),
+    )
 }
 
 /// Un Dropdown totalmente personalizado que aplica efectos LSD a las letras del menu.
@@ -1359,7 +1463,10 @@ pub fn svg_muted(
         Color::from_rgb(0.5, 0.5, 0.5)
     };
     iced::widget::svg::Style {
-        color: Some(Color { a: palette.text_secondary.a, ..base_color }), // Usa el alfa del texto secundario
+        color: Some(Color {
+            a: palette.text_secondary.a,
+            ..base_color
+        }), // Usa el alfa del texto secundario
     }
 }
 
@@ -1391,7 +1498,10 @@ pub fn scrollable_style(
             background: Background::Color(if is_hovered {
                 palette.accent // palette.accent ya tiene el alfa corregido
             } else {
-                Color { a: 0.1 * ui_a, ..palette.text_primary } // <--- Scrollbar suave
+                Color {
+                    a: 0.1 * ui_a,
+                    ..palette.text_primary
+                } // <--- Scrollbar suave
             }),
             border: Border {
                 radius: 10.0.into(),
@@ -1408,7 +1518,10 @@ pub fn scrollable_style(
         horizontal_rail: rail,
         gap: None,
         auto_scroll: scrollable::AutoScroll {
-            background: Background::Color(Color { a: 0.5 * ui_a, ..Color::BLACK }),
+            background: Background::Color(Color {
+                a: 0.5 * ui_a,
+                ..Color::BLACK
+            }),
             border: Border {
                 radius: 8.0.into(),
                 ..Default::default()
@@ -1445,17 +1558,17 @@ impl<'a, Message> SmoothTranslate<'a, Message> {
             time: offset.0.abs() + offset.1.abs(),
             lsd_intensity,
             lsd_enabled,
-            is_resizing: false, // Valor por defecto, se sobreescribe en magic_*
+            is_resizing: false,   // Valor por defecto, se sobreescribe en magic_*
             mouse_stillness: 0.0, // Valor por defecto, se sobreescribe en magic_*
         }
     }
-    
+
     // Metodo helper para encadenar
     pub fn resizing(mut self, is_resizing: bool) -> Self {
         self.is_resizing = is_resizing;
         self
     }
-    
+
     // Nuevo metodo helper para mouse_stillness
     pub fn with_stillness(mut self, mouse_stillness: f32) -> Self {
         self.mouse_stillness = mouse_stillness;
@@ -1534,8 +1647,8 @@ impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Messa
         // 1. Margen de seguridad: El efecto LSD mueve los objetos visualmente fuera de sus bounds reales.
         //    Si hacemos un culling estricto, los objetos parpadearan al entrar en pantalla.
         //    Anadimos 100px extra (suficiente para cubrir repulsion + jitter).
-        let safe_margin = 100.0; 
-        
+        let safe_margin = 100.0;
+
         let visible_area = Rectangle {
             x: viewport.x - safe_margin,
             y: viewport.y - safe_margin,
@@ -1576,7 +1689,7 @@ impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Messa
             self.lsd_intensity,
             self.lsd_enabled,
             self.offset,
-            self.is_resizing, // <--- PASAR AQUi
+            self.is_resizing,     // <--- PASAR AQUi
             self.mouse_stillness, // <--- PASAR AQUi
         );
 
@@ -1615,7 +1728,7 @@ impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Messa
             self.lsd_intensity,
             self.lsd_enabled && !self.proximity_only,
             self.offset,
-            self.is_resizing, // <--- PASAR AQUi
+            self.is_resizing,     // <--- PASAR AQUi
             self.mouse_stillness, // <--- PASAR AQUi
         );
 
@@ -1672,7 +1785,7 @@ impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Messa
             self.lsd_intensity,
             self.lsd_enabled && !self.proximity_only,
             self.offset,
-            self.is_resizing, // <--- PASAR AQUi
+            self.is_resizing,     // <--- PASAR AQUi
             self.mouse_stillness, // <--- PASAR AQUi
         );
 
@@ -1691,30 +1804,26 @@ impl<'a, Message> Widget<Message, Theme, Renderer> for SmoothTranslate<'a, Messa
 
 // Modificamos la firma para aceptar 'intensity'
 fn get_seeded_disparity(offset: (f32, f32), seed: usize, intensity: f32) -> (f32, f32) {
-    // CLAVE: Si la intensidad es muy baja (inicio del ramp-up), 
-    // forzamos cero absoluto para que el texto este pixel-perfecto en su sitio original.
-    if intensity < 0.05 {
+    // 1. HARD OPTIMIZATION: If intensity is negligible, return ZERO immediately.
+    // This stops layout thrashing when the mouse is still.
+    if intensity < 0.01 {
         return (0.0, 0.0);
     }
 
-    let s = seed as f32;
+    let s = (seed % 100) as f32; // Limit seed magnitude
 
-    // 1. Ruido pseudo-aleatorio estatico
-    let scatter_x = (s * 12.9898).sin().fract() * 0.4 - 0.2;
-    let scatter_y = (s * 78.233).sin().fract() * 0.4 - 0.2;
+    // 2. Reduce sin/cos usage. Use simple pseudo-random hash logic for static scatter.
+    // f32::sin is costly in a loop of 1000s of chars.
+    let scatter_x = ((s * 1.5).fract() - 0.5) * 0.4; // Replaces sin() scatter
+    let scatter_y = ((s * 2.5).fract() - 0.5) * 0.4;
 
-    // 2. Modulacion caotica
-    let phase = (s * 0.15).fract() * 6.28; 
-    let chaotic_offset_x = (offset.0 * (phase + offset.1 * 0.02).cos()
-        - offset.1 * (phase + offset.0 * 0.02).sin()) * 0.85;
-    let chaotic_offset_y = (offset.0 * (phase + offset.1 * 0.02).sin()
-        + offset.1 * (phase + offset.0 * 0.02).cos()) * 0.85;
+    // Only perform heavy trig for the chaotic movement part
+    let chaotic_offset_x = (offset.0 - offset.1 * 0.5) * 0.85;
+    let chaotic_offset_y = (offset.0 * 0.5 + offset.1) * 0.85;
 
-    // CLAVE 2: Multiplicamos el resultado final por la intensidad.
-    // Esto hace que el "desorden" crezca desde el centro hacia afuera.
     (
-        (scatter_x + chaotic_offset_x) * intensity, 
-        (scatter_y + chaotic_offset_y) * intensity
+        (scatter_x + chaotic_offset_x) * intensity,
+        (scatter_y + chaotic_offset_y) * intensity,
     )
 }
 
@@ -1723,18 +1832,22 @@ pub fn text<'a, M: 'a>(
     ctx: UIContext,
 ) -> Element<'a, M, Theme, Renderer> {
     let element: Element<'a, M, Theme, Renderer> = content.into();
-    
+
     // SIEMPRE envolvemos en SmoothTranslate para mantener estabilidad del arbol
     let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 1, ctx.lsd_intensity);
-    
-    Element::new(SmoothTranslate::new(
-        element,
-        (vx, vy), // Pasar vectores directos
-        ctx.mouse_pos,
-        false,
-        ctx.lsd_intensity,
-        ctx.lsd_enabled,
-    ).resizing(ctx.is_resizing).with_stillness(ctx.mouse_stillness))
+
+    Element::new(
+        SmoothTranslate::new(
+            element,
+            (vx, vy), // Pasar vectores directos
+            ctx.mouse_pos,
+            false,
+            ctx.lsd_intensity,
+            ctx.lsd_enabled,
+        )
+        .resizing(ctx.is_resizing)
+        .with_stillness(ctx.mouse_stillness),
+    )
 }
 
 // NUEVA FUNCIoN: Aplica efecto LSD letra por letra a un string
@@ -1768,18 +1881,22 @@ pub fn text_lsd_letters<'a, M: 'a>(
 
         // Calcular offset unico (La funcion ya devuelve valores ponderados por intensidad)
         let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 100 + i, lsd_intensity);
-        
+
         // NO vuelvas a multiplicar por lsd_intensity aqui
-        
+
         // Envolver cada letra
-        let magic_char = Element::new(SmoothTranslate::new(
-            char_element,
-            (vx, vy), // Pasar vectores directos
-            mouse_pos,
-            false,
-            lsd_intensity,
-            lsd_enabled,
-        ).resizing(ctx.is_resizing).with_stillness(ctx.mouse_stillness));
+        let magic_char = Element::new(
+            SmoothTranslate::new(
+                char_element,
+                (vx, vy), // Pasar vectores directos
+                mouse_pos,
+                false,
+                lsd_intensity,
+                lsd_enabled,
+            )
+            .resizing(ctx.is_resizing)
+            .with_stillness(ctx.mouse_stillness),
+        );
 
         letter_row = letter_row.push(magic_char);
     }
@@ -1789,18 +1906,25 @@ pub fn text_lsd_letters<'a, M: 'a>(
 
 pub fn svg<'a, M: 'a>(content: impl Into<Element<'a, M>>, ctx: UIContext) -> Element<'a, M> {
     let element = content.into();
-    
-    // SIEMPRE envolvemos en SmoothTranslate para mantener estabilidad del arbol
-    let (vx, vy) = get_seeded_disparity((ctx.lsd_offset.0 + 0.5, ctx.lsd_offset.1 + 0.5), 15, ctx.lsd_intensity);
 
-    Element::new(SmoothTranslate::new(
-        element,
-        (vx, vy), // Pasar vectores directos
-        ctx.mouse_pos,
-        false,
+    // SIEMPRE envolvemos en SmoothTranslate para mantener estabilidad del arbol
+    let (vx, vy) = get_seeded_disparity(
+        (ctx.lsd_offset.0 + 0.5, ctx.lsd_offset.1 + 0.5),
+        15,
         ctx.lsd_intensity,
-        ctx.lsd_enabled,
-    ).resizing(ctx.is_resizing))
+    );
+
+    Element::new(
+        SmoothTranslate::new(
+            element,
+            (vx, vy), // Pasar vectores directos
+            ctx.mouse_pos,
+            false,
+            ctx.lsd_intensity,
+            ctx.lsd_enabled,
+        )
+        .resizing(ctx.is_resizing),
+    )
 }
 
 pub fn magic_pick_list_with_menu<'a, M>(
@@ -1813,14 +1937,17 @@ where
     // SIEMPRE envolvemos en SmoothTranslate para mantener estabilidad del arbol
     let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 2, ctx.lsd_intensity);
 
-    Element::new(SmoothTranslate::new(
-        element,
-        (vx, vy),
-        ctx.mouse_pos,
-        false,
-        ctx.lsd_intensity,
-        ctx.lsd_enabled,
-    ).resizing(ctx.is_resizing))
+    Element::new(
+        SmoothTranslate::new(
+            element,
+            (vx, vy),
+            ctx.mouse_pos,
+            false,
+            ctx.lsd_intensity,
+            ctx.lsd_enabled,
+        )
+        .resizing(ctx.is_resizing),
+    )
 }
 pub fn magic_text_input<'a, M>(
     element: Element<'a, M, Theme, Renderer>,
@@ -1832,14 +1959,17 @@ where
     // SIEMPRE envolvemos en SmoothTranslate para mantener estabilidad del arbol
     let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 3, ctx.lsd_intensity);
 
-    Element::new(SmoothTranslate::new(
-        element,
-        (vx, vy),
-        ctx.mouse_pos,
-        false,
-        ctx.lsd_intensity,
-        ctx.lsd_enabled,
-    ).resizing(ctx.is_resizing))
+    Element::new(
+        SmoothTranslate::new(
+            element,
+            (vx, vy),
+            ctx.mouse_pos,
+            false,
+            ctx.lsd_intensity,
+            ctx.lsd_enabled,
+        )
+        .resizing(ctx.is_resizing),
+    )
 }
 
 pub fn text_editor_style(
@@ -1887,18 +2017,21 @@ where
     // SIEMPRE envolvemos en SmoothTranslate para mantener estabilidad del arbol
     let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 11, ctx.lsd_intensity);
 
-    Element::new(SmoothTranslate::new(
-        container(element)
-            .width(Length::Fill)
-            .height(Length::Fixed(150.0)) // Altura de area de texto real
-            .padding(2)
-            .into(),
-        (vx, vy),
-        ctx.mouse_pos,
-        false,
-        ctx.lsd_intensity,
-        ctx.lsd_enabled,
-    ).resizing(ctx.is_resizing))
+    Element::new(
+        SmoothTranslate::new(
+            container(element)
+                .width(Length::Fill)
+                .height(Length::Fixed(150.0)) // Altura de area de texto real
+                .padding(2)
+                .into(),
+            (vx, vy),
+            ctx.mouse_pos,
+            false,
+            ctx.lsd_intensity,
+            ctx.lsd_enabled,
+        )
+        .resizing(ctx.is_resizing),
+    )
 }
 pub fn magic_button<'a, M: 'a + Clone>(
     element: Element<'a, M, Theme, Renderer>,
@@ -1909,14 +2042,18 @@ where
 {
     // SIEMPRE envolvemos en SmoothTranslate para mantener estabilidad del arbol
     let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 9, ctx.lsd_intensity);
-    Element::new(SmoothTranslate::new(
-        element,
-        (vx, vy), // Pasar vectores directos
-        ctx.mouse_pos,
-        false,
-        ctx.lsd_intensity,
-        ctx.lsd_enabled,
-    ).resizing(ctx.is_resizing).with_stillness(ctx.mouse_stillness))
+    Element::new(
+        SmoothTranslate::new(
+            element,
+            (vx, vy), // Pasar vectores directos
+            ctx.mouse_pos,
+            false,
+            ctx.lsd_intensity,
+            ctx.lsd_enabled,
+        )
+        .resizing(ctx.is_resizing)
+        .with_stillness(ctx.mouse_stillness),
+    )
 }
 
 pub fn magic_checkbox<'a, M>(
@@ -1929,14 +2066,17 @@ where
     // SIEMPRE envolvemos en SmoothTranslate para mantener estabilidad del arbol
     // Semilla 5 para checkboxes
     let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 5, ctx.lsd_intensity);
-    Element::new(SmoothTranslate::new(
-        element,
-        (vx, vy), // Pasar vectores directos
-        ctx.mouse_pos,
-        false,
-        ctx.lsd_intensity,
-        ctx.lsd_enabled,
-    ).resizing(ctx.is_resizing))
+    Element::new(
+        SmoothTranslate::new(
+            element,
+            (vx, vy), // Pasar vectores directos
+            ctx.mouse_pos,
+            false,
+            ctx.lsd_intensity,
+            ctx.lsd_enabled,
+        )
+        .resizing(ctx.is_resizing),
+    )
 }
 
 pub fn magic_image<'a, M>(
@@ -1948,15 +2088,22 @@ where
 {
     // SIEMPRE envolvemos en SmoothTranslate para mantener estabilidad del arbol
     // Semilla 1.5 para imagenes (similar a svg)
-    let (vx, vy) = get_seeded_disparity((ctx.lsd_offset.0 + 0.3, ctx.lsd_offset.1 + 0.3), 1, ctx.lsd_intensity);
-    Element::new(SmoothTranslate::new(
-        element,
-        (vx, vy), // Pasar vectores directos
-        ctx.mouse_pos,
-        false,
+    let (vx, vy) = get_seeded_disparity(
+        (ctx.lsd_offset.0 + 0.3, ctx.lsd_offset.1 + 0.3),
+        1,
         ctx.lsd_intensity,
-        ctx.lsd_enabled,
-    ).resizing(ctx.is_resizing))
+    );
+    Element::new(
+        SmoothTranslate::new(
+            element,
+            (vx, vy), // Pasar vectores directos
+            ctx.mouse_pos,
+            false,
+            ctx.lsd_intensity,
+            ctx.lsd_enabled,
+        )
+        .resizing(ctx.is_resizing),
+    )
 }
 
 pub fn magic_container<'a, M>(
@@ -1970,14 +2117,17 @@ where
     // Semilla 6 para contenedores (mas sutil)
     let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 6, ctx.lsd_intensity);
 
-    Element::new(SmoothTranslate::new(
-        element,
-        (vx, vy),
-        ctx.mouse_pos,
-        false,
-        ctx.lsd_intensity,
-        ctx.lsd_enabled,
-    ).resizing(ctx.is_resizing))
+    Element::new(
+        SmoothTranslate::new(
+            element,
+            (vx, vy),
+            ctx.mouse_pos,
+            false,
+            ctx.lsd_intensity,
+            ctx.lsd_enabled,
+        )
+        .resizing(ctx.is_resizing),
+    )
 }
 
 pub fn magic_scrollable<'a, M>(
@@ -1994,14 +2144,17 @@ where
     // Si lsd_enabled es false, SmoothTranslate simplemente no aplicara efectos,
     // pero el widget "padre" seguira siendo el mismo para el motor de Iced.
     let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 5, ctx.lsd_intensity);
-    Element::new(SmoothTranslate::new(
-        element,
-        (vx, vy), // Pasar vectores directos
-        ctx.mouse_pos,
-        !ctx.lsd_enabled, // proximity_only si esta desactivado
-        ctx.lsd_intensity,
-        ctx.lsd_enabled,
-    ).resizing(ctx.is_resizing))
+    Element::new(
+        SmoothTranslate::new(
+            element,
+            (vx, vy), // Pasar vectores directos
+            ctx.mouse_pos,
+            !ctx.lsd_enabled, // proximity_only si esta desactivado
+            ctx.lsd_intensity,
+            ctx.lsd_enabled,
+        )
+        .resizing(ctx.is_resizing),
+    )
 }
 
 pub fn magic_slider<'a, M>(
@@ -2014,14 +2167,17 @@ where
     // SIEMPRE envolvemos en SmoothTranslate para mantener estabilidad del arbol
     // Semilla 7 para sliders (vibrante)
     let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 7, ctx.lsd_intensity);
-    Element::new(SmoothTranslate::new(
-        element,
-        (vx, vy),
-        ctx.mouse_pos,
-        false,
-        ctx.lsd_intensity,
-        ctx.lsd_enabled,
-    ).resizing(ctx.is_resizing))
+    Element::new(
+        SmoothTranslate::new(
+            element,
+            (vx, vy),
+            ctx.mouse_pos,
+            false,
+            ctx.lsd_intensity,
+            ctx.lsd_enabled,
+        )
+        .resizing(ctx.is_resizing),
+    )
 }
 
 pub fn magic_tooltip<'a, M>(
@@ -2034,14 +2190,17 @@ where
     // SIEMPRE envolvemos en SmoothTranslate para mantener estabilidad del arbol
     // Semilla 8 para tooltips
     let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 8, ctx.lsd_intensity);
-    Element::new(SmoothTranslate::new(
-        element,
-        (vx, vy),
-        ctx.mouse_pos,
-        false,
-        ctx.lsd_intensity,
-        ctx.lsd_enabled,
-    ).resizing(ctx.is_resizing))
+    Element::new(
+        SmoothTranslate::new(
+            element,
+            (vx, vy),
+            ctx.mouse_pos,
+            false,
+            ctx.lsd_intensity,
+            ctx.lsd_enabled,
+        )
+        .resizing(ctx.is_resizing),
+    )
 }
 
 pub fn dropdown_menu_style(palette: &Palette, _t: &Theme) -> container::Style {
@@ -2078,9 +2237,16 @@ pub fn window_frame_style(palette: &Palette, _t: &Theme, is_maximized: bool) -> 
         background: Some(Background::Color(Color::TRANSPARENT)), // El fondo lo maneja el contenido interno
         border: Border {
             // El color del borde desaparece junto con el alpha general
-            color: Color { a: 0.5 * alpha, ..Color::BLACK },
+            color: Color {
+                a: 0.5 * alpha,
+                ..Color::BLACK
+            },
             width: if is_maximized { 0.0 } else { 1.0 }, // Sin borde si esta maximizado
-            radius: if is_maximized { 0.0.into() } else { 10.0.into() }, // Redondeado solo si es ventana
+            radius: if is_maximized {
+                0.0.into()
+            } else {
+                10.0.into()
+            }, // Redondeado solo si es ventana
         },
         // OPTIMIZACIoN: Reducir blur_radius de 15.0 a 5.0 para mejorar rendimiento
         shadow: if is_maximized {
@@ -2088,7 +2254,10 @@ pub fn window_frame_style(palette: &Palette, _t: &Theme, is_maximized: bool) -> 
         } else {
             Shadow {
                 // La sombra tambien muere en la transparencia total
-                color: Color { a: 0.4 * alpha, ..Color::BLACK },
+                color: Color {
+                    a: 0.4 * alpha,
+                    ..Color::BLACK
+                },
                 offset: Vector::new(0.0, 2.0),
                 blur_radius: 5.0, // Reducido para rendimiento
             }
@@ -2097,20 +2266,33 @@ pub fn window_frame_style(palette: &Palette, _t: &Theme, is_maximized: bool) -> 
     }
 }
 
-pub fn title_bar_style(palette: &Palette, _t: &Theme, base_mode: &crate::config::BaseThemeMode) -> container::Style {
+pub fn title_bar_style(
+    palette: &Palette,
+    _t: &Theme,
+    base_mode: &crate::config::BaseThemeMode,
+) -> container::Style {
     use crate::config::BaseThemeMode;
-    
+
     // Obtenemos el multiplicador de desvanecimiento desde la paleta
     let ui_a = palette.background.a;
 
     let background_color = match base_mode {
-        BaseThemeMode::Light => Color { a: 0.95 * ui_a, ..Color::from_rgb(0.95, 0.95, 0.97) },
-        BaseThemeMode::Grey => Color { a: 0.9 * ui_a, ..Color::from_rgb(0.15, 0.15, 0.18) },
-        BaseThemeMode::Black => Color { a: 0.9 * ui_a, ..Color::from_rgb(0.05, 0.05, 0.08) },
+        BaseThemeMode::Light => Color {
+            a: 0.95 * ui_a,
+            ..Color::from_rgb(0.95, 0.95, 0.97)
+        },
+        BaseThemeMode::Grey => Color {
+            a: 0.9 * ui_a,
+            ..Color::from_rgb(0.15, 0.15, 0.18)
+        },
+        BaseThemeMode::Black => Color {
+            a: 0.9 * ui_a,
+            ..Color::from_rgb(0.05, 0.05, 0.08)
+        },
     };
-    
+
     container::Style {
-        background: Some(Background::Color(background_color)), 
+        background: Some(Background::Color(background_color)),
         text_color: Some(palette.text_primary),
         ..Default::default()
     }
@@ -2135,18 +2317,27 @@ pub fn window_control_button_style(
             if is_close {
                 button::Style {
                     // El rojo del boton cerrar tambien debe desvanecerse
-                    background: Some(Background::Color(Color { a: 0.9 * ui_a, ..Color::from_rgb(0.9, 0.2, 0.2) })),
-                    text_color: Color { a: 1.0 * ui_a, ..Color::WHITE },
+                    background: Some(Background::Color(Color {
+                        a: 0.9 * ui_a,
+                        ..Color::from_rgb(0.9, 0.2, 0.2)
+                    })),
+                    text_color: Color {
+                        a: 1.0 * ui_a,
+                        ..Color::WHITE
+                    },
                     ..base
                 }
             } else {
                 button::Style {
-                    background: Some(Background::Color(Color { a: 0.1 * ui_a, ..Color::WHITE })),
+                    background: Some(Background::Color(Color {
+                        a: 0.1 * ui_a,
+                        ..Color::WHITE
+                    })),
                     text_color: palette.text_primary,
                     ..base
                 }
             }
-        },
+        }
         _ => base,
     }
 }
@@ -2157,7 +2348,7 @@ pub fn window_control_button<'a, Message: Clone + 'a>(
     msg: Message,
     is_close: bool,
     palette: Palette,
-    ctx: UIContext
+    ctx: UIContext,
 ) -> Element<'a, Message, Theme, Renderer> {
     let btn = button(
         container(
@@ -2166,7 +2357,7 @@ pub fn window_control_button<'a, Message: Clone + 'a>(
                 .height(12)
                 .opacity(ctx.palette.text_primary.a) // <--- CRiTICO: Opacidad dinamica para SVGs
                 .style(move |_t, _s| iced::widget::svg::Style {
-                    color: Some(if is_close { 
+                    color: Some(if is_close {
                         if palette.background.r > 0.5 {
                             Color::BLACK // Icono negro para tema claro
                         } else {
@@ -2174,13 +2365,13 @@ pub fn window_control_button<'a, Message: Clone + 'a>(
                         }
                     } else {
                         palette.text_primary
-                    }), 
-                })
+                    }),
+                }),
         )
         .width(Length::Fill)
         .height(Length::Fill)
         .center_x(Length::Fill)
-        .center_y(Length::Fill)
+        .center_y(Length::Fill),
     )
     .on_press(msg)
     .width(45) // Ancho estandar de boton de ventana
@@ -2207,7 +2398,7 @@ pub fn text_paragraph<'a, M: 'a + Clone>(
     // [CRITICAL PERFORMANCE FIX]
     // Durante el redimensionamiento, el calculo de layout de "LsdWrapper" (letra por letra)
     // es demasiado costoso (O(N) donde N es el numero de caracteres).
-    // Si estamos redimensionando, retornamos un Texto nativo simple. 
+    // Si estamos redimensionando, retornamos un Texto nativo simple.
     // El motor de texto nativo de Iced es extremadamente rapido recalculando saltos de linea.
     if ctx.is_resizing {
         return iced::widget::text(text_owned)
@@ -2236,22 +2427,25 @@ pub fn text_paragraph<'a, M: 'a + Clone>(
             let char_element: Element<'a, M, Theme, Renderer> = char_text.into();
 
             // Semilla unica continua
-            let seed = 1000 + (word_idx * 50) + char_idx; 
-            
+            let seed = 1000 + (word_idx * 50) + char_idx;
+
             // Calculo LSD
             let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, seed, ctx.lsd_intensity);
-            
+
             // NO vuelvas a multiplicar por lsd_intensity aqui
 
             // Envoltura con SmoothTranslate
-            let magic_char = Element::new(SmoothTranslate::new(
-                char_element,
-                (vx, vy), // Pasar vectores directos
-                ctx.mouse_pos,
-                false,
-                ctx.lsd_intensity,
-                ctx.lsd_enabled,
-            ).resizing(ctx.is_resizing)); // Esto mantiene el jitter apagado, pero el switch de arriba es el que salva los FPS
+            let magic_char = Element::new(
+                SmoothTranslate::new(
+                    char_element,
+                    (vx, vy), // Pasar vectores directos
+                    ctx.mouse_pos,
+                    false,
+                    ctx.lsd_intensity,
+                    ctx.lsd_enabled,
+                )
+                .resizing(ctx.is_resizing),
+            ); // Esto mantiene el jitter apagado, pero el switch de arriba es el que salva los FPS
 
             letters_in_word = letters_in_word.push(magic_char);
         }
@@ -2276,7 +2470,8 @@ struct LsdWrapper<'a, Message, Theme, Renderer> {
     line_height: f32,
 }
 
-impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer> for LsdWrapper<'a, Message, Theme, Renderer>
+impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for LsdWrapper<'a, Message, Theme, Renderer>
 where
     Renderer: iced::advanced::Renderer,
 {
@@ -2312,7 +2507,7 @@ where
                 renderer,
                 &layout::Limits::new(Size::ZERO, limits.max()),
             );
-            
+
             let child_size = child_layout.size();
 
             // Wrapping
@@ -2329,10 +2524,7 @@ where
             row_x += child_size.width + self.spacing;
         }
 
-        layout::Node::with_children(
-            Size::new(max_width, final_height),
-            nodes,
-        )
+        layout::Node::with_children(Size::new(max_width, final_height), nodes)
     }
 
     fn draw(
@@ -2345,8 +2537,15 @@ where
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
-        for ((child, state), layout) in self.elements.iter().zip(&tree.children).zip(layout.children()) {
-            child.as_widget().draw(state, renderer, theme, style, layout, cursor, viewport);
+        for ((child, state), layout) in self
+            .elements
+            .iter()
+            .zip(&tree.children)
+            .zip(layout.children())
+        {
+            child
+                .as_widget()
+                .draw(state, renderer, theme, style, layout, cursor, viewport);
         }
     }
 
@@ -2365,8 +2564,15 @@ where
         renderer: &Renderer,
         operation: &mut dyn widget::Operation,
     ) {
-        for ((child, state), layout) in self.elements.iter_mut().zip(&mut tree.children).zip(layout.children()) {
-            child.as_widget_mut().operate(state, layout, renderer, operation);
+        for ((child, state), layout) in self
+            .elements
+            .iter_mut()
+            .zip(&mut tree.children)
+            .zip(layout.children())
+        {
+            child
+                .as_widget_mut()
+                .operate(state, layout, renderer, operation);
         }
     }
 
@@ -2382,20 +2588,18 @@ where
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
-        for ((child, state), layout) in self.elements.iter_mut().zip(&mut tree.children).zip(layout.children()) {
+        for ((child, state), layout) in self
+            .elements
+            .iter_mut()
+            .zip(&mut tree.children)
+            .zip(layout.children())
+        {
             child.as_widget_mut().update(
-                state,
-                event,
-                layout,
-                cursor,
-                renderer,
-                clipboard,
-                shell,
-                viewport,
+                state, event, layout, cursor, renderer, clipboard, shell, viewport,
             );
         }
     }
-    
+
     // OVERLAY: Anadido argumento 'viewport' que faltaba
     fn overlay<'b>(
         &'b mut self,
@@ -2406,14 +2610,23 @@ where
         translation: Vector,
     ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
         let mut overlays = Vec::new();
-        for ((child, state), layout) in self.elements.iter_mut().zip(&mut tree.children).zip(layout.children()) {
-             // Propagamos el viewport a los hijos
-             if let Some(overlay) = child.as_widget_mut().overlay(state, layout, renderer, viewport, translation) {
-                 overlays.push(overlay);
-             }
+        for ((child, state), layout) in self
+            .elements
+            .iter_mut()
+            .zip(&mut tree.children)
+            .zip(layout.children())
+        {
+            // Propagamos el viewport a los hijos
+            if let Some(overlay) =
+                child
+                    .as_widget_mut()
+                    .overlay(state, layout, renderer, viewport, translation)
+            {
+                overlays.push(overlay);
+            }
         }
-        
+
         // Iced solo permite devolver un Element de overlay facilmente si no usamos Groups
-        overlays.pop() 
+        overlays.pop()
     }
 }

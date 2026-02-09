@@ -92,7 +92,7 @@ pub struct ModsState {
     pub mods_with_updates: HashSet<String>, // Ahora contiene remote_ids
     // Cache para evitar recalculos en view()
     pub update_status_cache: HashMap<String, bool>, // file_name/mod_id -> has_update
-    pub cache_dirty: bool, // Marcar cuando se necesita recalcular
+    pub cache_dirty: bool,                          // Marcar cuando se necesita recalcular
     // Mapa para recordar que version selecciono el usuario en la UI para cada mod (Browse tab)
     pub selected_versions: HashMap<String, String>,
     // Set de mods que estan cargando versiones actualmente
@@ -143,7 +143,10 @@ impl ModsState {
 
     /// Helper: Crea tupla (channel, version) para pasar a async blocks
     fn cv_tuple(settings: &GameSettings) -> (String, String) {
-        (settings.channel.clone(), Self::version_str(settings.game_version))
+        (
+            settings.channel.clone(),
+            Self::version_str(settings.game_version),
+        )
     }
 
     pub fn new() -> Self {
@@ -218,14 +221,14 @@ impl ModsState {
 
                         // Populate installed_ids with mod IDs from JAR mods and ZIP patches
                         self.installed_ids.clear();
-                        
+
                         // Add mod IDs from JAR mods that have metadata
                         for jar_mod in &self.installed_mods {
                             if let Some(meta) = &jar_mod.metadata {
                                 self.installed_ids.insert(meta.mod_id.clone());
                             }
                         }
-                        
+
                         // Add remote IDs from ZIP patches
                         for patch in &self.patch_mods {
                             if let Some(remote_id) = &patch.remote_id {
@@ -634,7 +637,6 @@ impl ModsState {
                                 s.game_version.to_string()
                             },
                         );
-                        let (gd, pd) = (p.version_dir(&c, &v), p.core_patches_dir(&c, &v));
                         let nm = zp
                             .file_stem()
                             .unwrap_or_default()
@@ -644,8 +646,7 @@ impl ModsState {
                         tokio::task::spawn_blocking(move || {
                             crate::game::zip_mods::install_new_patch(
                                 zp,
-                                gd,
-                                pd,
+                                &p,
                                 c.clone(),
                                 v.clone(),
                                 nm.clone(), // mod_id basado en el nombre del archivo
@@ -673,12 +674,11 @@ impl ModsState {
                 Task::perform(
                     async move {
                         let p = crate::game::GamePaths::new(bd);
-                        let (gd, pd) = (p.version_dir(&c, &v), p.core_patches_dir(&c, &v));
                         tokio::task::spawn_blocking(move || {
                             if en {
-                                crate::game::zip_mods::enable_patch(gd, pd, c, v, &id)
+                                crate::game::zip_mods::enable_patch(&p, c, v, &id)
                             } else {
-                                crate::game::zip_mods::disable_patch(gd, pd, &id)
+                                crate::game::zip_mods::disable_patch(&p, c, v, &id)
                             }
                         })
                         .await
@@ -702,9 +702,8 @@ impl ModsState {
                                 s.game_version.to_string()
                             },
                         );
-                        let (gd, pd) = (p.version_dir(&c, &v), p.core_patches_dir(&c, &v));
                         tokio::task::spawn_blocking(move || {
-                            crate::game::zip_mods::uninstall_patch(gd, pd, &id)
+                            crate::game::zip_mods::uninstall_patch(&p, c, v, &id)
                         })
                         .await
                         .map_err(|e| e.to_string())?
@@ -757,9 +756,11 @@ impl ModsState {
                         // 1. Verificar JAR Mods
                         for installed in manifest {
                             if installed.provider == ModProvider::CurseForge {
-                                println!("[Mods] DEBUG: Checking JAR mod - mod_id: {}, file_name: {}, current_file_id: {}", 
-                                    installed.mod_id, installed.file_name, installed.file_id);
-                                
+                                println!(
+                                    "[Mods] DEBUG: Checking JAR mod - mod_id: {}, file_name: {}, current_file_id: {}",
+                                    installed.mod_id, installed.file_name, installed.file_id
+                                );
+
                                 if let Ok(versions) = repo.get_versions(&installed.mod_id).await {
                                     let compatible_file = versions.iter().find(|f| {
                                         current_game_ver == "latest"
@@ -767,12 +768,16 @@ impl ModsState {
                                     });
 
                                     if let Some(latest) = compatible_file {
-                                        println!("[Mods] DEBUG: Found latest version - file_id: {}, name: {}", 
-                                            latest.file_id, latest.name);
-                                        
+                                        println!(
+                                            "[Mods] DEBUG: Found latest version - file_id: {}, name: {}",
+                                            latest.file_id, latest.name
+                                        );
+
                                         if latest.file_id != installed.file_id {
-                                            println!("[Mods] DEBUG: UPDATE NEEDED - latest.file_id ({}) != installed.file_id ({})", 
-                                                latest.file_id, installed.file_id);
+                                            println!(
+                                                "[Mods] DEBUG: UPDATE NEEDED - latest.file_id ({}) != installed.file_id ({})",
+                                                latest.file_id, installed.file_id
+                                            );
                                             // REGISTRAMOS POR EL ID DEL MOD EN CURSEFORGE (remote_id = mod_id para JARs)
                                             updates.push(installed.mod_id.clone());
                                         } else {
@@ -780,10 +785,16 @@ impl ModsState {
                                         }
                                         cached_map.insert(installed.mod_id.clone(), versions);
                                     } else {
-                                        println!("[Mods] DEBUG: No compatible version found for mod_id: {}", installed.mod_id);
+                                        println!(
+                                            "[Mods] DEBUG: No compatible version found for mod_id: {}",
+                                            installed.mod_id
+                                        );
                                     }
                                 } else {
-                                    println!("[Mods] ERROR: Failed to get versions for mod_id: {}", installed.mod_id);
+                                    println!(
+                                        "[Mods] ERROR: Failed to get versions for mod_id: {}",
+                                        installed.mod_id
+                                    );
                                 }
                             }
                         }
@@ -798,12 +809,14 @@ impl ModsState {
                         for p in patches {
                             let remote_id = p.remote_id.clone();
                             let provider = p.provider.clone();
-                            
+
                             if let (Some(rid), Some(prov)) = (remote_id, provider) {
                                 if prov == ModProvider::CurseForge {
-                                    println!("[Mods] DEBUG: Checking ZIP patch - mod_id: {}, remote_id: {}, current_file_id: {:?}", 
-                                        p.mod_id, rid, p.file_id);
-                                    
+                                    println!(
+                                        "[Mods] DEBUG: Checking ZIP patch - mod_id: {}, remote_id: {}, current_file_id: {:?}",
+                                        p.mod_id, rid, p.file_id
+                                    );
+
                                     if let Ok(versions) = repo.get_versions(&rid).await {
                                         let compatible_file = versions.iter().find(|f| {
                                             current_game_ver == "latest"
@@ -811,30 +824,48 @@ impl ModsState {
                                         });
 
                                         if let Some(latest) = compatible_file {
-                                            println!("[Mods] DEBUG: Found latest version for patch - file_id: {}, name: {}", 
-                                                latest.file_id, latest.name);
-                                            
+                                            println!(
+                                                "[Mods] DEBUG: Found latest version for patch - file_id: {}, name: {}",
+                                                latest.file_id, latest.name
+                                            );
+
                                             // En patches, file_id es Option<String>
                                             if Some(latest.file_id.clone()) != p.file_id {
-                                                println!("[Mods] DEBUG: PATCH UPDATE NEEDED - latest.file_id ({}) != patch.file_id ({:?})", 
-                                                    latest.file_id, p.file_id);
+                                                println!(
+                                                    "[Mods] DEBUG: PATCH UPDATE NEEDED - latest.file_id ({}) != patch.file_id ({:?})",
+                                                    latest.file_id, p.file_id
+                                                );
                                                 // REGISTRAMOS POR EL ID DEL MOD EN CURSEFORGE (remote_id)
                                                 updates.push(rid.clone());
                                             } else {
-                                                println!("[Mods] DEBUG: PATCH UP TO DATE - file_ids match");
+                                                println!(
+                                                    "[Mods] DEBUG: PATCH UP TO DATE - file_ids match"
+                                                );
                                             }
                                             cached_map.insert(rid.clone(), versions);
                                         } else {
-                                            println!("[Mods] DEBUG: No compatible version found for patch remote_id: {}", rid);
+                                            println!(
+                                                "[Mods] DEBUG: No compatible version found for patch remote_id: {}",
+                                                rid
+                                            );
                                         }
                                     } else {
-                                        println!("[Mods] ERROR: Failed to get versions for patch remote_id: {}", rid);
+                                        println!(
+                                            "[Mods] ERROR: Failed to get versions for patch remote_id: {}",
+                                            rid
+                                        );
                                     }
                                 } else {
-                                    println!("[Mods] DEBUG: Skipping patch - provider is not CurseForge: {:?}", prov);
+                                    println!(
+                                        "[Mods] DEBUG: Skipping patch - provider is not CurseForge: {:?}",
+                                        prov
+                                    );
                                 }
                             } else {
-                                println!("[Mods] DEBUG: Skipping patch - missing remote_id or provider. remote_id: {:?}, provider: {:?}", p.remote_id, p.provider);
+                                println!(
+                                    "[Mods] DEBUG: Skipping patch - missing remote_id or provider. remote_id: {:?}, provider: {:?}",
+                                    p.remote_id, p.provider
+                                );
                             }
                         }
 
@@ -847,18 +878,28 @@ impl ModsState {
                 self.checking_updates = false;
                 match res {
                     Ok((updates, versions)) => {
-                        println!("[Mods] DEBUG: Updates check completed - found {} updates", updates.len());
+                        println!(
+                            "[Mods] DEBUG: Updates check completed - found {} updates",
+                            updates.len()
+                        );
                         for update_id in &updates {
-                            println!("[Mods] DEBUG: Update available for remote_id: {}", update_id);
+                            println!(
+                                "[Mods] DEBUG: Update available for remote_id: {}",
+                                update_id
+                            );
                         }
-                        
+
                         // Log del estado final de los mods (solo una vez)
                         println!("[Mods] DEBUG: Final update status:");
-                        
+
                         self.mods_with_updates = updates.into_iter().collect();
                         // Poblar el cache con lo que encontramos al buscar actualizaciones
                         for (mod_id, files) in versions {
-                            println!("[Mods] DEBUG: Cached {} versions for mod_id: {}", files.len(), mod_id);
+                            println!(
+                                "[Mods] DEBUG: Cached {} versions for mod_id: {}",
+                                files.len(),
+                                mod_id
+                            );
                             self.cached_versions.insert(mod_id, files);
                         }
                     }
@@ -972,10 +1013,9 @@ impl ModsState {
                                         settings_clone.game_version.to_string()
                                     },
                                 );
-                                let (gd, pd) = (p.version_dir(&c, &v), p.core_patches_dir(&c, &v));
                                 let old_id = old_file_name.clone();
                                 let _ = tokio::task::spawn_blocking(move || {
-                                    crate::game::zip_mods::uninstall_patch(gd, pd, &old_id)
+                                    crate::game::zip_mods::uninstall_patch(&p, c, v, &old_id)
                                 })
                                 .await;
                             }
