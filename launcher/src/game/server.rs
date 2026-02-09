@@ -169,7 +169,7 @@ struct Patchlines {
     release: GameVersionInfo,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 struct GameVersionInfo {
     #[serde(rename = "BuildVersion")]
     build_version: String,
@@ -310,19 +310,9 @@ struct JwtHeader {
     kid: String,
     typ: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-}
-
-// ==================== SERVER LOGIC ====================
-// ==================== SERVER LOGIC ====================
-=======
     jwk: Option<serde_json::Value>,
 }
 
-// ==================== SERVER LOGIC ====================
-=======
-}
-
-// ==================== SERVER LOGIC ====================
 // ==================== SERVER LOGIC ====================
 
 const ENTITLEMENTS: &[&str] = &["game.base", "game.deluxe", "game.founder", "game.server"];

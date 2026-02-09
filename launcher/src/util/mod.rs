@@ -5,18 +5,28 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::io::{Read, Write};
+use std::time::{Duration, Instant};
 
 #[cfg(target_os = "linux")]
 use libc;
 
 pub mod icons;
 pub mod image_cache;
+pub mod ui_helpers;
 pub mod win_job;
 
 /// Cache global para evitar syscalls repetidas de current_exe()
 static CURRENT_EXE: Lazy<anyhow::Result<PathBuf>> = Lazy::new(|| {
     std::env::current_exe().context("Failed to get current executable path")
 });
+
+/// Última actividad registrada (para giro predictivo)
+static LAST_ACTIVITY: Lazy<std::sync::Mutex<Instant>> = Lazy::new(|| {
+    std::sync::Mutex::new(Instant::now())
+});
+
+/// Contador de giros automáticos realizados
+static AUTO_TRIM_COUNT: AtomicU64 = AtomicU64::new(0);
 
 /// Obtiene la ruta del ejecutable actual (cacheada)
 pub fn get_current_exe() -> anyhow::Result<&'static PathBuf> {
@@ -248,10 +258,10 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
     }
 
     println!("CWD: {:?}", std::env::current_dir());
-    let cwd_res = std::env::current_dir();
+    let _cwd_res = std::env::current_dir();
 
     let port = get_saved_port();
-    let mode_str = match online_mode {
+    let _mode_str = match online_mode {
         OnlineFixMode::Sanasol => "sanasol",
         OnlineFixMode::Local => "local",
     };
@@ -274,34 +284,28 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
     cmd.env("DISABLE_SENTRY", "1");
 
     // --- NEW: JAVA AGENT INJECTION (SMART CHECK) ---
-    // The agent is located at RusTale/tools/dualauth-agent.jar
-    // We are at RusTale/tools/jre/latest/bin/java.exe (Proxy)
-    // Hierarchy: tools -> jre -> latest -> bin -> java.exe
-    if let Some(latest_dir) = bin_dir.parent() {      // tools/jre/latest
-        if let Some(jre_dir) = latest_dir.parent() {  // tools/jre
-            if let Some(tools_dir) = jre_dir.parent() { // tools
-                let agent_path = tools_dir.join("dualauth-agent.jar");
-                if agent_path.exists() {
-                    // FIX CRÍTICO: Verificar si el argumento YA ESTÁ PRESENTE.
-                    // Esto evita la duplicación cuando server/runner.rs ya lo ha añadido.
-                    let agent_filename = agent_path.file_name().and_then(|f| f.to_str()).unwrap_or("dualauth-agent.jar");
-                    let already_present = args.iter().any(|a| a.contains("-javaagent") && a.contains(agent_filename));
+    // Use GamePaths for consistency with runner.rs
+    let paths = crate::game::paths::GamePaths::new(bin_dir.parent().and_then(|p| p.parent()).and_then(|p| p.parent()).unwrap_or(bin_dir).to_path_buf());
+    let agent_path = paths.dualauth_agent();
+    
+    if agent_path.exists() {
+        // FIX CRÍTICO: Verificar si el argumento YA ESTÁ PRESENTE.
+        // Esto evita la duplicación cuando server/runner.rs ya lo ha añadido.
+        let agent_filename = agent_path.file_name().and_then(|f| f.to_str()).unwrap_or("dualauth-agent.jar");
+        let already_present = args.iter().any(|a| a.contains("-javaagent") && a.contains(agent_filename));
 
-                    if !already_present {
-                        println!("[Proxy] Injecting Java Agent: {:?}", agent_path);
-                        // IMPORTANTE: Usamos un método que pone el agente AL PRINCIPIO de los args internos
-                        // Sin embargo, Command no tiene 'prepend'.
-                        // Dado que args se añade despues, cmd.arg aqui añade ANTES de los argumentos del juego.
-                        // Correcto orden: java [proxy_args] [runner_args]
-                        cmd.arg(format!("-javaagent:{}", agent_path.to_string_lossy()));
-                    } else {
-                        println!("[Proxy] Java Agent already present in arguments. Skipping proxy injection.");
-                    }
-                } else {
-                    println!("[Proxy] WARNING: Java Agent NOT FOUND at {:?}", agent_path);
-                }
-            }
+        if !already_present {
+            println!("[Proxy] Injecting Java Agent: {:?}", agent_path);
+            // IMPORTANTE: Usamos un método que pone el agente AL PRINCIPIO de los args internos
+            // Sin embargo, Command no tiene 'prepend'.
+            // Dado que args se añade despues, cmd.arg aqui añade ANTES de los argumentos del juego.
+            // Correcto orden: java [proxy_args] [runner_args]
+            cmd.arg(format!("-javaagent:{}", agent_path.to_string_lossy()));
+        } else {
+            println!("[Proxy] Java Agent already present in arguments. Skipping proxy injection.");
         }
+    } else {
+        println!("[Proxy] WARNING: Java Agent NOT FOUND at {:?}", agent_path);
     }
 
     // Launch the real Java with telemetry disabled by default
@@ -589,48 +593,289 @@ async fn remove_dir_recursive_exclude(dir: &Path, exclude_file: &Path) -> Result
     Ok(())
 }
 
+/// Obtiene el uso actual de memoria RSS (Resident Set Size) en bytes
+/// Returns 0 si falla la medición
+fn get_memory_usage() -> u64 {
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::System::ProcessStatus::PROCESS_MEMORY_COUNTERS;
+        use windows_sys::Win32::System::ProcessStatus::K32GetProcessMemoryInfo;
+        use windows_sys::Win32::System::Threading::GetCurrentProcess;
+        use std::mem;
+        
+        unsafe {
+            let mut pmc: PROCESS_MEMORY_COUNTERS = mem::zeroed();
+            pmc.cb = mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+            
+            if K32GetProcessMemoryInfo(GetCurrentProcess(), &mut pmc, pmc.cb) != 0 {
+                pmc.WorkingSetSize
+            } else {
+                0
+            }
+        }
+    }
+    
+    #[cfg(target_os = "linux")]
+    {
+        use std::fs;
+        
+        // Leer /proc/self/stat para obtener RSS
+        if let Ok(stat) = fs::read_to_string("/proc/self/stat") {
+            // El campo 23 (índice 22) es RSS en páginas
+            if let Some(fields) = stat.split_whitespace().collect::<Vec<_>>().get(23) {
+                if let Ok(pages) = fields.parse::<u64>() {
+                    // Convertir páginas a bytes (tamaño de página usualmente 4096)
+                    return pages * 4096;
+                }
+            }
+        }
+        0
+    }
+    
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    {
+        0 // No implementado para otras plataformas
+    }
+}
+
+/// Registra actividad para el sistema de giro predictivo
+pub fn register_activity() {
+    if let Ok(mut last) = LAST_ACTIVITY.lock() {
+        *last = Instant::now();
+    }
+}
+
+/// Verifica si ha pasado suficiente tiempo de inactividad para un giro automático
+pub fn check_auto_trim() {
+    const INACTIVITY_THRESHOLD: Duration = Duration::from_secs(30); // 30 segundos de inactividad
+    
+    if let Ok(mut last) = LAST_ACTIVITY.lock() {
+        if last.elapsed() > INACTIVITY_THRESHOLD {
+            // Realizar giro predictivo
+            trim_memory_predictive();
+            *last = Instant::now(); // Resetear timer
+            
+            // Incrementar contador
+            let count = AUTO_TRIM_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+            println!("[GIRO] 🤖 Auto-giro #{} por inactividad ({}s)", count, INACTIVITY_THRESHOLD.as_secs());
+        }
+    }
+}
+
+/// Versión de trim_memory() para giros predictivos (menos verbose)
+fn trim_memory_predictive() {
+    trim_memory_with_level(TrimLevel::Gentle);
+}
+
+/// Niveles de agresividad para el giro de memoria
+#[derive(Debug, Clone, Copy)]
+pub enum TrimLevel {
+    /// Suave: solo recolección básica (sin medición detallada)
+    Gentle,
+    /// Normal: recolección estándar con medición
+    Normal,
+    /// Agresivo: limpieza completa con múltiples pasadas
+    Aggressive,
+    /// Extremo: modo servidor - todo lo posible
+    Extreme,
+}
+
 /// Realiza una limpieza agresiva de la memoria en Windows y Linux.
 ///
 /// En Windows: Mueve páginas al archivo de paginación (EmptyWorkingSet).
 /// En Linux: Fuerza a 'mimalloc' (Rust) y 'glibc' (GTK/System) a devolver memoria al Kernel.
+/// 
+/// Ahora mide el impacto real del "giro" mostrando cuánta memoria se liberó.
 pub fn trim_memory() {
-    #[cfg(target_os = "windows")]
-    {
-        use windows_sys::Win32::System::ProcessStatus::K32EmptyWorkingSet;
-        use windows_sys::Win32::System::Threading::GetCurrentProcess;
-        unsafe {
-            let process = GetCurrentProcess();
-            K32EmptyWorkingSet(process);
+    trim_memory_with_level(TrimLevel::Normal);
+}
+
+/// Versión escalonada de trim_memory() con diferentes niveles de agresividad
+pub fn trim_memory_with_level(level: TrimLevel) {
+    // Medir memoria ANTES del giro
+    let before = get_memory_usage();
+    
+    match level {
+        TrimLevel::Gentle => {
+            // Solo recolección básica, sin forzar
+            #[cfg(target_os = "linux")]
+            unsafe {
+                unsafe extern "C" {
+                    fn mi_collect(force: bool);
+                }
+                mi_collect(false); // No forzar
+            }
+            
+            #[cfg(target_os = "windows")]
+            unsafe {
+                use windows_sys::Win32::System::ProcessStatus::K32EmptyWorkingSet;
+                use windows_sys::Win32::System::Threading::GetCurrentProcess;
+                let process = GetCurrentProcess();
+                K32EmptyWorkingSet(process);
+            }
+        }
+        
+        TrimLevel::Normal => {
+            // Comportamiento estándar original
+            #[cfg(target_os = "windows")]
+            {
+                use windows_sys::Win32::System::ProcessStatus::K32EmptyWorkingSet;
+                use windows_sys::Win32::System::Threading::GetCurrentProcess;
+                unsafe {
+                    let process = GetCurrentProcess();
+                    K32EmptyWorkingSet(process);
+                }
+            }
+
+            #[cfg(target_os = "linux")]
+            {
+                unsafe {
+                    unsafe extern "C" {
+                        fn mi_collect(force: bool);
+                    }
+                    mi_collect(true);
+
+                    unsafe extern "C" {
+                        fn malloc_trim(pad: usize) -> i32;
+                    }
+                    malloc_trim(0);
+                }
+            }
+        }
+        
+        TrimLevel::Aggressive => {
+            // Múltiples pasadas para máxima limpieza
+            for _i in 0..3 {
+                #[cfg(target_os = "windows")]
+                {
+                    use windows_sys::Win32::System::ProcessStatus::K32EmptyWorkingSet;
+                    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+                    unsafe {
+                        let process = GetCurrentProcess();
+                        K32EmptyWorkingSet(process);
+                    }
+                }
+
+                #[cfg(target_os = "linux")]
+                {
+                    unsafe {
+                        unsafe extern "C" {
+                            fn mi_collect(force: bool);
+                        }
+                        mi_collect(true);
+
+                        unsafe extern "C" {
+                            fn malloc_trim(pad: usize) -> i32;
+                        }
+                        malloc_trim(0);
+                    }
+                }
+                
+                // Pequeña pausa entre pasadas
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+        
+        TrimLevel::Extreme => {
+            // Modo servidor: todo lo posible + configuración adicional
+            trim_memory_with_level(TrimLevel::Aggressive);
+            
+            // Intentar liberar cachés adicionales del sistema
+            #[cfg(target_os = "linux")]
+            {
+                unsafe {
+                    // Intentar liberar caché de directorios
+                    unsafe extern "C" {
+                        fn sync();
+                    }
+                    sync();
+                    
+                    // Otra pasada de malloc_trim por si acaso
+                    unsafe extern "C" {
+                        fn malloc_trim(pad: usize) -> i32;
+                    }
+                    malloc_trim(0);
+                }
+            }
         }
     }
-
-    #[cfg(target_os = "linux")]
-    {
-        unsafe {
-            // 1. MIMALLOC (Rust Heap):
-            // El crate 'mimalloc' exporta los símbolos C. Llamamos a mi_collect(true)
-            // para forzar la devolución de páginas abandonadas al OS.
-            // Enlazamos débilmente por si el allocador cambia en el futuro.
-            unsafe extern "C" {
-                fn mi_collect(force: bool);
-            }
-            // Ejecutamos garbage collector de mimalloc
-            mi_collect(true);
-
-            // 2. GLIBC (System Heap - GTK/WGPU/Drivers):
-            // GTK y librerías C usan malloc del sistema. malloc_trim(0)
-            // libera toda la memoria libre al final del heap hacia el Kernel.
-            // Esto es CRÍTICO para aplicaciones gráficas en Linux.
-            unsafe extern "C" {
-                fn malloc_trim(pad: usize) -> i32;
-            }
-            malloc_trim(0);
+    
+    // Medir memoria DESPUÉS del giro y calcular impacto
+    let after = get_memory_usage();
+    
+    if before > 0 && after > 0 && matches!(level, TrimLevel::Normal | TrimLevel::Aggressive | TrimLevel::Extreme) {
+        let freed = before.saturating_sub(after);
+        let freed_mb = freed as f64 / 1024.0 / 1024.0;
+        let after_mb = after as f64 / 1024.0 / 1024.0;
+        
+        let level_emoji = match level {
+            TrimLevel::Gentle => "🌸",
+            TrimLevel::Normal => "🌀",
+            TrimLevel::Aggressive => "🌪️",
+            TrimLevel::Extreme => "💥",
+        };
+        
+        if freed_mb > 0.1 { // Solo mostrar si liberamos más de 0.1 MB
+            println!("[GIRO] {} Memoria liberada: {:.1} MB ({:.1} MB → {:.1} MB) [{:?}]", 
+                level_emoji, freed_mb, before / 1024 / 1024, after_mb, level);
         }
     }
     
     // Log silencioso para debug interno si se requiere, pero evitamos spam en release.
     #[cfg(debug_assertions)]
-    println!("[Memory] Aggressive Trim execution completed.");
+    println!("[Memory] {:?} Trim execution completed.", level);
+}
+
+/// Obtiene estadísticas completas de memoria para monitoreo en tiempo real
+pub fn get_memory_stats() -> MemoryStats {
+    let current = get_memory_usage();
+    let current_mb = current as f64 / 1024.0 / 1024.0;
+    
+    MemoryStats {
+        current_bytes: current,
+        current_mb: current_mb,
+        auto_trims: AUTO_TRIM_COUNT.load(Ordering::Relaxed),
+        last_activity: LAST_ACTIVITY.lock()
+            .map(|instant| instant.elapsed())
+            .unwrap_or(Duration::ZERO),
+    }
+}
+
+/// Estadísticas de memoria para monitoreo
+#[derive(Debug, Clone)]
+pub struct MemoryStats {
+    pub current_bytes: u64,
+    pub current_mb: f64,
+    pub auto_trims: u64,
+    pub last_activity: Duration,
+}
+
+impl MemoryStats {
+    /// Devuelve una descripción formateada del estado actual
+    pub fn format_status(&self) -> String {
+        let weight_emoji = if self.current_mb < 50.0 {
+            "🪶" // Ultra ligero
+        } else if self.current_mb < 100.0 {
+            "🕊️" // Ligero
+        } else if self.current_mb < 200.0 {
+            "🦅" // Normal
+        } else if self.current_mb < 400.0 {
+            "🦉" // Pesado
+        } else {
+            "🐘" // Muy pesado
+        };
+        
+        let activity_status = if self.last_activity < Duration::from_secs(10) {
+            "🟢 Activo"
+        } else if self.last_activity < Duration::from_secs(30) {
+            "🟡 Inactivo"
+        } else {
+            "🔴 Dormido"
+        };
+        
+        format!("{} {:.1}MB | {} | Auto-giros: {}", 
+            weight_emoji, self.current_mb, activity_status, self.auto_trims)
+    }
 }
 
 /// Helper para limpiar rutas, especialmente en Windows (eliminar \\?\)

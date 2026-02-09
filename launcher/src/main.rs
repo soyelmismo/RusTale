@@ -185,13 +185,13 @@ pub fn main() -> std::process::ExitCode {
 
         let result = rt.block_on(async {
             // Recorte inicial de memoria (liberar estructuras de arranque)
-            util::trim_memory();
+            util::trim_memory_with_level(util::TrimLevel::Extreme);
 
             // Carga "Lazy" de la configuración de servidor
             let config = server::config::load_or_create(&args).await;
 
             // Recorte agresivo antes de entrar al loop infinito
-            util::trim_memory();
+            util::trim_memory_with_level(util::TrimLevel::Extreme);
 
             // Iniciar runner sin tocar módulos de UI
             if let Err(e) = server::runner::run_server_flow(config).await {
@@ -308,6 +308,7 @@ pub enum Message {
     CursorMoved(iced::Point),
     ShaderClicked, // Nuevo mensaje para clic en el shader
     Initialize,
+    MemoryStatsUpdate, // Nuevo mensaje para actualizar estadísticas de memoria
     Mods(ModsMessage),                        // New type of wrapper message
     ModsLoaded(Result<Vec<ModInfo>, String>), // Result of the load
     ConfigLoaded(ProfilesConfig, GameSettings, Localization),
@@ -464,6 +465,10 @@ struct RusTale {
     // --- CAMPOS PARA OPTIMIZACIoN DE TICKING ---
     is_minimized: bool, // Estado de minimizacion de la ventana
     is_focused: bool,   // Estado de foco de la ventana
+    // -------------------------------------
+    
+    // --- CAMPOS PARA MONITOREO DE MEMORIA ---
+    memory_stats: crate::util::MemoryStats, // Estadísticas actuales de memoria
     // -------------------------------------
 
     // --- CAMPOS PARA OCULTAMIENTO DE CURSOR POR INACTIVIDAD ---
@@ -673,6 +678,10 @@ impl RusTale {
                 is_minimized: false, // Inicialmente no minimizado
                 is_focused: true,    // Inicialmente con foco (ventana principal)
                 // -------------------------------------
+                
+                // --- CAMPOS PARA MONITOREO DE MEMORIA ---
+                memory_stats: crate::util::get_memory_stats(), // Obtener estadísticas iniciales
+                // -------------------------------------
 
                 // --- CAMPOS PARA OCULTAMIENTO DE CURSOR POR INACTIVIDAD ---
                 is_cursor_hidden: false, // Inicialmente visible
@@ -764,23 +773,56 @@ impl RusTale {
             Subscription::none()
         };
 
-        // 4. TICK SYSTEM (El mayor consumidor de recursos)
-        let tick_sub = if is_interactive {
-            // Reducimos ticks dramáticamente si un modal estático está abierto y tapa el shader
-            if self.settings_state.is_open || self.mods_state.is_open {
-                iced::time::every(std::time::Duration::from_millis(100)).map(Message::Tick) // 10 FPS fondo
-            } else if self.settings.theme.lsd_mode {
-                iced::time::every(std::time::Duration::from_millis(33)).map(Message::Tick) // 30 FPS shader
+        // 4. TICK SYSTEM (El mayor consumidor de recursos) - OPTIMIZACIÓN AVANZADA
+        let tick_sub = {
+            // OPTIMIZATION: Variable Rate Ticking
+            // [FIX LSD] En modo LSD, los ticks corren solo con foco y ventana visible
+            // Si no hay foco o está minimizado, se detienen completamente
+            let should_tick = self.settings.theme.lsd_mode 
+                && !self.is_minimized 
+                && self.is_window_visible
+                && self.is_focused; // <-- Solo con foco
+
+            // Dynamic framerate - usar FPS del monitor cuando está activo
+            let tick_interval = if self.resizing_direction.is_some() {
+                // Paused during resize for smoothness
+                None 
+            } else if self.is_mouse_pressed {
+                // High refresh on interaction - usar 60 FPS como máximo
+                Some(std::time::Duration::from_millis(16)) // 60 FPS
+            } else if self.ui_opacity_accumulator < 0.1 {
+                // [FIX LSD] UI invisible - usar framerate normal del monitor
+                Some(std::time::Duration::from_millis(16)) // 60 FPS para shader fluido
+            } else {
+                // Normal refresh rate del monitor
+                Some(std::time::Duration::from_millis(16)) // 60 FPS
+            };
+
+            // [DEBUG LSD] Log cuando se detienen los ticks
+            if !should_tick && self.settings.theme.lsd_mode {
+                if self.is_minimized {
+                    println!("[LSD] Ticks detenidos - Ventana minimizada");
+                } else if !self.is_focused {
+                    println!("[LSD] Ticks detenidos - Sin foco");
+                } else if !self.is_window_visible {
+                    println!("[LSD] Ticks detenidos - Ventana invisible");
+                }
+            }
+
+            if should_tick && tick_interval.is_some() {
+                iced::time::every(tick_interval.unwrap()).map(Message::Tick)
             } else {
                 Subscription::none()
             }
-        } else {
-            Subscription::none() // Cero ticks si está minimizado o background
         };
 
         // Watchdog subscription: Check every 30 seconds for stuck states
         let watchdog_sub =
             iced::time::every(std::time::Duration::from_secs(30)).map(|_| Message::WatchdogCheck);
+
+        // Memory stats subscription: Update every 5 seconds for real-time monitoring
+        let memory_stats_sub =
+            iced::time::every(std::time::Duration::from_secs(5)).map(|_| Message::MemoryStatsUpdate);
 
         // Keyboard también condicionado a visibilidad y foco
         let keyboard_sub = if is_interactive {
@@ -816,6 +858,7 @@ impl RusTale {
             window_sub,
             tick_sub,
             watchdog_sub, // Agregar watchdog al batch
+            memory_stats_sub, // Agregar monitoreo de memoria
             mouse_sub,
             global_mouse,
             keyboard_sub, // <--- Agregar esto al batch final
@@ -868,6 +911,24 @@ impl RusTale {
                 self.cursor_position = relative_position;
                 self.last_mouse_move_time = std::time::Instant::now();
                 self.last_user_interaction = std::time::Instant::now(); // Reset interacción
+                
+                // [GIRO PREDICTIVO] Registrar actividad del usuario
+                crate::util::register_activity();
+                
+                // [FIX LSD] Restauración inmediata de opacidad al mover mouse
+                if self.settings.theme.lsd_mode && !self.settings_state.is_open && !self.mods_state.is_open {
+                    // Restaurar opacidad inmediatamente si está baja
+                    if self.ui_opacity_accumulator < 0.9 {
+                        println!("[LSD] Mouse movido - Restaurando opacidad: {:.2} → 1.0", self.ui_opacity_accumulator);
+                        self.ui_opacity_accumulator = 1.0;
+                        
+                        // Mostrar cursor si estaba oculto
+                        if self.is_cursor_hidden {
+                            self.is_cursor_hidden = false;
+                            println!("[LSD] Cursor restaurado");
+                        }
+                    }
+                }
 
                 // Si el cursor estaba oculto y el usuario mueve el mouse, lo mostramos inmediatamente
                 if self.is_cursor_hidden {
@@ -1036,6 +1097,20 @@ impl RusTale {
                     return Task::none();
                 }
 
+                // [DEBUG LSD] Mostrar estado actual del framerate
+                if self.ui_opacity_accumulator < 0.1 {
+                    use std::sync::LazyLock;
+                    static LAST_LOW_FPS_LOG: LazyLock<std::sync::Mutex<std::time::Instant>> = 
+                        LazyLock::new(|| std::sync::Mutex::new(std::time::Instant::now()));
+                    
+                    if let Ok(mut last_log) = LAST_LOW_FPS_LOG.lock() {
+                        if last_log.elapsed().as_secs() > 5 {
+                            println!("[LSD] Shader fluyendo a 60 FPS (UI invisible, con foco)");
+                            *last_log = std::time::Instant::now();
+                        }
+                    }
+                }
+
                 // Si estamos redimensionando la ventana, pausamos los calculos matematicos del shader/texto.
                 // Esto libera recursos para que el motor de layout (Iced/WGPU) recalcule la geometria sin lag.
                 if self.resizing_direction.is_some() {
@@ -1043,7 +1118,8 @@ impl RusTale {
                 }
 
                 // --- LoGICA DE OPACIDAD SUAVE ---
-                let dt = 0.033; // El tick ocurre cada 33ms (~30fps)
+                // [FIX LSD] dt fijo a 60 FPS para animaciones fluidas
+                let dt = 0.016; // 16ms = 60 FPS constante
                 let fade_speed = 1.5; // Velocidad para desaparecer (mayor = mas rapido)
                 let reveal_speed = 2.5; // Velocidad para aparecer (el ojo humano prefiere UI que aparece rapido)
                 let hold_threshold = 0.25; // SEGUNDOS DE ESPERA para considerar que se esta "manteniendo"
@@ -1074,9 +1150,10 @@ impl RusTale {
                     // Condiciones para desvanecer:
                     // 1. Mouse presionado por un tiempo (Hold click)
                     // 2. Mouse inactivo por 10 segundos (Idle)
+                    // [FIX] Añadir umbral pequeño para evitar falsos positivos
                     let should_fade_out = (self.is_mouse_pressed
                         && elapsed_since_click > hold_threshold)
-                        || elapsed_idle > inactivity_threshold;
+                        || elapsed_idle > inactivity_threshold + 0.5; // +0.5s de margen
 
                     if should_fade_out {
                         // Disminuir opacidad gradualmente hacia 0.0
@@ -1120,7 +1197,7 @@ impl RusTale {
                     }
                 } else {
                     // Esperar tiempo para cambiar
-                    self.shader_change_timer += 0.033; // ~30ms por tick
+                    self.shader_change_timer += dt; // Usar dt dinámico
                     if self.shader_change_timer > 30.0 {
                         // Cambiar cada 30 segundos
                         self.shader_change_timer = 0.0;
@@ -1566,7 +1643,7 @@ impl RusTale {
                         self.mods_state.thumbnails.clear(); // Adiós miniaturas mods
 
                         // Ejecutar limpieza profunda del SO
-                        crate::util::trim_memory();
+                        crate::util::trim_memory_with_level(crate::util::TrimLevel::Aggressive);
 
                         // Rebuild tray menu to show "Stop Game"
                         self.rebuild_tray_menu();
@@ -1660,8 +1737,25 @@ impl RusTale {
                     }
                 }
 
+                // [GIRO PREDICTIVO] Verificar si necesitamos un giro automático por inactividad
+                crate::util::check_auto_trim();
+
                 Task::none()
             }
+
+            Message::MemoryStatsUpdate => {
+                // Actualizar estadísticas de memoria para monitoreo en tiempo real
+                self.memory_stats = crate::util::get_memory_stats();
+                
+                // Opcional: mostrar en debug cada 30 segundos (cada 6 actualizaciones)
+                #[cfg(debug_assertions)]
+                if self.memory_stats.auto_trims % 6 == 0 {
+                    println!("[MONITOR] {}", self.memory_stats.format_status());
+                }
+                
+                Task::none()
+            }
+
             Message::GameStopped => {
                 println!("[Game] GameStopped received");
 
@@ -2556,7 +2650,7 @@ impl RusTale {
                         window::minimize(id, true),
                         // Ejecutar recorte de memoria después de minimizar
                         Task::perform(async {}, |_| {
-                            crate::util::trim_memory();
+                            crate::util::trim_memory_with_level(crate::util::TrimLevel::Aggressive);
                             Message::None
                         }),
                     ])
@@ -2685,6 +2779,22 @@ impl RusTale {
                 self.is_mouse_pressed = true;
                 self.last_user_interaction = std::time::Instant::now(); // Reset interacción al hacer click
                 self.shader_click_time = std::time::Instant::now();
+                
+                // [GIRO PREDICTIVO] Registrar actividad del usuario
+                crate::util::register_activity();
+                
+                // [FIX LSD] Restauración inmediata de opacidad al hacer clic
+                if self.settings.theme.lsd_mode && !self.settings_state.is_open && !self.mods_state.is_open {
+                    // Restaurar opacidad inmediatamente si está baja
+                    if self.ui_opacity_accumulator < 0.9 {
+                        self.ui_opacity_accumulator = 1.0;
+                        
+                        // Mostrar cursor si estaba oculto
+                        if self.is_cursor_hidden {
+                            self.is_cursor_hidden = false;
+                        }
+                    }
+                }
 
                 // --- Resetear inactividad al presionar ---
                 self.last_mouse_move_time = std::time::Instant::now();
@@ -3054,7 +3164,7 @@ impl RusTale {
         let bg: Element<'_, Message> = if self.settings.theme.lsd_mode {
             // [FIX] La capa siempre es visible (alpha = 1.0)
             // La intensidad del shader se controla internamente con effect_intensity
-            let shader_opacity = 1.0; // Capa siempre visible
+            let _shader_opacity = 1.0; // Capa siempre visible
 
             // Crear o actualizar instancia del shader dinamicamente
             let mut shader_opt = self.lsd_shader_instance.borrow_mut();

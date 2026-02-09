@@ -343,18 +343,9 @@ pub fn disable_patch(
     // LoGICA HYBRID: Mover de Mods/ -> DisabledMods/
     // =========================================================
     if manifest.is_hybrid {
-        // Necesitamos reconstruir channel/version para paths
-        let (channel, version) = extract_channel_version_from_paths(&core_patches_root);
-
-        // CORRECCIoN: Usar directorio base de RusTale
-        let rusale_base = game_root_dir
-            .parent()
-            .and_then(|p| p.parent())
-            .unwrap_or(&game_root_dir);
-
-        let game_paths = crate::game::GamePaths::new(rusale_base.to_path_buf());
-        let mods_dir = game_paths.mods_dir(&channel, &version);
-        let disabled_dir = game_paths.disabled_mods_dir(&channel, &version);
+        // Usar el GamePaths pasado como argumento en lugar de reconstruir
+        let mods_dir = paths.mods_dir(&channel, &version);
+        let disabled_dir = paths.disabled_mods_dir(&channel, &version);
 
         let zip_filename = format!("{}.zip", manifest.mod_name);
         let src = mods_dir.join(&zip_filename);
@@ -575,22 +566,3 @@ pub fn is_patch_mod(zip_path: &Path) -> (bool, bool) {
     (false, false)
 }
 
-/// Extraer canal y version desde las rutas de carpetas
-fn extract_channel_version_from_paths(core_patches_root: &Path) -> (String, String) {
-    // Intentar extraer desde core_patches_root que suele tener la estructura: .../channel/version/CorePatches
-    if let Some(parent) = core_patches_root.parent() {
-        if let Some(version_dir) = parent.file_name() {
-            if let Some(grandparent) = parent.parent() {
-                if let Some(channel) = grandparent.file_name() {
-                    return (
-                        channel.to_string_lossy().to_string(),
-                        version_dir.to_string_lossy().to_string(),
-                    );
-                }
-            }
-        }
-    }
-
-    // ultimo fallback
-    ("latest".to_string(), "latest".to_string())
-}
