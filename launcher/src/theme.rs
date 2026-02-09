@@ -2630,3 +2630,66 @@ where
         overlays.pop()
     }
 }
+
+// --- FUNCIONES PARA COLORES Y ESTILOS CENTRALIZADOS ---
+
+/// Color para elementos SVG que deberían ser negros (iconos, etc.)
+pub fn svg_icon_color(palette: &Palette) -> Color {
+    // Usar el color primario de texto en modo claro, o negro suave en modo oscuro
+    if palette.background.r > 0.5 {
+        Color::BLACK
+    } else {
+        Color::from_rgb(0.05, 0.05, 0.05) // Negro suave para modo oscuro
+    }
+}
+
+/// Estilo para contenedores de fondo oscuro (usado en main.rs)
+pub fn dark_background_container(_t: &Theme) -> container::Style {
+    container::Style {
+        background: Some(iced::Background::Color(Color::from_rgb(0.05, 0.05, 0.05))),
+        ..Default::default()
+    }
+}
+
+/// Estilo para overlays semitransparentes (usado en main.rs)
+pub fn overlay_container(_t: &Theme) -> container::Style {
+    container::Style {
+        background: Some(iced::Background::Color(Color::from_rgba(
+            0.0, 0.0, 0.0, 0.8,
+        ))),
+        ..Default::default()
+    }
+}
+
+/// Estilo para placeholders de imágenes (usado en news_section.rs)
+pub fn image_placeholder_container(_t: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(Color::from_rgb(0.1, 0.1, 0.1))),
+        ..Default::default()
+    }
+}
+
+/// Estilo para bordes redondeados de imágenes (usado en news_section.rs)
+pub fn image_border_container() -> Border {
+    Border {
+        radius: 8.0.into(),
+        ..Default::default()
+    }
+}
+
+/// Estilo para barras de progreso pequeñas (usado en news_section.rs)
+pub fn small_progress_bar(_palette: &Palette) -> Border {
+    Border {
+        radius: 3.0.into(),
+        ..Default::default()
+    }
+}
+
+// --- CONSTANTES DE LAYOUT (Para uso futuro en migración) ---
+// pub const UI_FULL_WIDTH: Length = Length::Fill;
+// pub const UI_FULL_HEIGHT: Length = Length::Fill;
+// pub const UI_FIXED_WIDTH_180: Length = Length::Fixed(180.0);
+// pub const UI_FIXED_WIDTH_200: Length = Length::Fixed(200.0);
+
+// --- CONSTANTES DE FUENTES (Para uso futuro en migración) ---
+// pub const UI_MONOSPACE_FONT: iced::Font = iced::Font::MONOSPACE;

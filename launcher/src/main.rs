@@ -3153,10 +3153,7 @@ impl RusTale {
             container(Space::new())
                 .width(Length::Fill)
                 .height(Length::Fill)
-                .style(|_t: &Theme| container::Style {
-                    background: Some(iced::Background::Color(Color::from_rgb(0.05, 0.05, 0.05))),
-                    ..Default::default()
-                })
+                .style(|_t: &Theme| crate::theme::dark_background_container(_t))
                 .into()
         };
 
@@ -3309,12 +3306,7 @@ impl RusTale {
                 .height(Length::Fill)
                 .center_x(Length::Fill)
                 .center_y(Length::Fill)
-                .style(|_| container::Style {
-                    background: Some(iced::Background::Color(Color::from_rgba(
-                        0.0, 0.0, 0.0, 0.8,
-                    ))),
-                    ..Default::default()
-                }),
+                .style(|_| crate::theme::overlay_container(&iced::Theme::Dark)),
             )
         } else if self.mods_state.is_open {
             Some(
@@ -3328,12 +3320,7 @@ impl RusTale {
                 .height(Length::Fill)
                 .center_x(Length::Fill)
                 .center_y(Length::Fill)
-                .style(|_| container::Style {
-                    background: Some(iced::Background::Color(Color::from_rgba(
-                        0.0, 0.0, 0.0, 0.8,
-                    ))),
-                    ..Default::default()
-                }),
+                .style(|_| crate::theme::overlay_container(&iced::Theme::Dark)),
             )
         } else {
             None

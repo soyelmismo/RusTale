@@ -1564,8 +1564,8 @@ impl ModsState {
                     svg(util::icons::icon(util::icons::TRASH))
                         .width(14)
                         .height(14)
-                        .style(|_, _| iced::widget::svg::Style {
-                            color: Some(Color::BLACK),
+                        .style(move |_, _| iced::widget::svg::Style {
+                            color: Some(crate::theme::svg_icon_color(&palette)),
                         }),
                     ctx,
                 ))
@@ -2079,8 +2079,8 @@ impl ModsState {
                     svg(util::icons::icon(util::icons::TRASH))
                         .width(14)
                         .height(14)
-                        .style(|_, _| iced::widget::svg::Style {
-                            color: Some(Color::BLACK),
+                        .style(move |_, _| iced::widget::svg::Style {
+                            color: Some(crate::theme::svg_icon_color(&palette)),
                         }),
                     ctx,
                 ))

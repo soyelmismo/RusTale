@@ -303,10 +303,7 @@ impl NewsSection {
         let mut btn = button(
             row![
                 container(image_content).style(|_| container::Style {
-                    border: Border {
-                        radius: 8.0.into(),
-                        ..Default::default()
-                    },
+                    border: crate::theme::image_border_container(),
                     ..Default::default()
                 }),
                 column![
@@ -356,10 +353,7 @@ impl NewsSection {
 
 fn placeholder_image<'a>() -> Element<'a, NewsMessage, Theme, Renderer> {
     container(Space::new().width(100.0).height(56.0))
-        .style(|_| container::Style {
-            background: Some(Background::Color(Color::from_rgb(0.1, 0.1, 0.1))),
-            ..Default::default()
-        })
+        .style(|_| crate::theme::image_placeholder_container(&iced::Theme::Dark))
         .into()
 }
 
@@ -377,10 +371,7 @@ fn header_section<'a>(
                 .height(6)
                 .style(move |_| container::Style {
                     background: Some(Background::Color(palette.accent)),
-                    border: Border {
-                        radius: 3.0.into(),
-                        ..Default::default()
-                    },
+                    border: crate::theme::small_progress_bar(&palette),
                     ..Default::default()
                 }),
             theme::text_micro(if loading {
