@@ -1,8 +1,8 @@
+use crate::game::paths::GamePaths;
 use crate::server::assets::{
     find_best_client_version, generate_server_args_with_direct_assets, validate_client_version,
 };
 use crate::server::config::ServerConfig;
-use crate::game::paths::GamePaths;
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -668,10 +668,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     }
 
     // Filter out AOT args explicitly to avoid errors
-    let java_args: Vec<&str> = config
-        .java_exec_args
-        .split_whitespace()
-        .collect();
+    let java_args: Vec<&str> = config.java_exec_args.split_whitespace().collect();
 
     cmd.args(java_args).arg("-jar").arg(&clean_target_jar);
     cmd.args(config.server_args.split_whitespace());
@@ -700,7 +697,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     tokio::spawn(async move {
         let mut reader = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = reader.next_line().await {
-            println!("[Server] {}", line);
+            println!("{}", line);
         }
     });
 
@@ -757,9 +754,9 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
             println!("[RusTale] NO KILL. Waiting for the Proxy to save the world and close Java...");
 
             // CRITICAL FIX:
-            // Before you were killing the Proxy (src/util/mod.rs) 
+            // Before you were killing the Proxy (src/util/mod.rs)
             // right when it was trying to save you.
-            
+
             // Now we wait up to 60 seconds for the Proxy (which already received the OS signal)
             // to finish talking to Java and close voluntarily.
             match tokio::time::timeout(std::time::Duration::from_secs(60), child.wait()).await {

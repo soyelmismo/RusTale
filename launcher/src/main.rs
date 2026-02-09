@@ -164,18 +164,34 @@ pub fn main() -> std::process::ExitCode {
     // 4. BIFURCACIÓN DE LÓGICA (RAM SAVER)
     if args.dedicated_server {
         // === MODO SERVIDOR (HEADLESS) ===
-        println!(">>> Starting in DEDICATED SERVER mode (Headless) <<<");
+        // [OPTIMIZACIÓN MEMORIA EXTREMA]
+        // Configurar mimalloc para ser agresivo devolviendo memoria al OS
+        unsafe {
+            std::env::set_var("MIMALLOC_ARENA_RESERVE", "0");
+            std::env::set_var("MIMALLOC_DECOMMIT_DELAY", "0");
+        }
 
-        // Creamos un Runtime dedicado mínimo (menos threads de background)
+        println!(">>> Starting in DEDICATED SERVER mode (Headless & Low RAM) <<<");
+
+        // Creamos un Runtime dedicado mínimo:
+        // 1. Single Threaded (No necesitamos más para esperar un proceso)
+        // 2. Stack Size reducido (512KB en vez de 2MB default)
         let rt = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2) // Reducir hilos para el servidor ligero
+            .worker_threads(1)
+            .thread_stack_size(512 * 1024)
             .enable_all()
             .build()
             .expect("Failed to create server runtime");
 
         let result = rt.block_on(async {
+            // Recorte inicial de memoria (liberar estructuras de arranque)
+            util::trim_memory();
+
             // Carga "Lazy" de la configuración de servidor
             let config = server::config::load_or_create(&args).await;
+
+            // Recorte agresivo antes de entrar al loop infinito
+            util::trim_memory();
 
             // Iniciar runner sin tocar módulos de UI
             if let Err(e) = server::runner::run_server_flow(config).await {
