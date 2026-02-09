@@ -150,6 +150,22 @@ impl ModsState {
         Self::default()
     }
 
+    // Nuevo método para limpieza agresiva de memoria
+    pub fn clear_heavy_data(&mut self) {
+        self.thumbnails.clear(); // Liberar texturas GPU/RAM
+        self.remote_mods.clear(); // Liberar lista de búsqueda
+        self.current_page = 0;
+        self.installed_mods.clear(); // Opcional, o mantener caché
+        self.patch_mods.clear();
+        self.update_status_cache.clear();
+        self.selected_versions.clear();
+        self.loading_versions.clear();
+        self.installing_ids.clear();
+        self.installed_ids.clear();
+        self.installing_mods.clear();
+        self.mods_with_updates.clear();
+    }
+
     pub fn update(
         &mut self,
         message: ModsMessage,
@@ -160,6 +176,7 @@ impl ModsState {
         match message {
             ModsMessage::Close => {
                 self.is_open = false;
+                self.clear_heavy_data(); // LIMPIEZA AUTOMÁTICA AL CERRAR
                 Task::none()
             }
             ModsMessage::RefreshLocal | ModsMessage::OpenMods => {

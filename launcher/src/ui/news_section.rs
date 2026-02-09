@@ -22,6 +22,7 @@ pub struct NewsSection {
     pub posts: Vec<BlogPost>,
     pub images: HashMap<String, image::Handle>,
     pub loading: bool,
+    pub loaded_once: bool, // Nueva bandera para lazy loading
     pub error: Option<String>,
 }
 
@@ -30,18 +31,33 @@ impl NewsSection {
         Self {
             posts: Vec::new(),
             images: HashMap::new(),
-            loading: true,
+            loading: false, // Default: NO cargando
+            loaded_once: false, // Default: NO ha cargado
             error: None,
         }
+    }
+
+    // Nuevo método helper para saber si iniciar la carga
+    pub fn should_load(&self) -> bool {
+        !self.loaded_once && !self.loading
     }
 
     pub fn update(&mut self, message: NewsMessage, client: reqwest::Client) -> Task<Message> {
         match message {
             NewsMessage::LoadNews => {
                 self.loading = true;
+                self.loaded_once = true; // Marcar como intentado
                 self.error = None;
                 self.images.clear();
-                Task::none()
+                // Iniciar carga real de noticias
+                Task::perform(
+                    async move {
+                        crate::news::fetch_news(&client)
+                            .await
+                            .map_err(|e| e.to_string())
+                    },
+                    |res| Message::News(NewsMessage::NewsLoaded(res)),
+                )
             }
             NewsMessage::NewsLoaded(result) => {
                 self.loading = false;

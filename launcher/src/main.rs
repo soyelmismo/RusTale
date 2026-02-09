@@ -132,137 +132,137 @@ fn is_running_as_java_proxy() -> bool {
     false
 }
 
-pub fn main() -> iced::Result {
+pub fn main() -> std::process::ExitCode {
+    // 1. Parseo de argumentos PREVIO a cualquier inicialización pesada
+    let args = Args::parse();
+
+    // 2. DETECCIÓN DE MODO PROXY (Inmediata y ligera)
     if is_running_as_java_proxy() {
         let mode_env = std::env::var("AURORA_MODE").unwrap_or_default();
         let mode = match mode_env.as_str() {
             "sanasol" => config::OnlineFixMode::Sanasol,
             _ => config::OnlineFixMode::Local,
         };
-
         if let Err(e) = util::run_java_proxy_logic(mode) {
-            // Write to a panic log file just in case stdout is swallowed
-            if let Ok(mut f) = std::fs::File::create("proxy_panic.log") {
-                use std::io::Write;
-                let _ = writeln!(f, "Proxy Critical Error: {}", e);
-            }
             eprintln!("Java Proxy Error: {}", e);
-            std::process::exit(1);
+            return std::process::ExitCode::FAILURE;
         }
-        std::process::exit(0);
-    }
-    #[cfg(target_os = "linux")]
-    {
-        unsafe { std::env::set_var("WGPU_BACKEND", "vulkan"); }
-        
-        // El sistema de resize manual de Iced colisiona con el protocolo de Wayland.
-        // Forzamos X11 (XWayland) para que el resize manual matematico sea sincrono y suave.
-        // Esto elimina el "Stretch" y el "Freeze" inmediatamente.
-        unsafe { std::env::set_var("WINIT_UNIX_BACKEND", "x11"); }
+        return std::process::ExitCode::SUCCESS;
     }
 
-    // [GPU OPTIMIZATION 1] ----------------------------
-    // Forzamos a WGPU a usar el modo de alto rendimiento antes de inicializar nada.
-    // Esto evita que use la integrada o renderizado por software (WARP/LLVMpipe).
-    unsafe { std::env::set_var("WGPU_POWER_PREF", "high") };
-
-    #[cfg(windows)]
-    {
-        let raw_args: Vec<String> = std::env::args().collect();
-        if raw_args
-            .iter()
-            .any(|a| a == "--dedicated-server" || a == "--help" || a == "-h")
-        {
-            use windows_sys::Win32::System::Console::{
-                ATTACH_PARENT_PROCESS, AllocConsole, AttachConsole,
-            };
-            unsafe {
-                if AttachConsole(ATTACH_PARENT_PROCESS) == 0 {
-                    AllocConsole();
-                }
-            }
-        }
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        if let Err(e) = gtk::init() {
-            eprintln!("Failed to initialize GTK: {}", e);
-        }
-    }
-
-    let args = Args::parse();
-
+    // 3. SINGLE INSTANCE CHECK
     let lock_name = if args.dedicated_server {
         "RusTaleServer_Lock"
     } else {
         "RusTaleLauncher_Lock"
     };
-
     let instance = SingleInstance::new(lock_name).unwrap();
-
     if !instance.is_single() {
-        eprintln!("===================================================");
-        eprintln!("ERROR: There's already an instance of RusTale running.");
-        eprintln!("If you don't see the window, check Task Manager");
-        eprintln!("and close 'rustale' or 'java'.");
-        eprintln!("===================================================");
-        std::process::exit(1);
+        eprintln!("Instance already running.");
+        return std::process::ExitCode::FAILURE;
     }
 
-    let config_initialization_mode = config::load_initialization_config_sync();
-    let (width, height) = config::load_width_height();
-    let is_quickplay = args.quickplay || config_initialization_mode.quickplay;
-
+    // 4. BIFURCACIÓN DE LÓGICA (RAM SAVER)
     if args.dedicated_server {
-        // Inicializar runtime basico para el server (sin UI)
+        // === MODO SERVIDOR (HEADLESS) ===
+        println!(">>> Starting in DEDICATED SERVER mode (Headless) <<<");
+        
+        // Creamos un Runtime dedicado mínimo (menos threads de background)
         let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2) // Reducir hilos para el servidor ligero
             .enable_all()
             .build()
-            .expect("Failed to create tokio runtime");
+            .expect("Failed to create server runtime");
 
-        rt.block_on(async {
-            // Cargar configuracion (fusiona archivo + CLI)
+        let result = rt.block_on(async {
+            // Carga "Lazy" de la configuración de servidor
             let config = server::config::load_or_create(&args).await;
-
+            
+            // Iniciar runner sin tocar módulos de UI
             if let Err(e) = server::runner::run_server_flow(config).await {
-                eprintln!("Server Error: {}", e);
-                std::process::exit(1);
+                eprintln!("Server Critical Error: {}", e);
+                return 1;
             }
+            0
         });
-        std::process::exit(0);
+        
+        if result == 0 { std::process::ExitCode::SUCCESS } else { std::process::ExitCode::FAILURE }
+    } else {
+        // === MODO UI (CLIENTE) ===
+        // Solo AQUI configuramos entornos gráficos
+        
+        #[cfg(target_os = "linux")]
+        {
+            unsafe { std::env::set_var("WGPU_BACKEND", "vulkan"); }
+            unsafe { std::env::set_var("WINIT_UNIX_BACKEND", "x11"); }
+            // IMPORTANTE: gtk::init() SOLO AQUÍ
+            if let Err(e) = gtk::init() {
+                eprintln!("Failed to initialize GTK: {}", e);
+            }
+        }
+        
+        // WGPU optimización solo para cliente
+        unsafe { std::env::set_var("WGPU_POWER_PREF", "high") };
+
+        #[cfg(windows)]
+        {
+            let raw_args: Vec<String> = std::env::args().collect();
+            if raw_args
+                .iter()
+                .any(|a| a == "--dedicated-server" || a == "--help" || a == "-h")
+            {
+                use windows_sys::Win32::System::Console::{
+                    ATTACH_PARENT_PROCESS, AllocConsole, AttachConsole,
+                };
+                unsafe {
+                    if AttachConsole(ATTACH_PARENT_PROCESS) == 0 {
+                        AllocConsole();
+                    }
+                }
+            }
+        }
+
+        let config_initialization_mode = config::load_initialization_config_sync();
+        let (width, height) = config::load_width_height();
+        let is_quickplay = args.quickplay || config_initialization_mode.quickplay;
+
+        let res = iced::application(
+            move || RusTale::new(is_quickplay),
+            RusTale::update,
+            RusTale::view,
+        )
+        .theme(RusTale::theme)
+        .subscription(RusTale::subscription)
+        .title(RusTale::title)
+        .window(iced::window::Settings {
+            size: iced::Size::new(width, height),
+            min_size: Some(iced::Size::new(480.0, 390.0)),
+            resizable: true,
+            icon: iced::window::icon::from_file_data(include_bytes!("../assets/icon.png"), None).ok(),
+
+            // --- CAMBIOS PARA CUSTOM TITLEBAR ---
+            visible: !is_quickplay,
+            decorations: false, // Desactivar barra nativa
+            transparent: true,  // Permitir transparencia real (bordes redondeados/semitransparencia)
+            // ------------------------------------
+            position: iced::window::Position::Centered,
+            exit_on_close_request: false,
+
+            ..Default::default()
+        })
+        .settings(iced::Settings {
+            antialiasing: false, // [OPTIMIZACIÓN RAM] Desactivar MSAA
+            default_font: iced::Font::MONOSPACE, // Evitar cargar fuentes del sistema
+            ..Default::default()
+        })
+        .scale_factor(|app: &RusTale| app.settings.scale_factor)
+        .run();
+
+        match res {
+            Ok(_) => std::process::ExitCode::SUCCESS,
+            Err(_) => std::process::ExitCode::FAILURE,
+        }
     }
-
-    iced::application(
-        move || RusTale::new(is_quickplay),
-        RusTale::update,
-        RusTale::view,
-    )
-    .theme(RusTale::theme)
-    .subscription(RusTale::subscription)
-    .title(RusTale::title)
-    .window(iced::window::Settings {
-        size: iced::Size::new(width, height),
-        min_size: Some(iced::Size::new(480.0, 390.0)),
-        resizable: true,
-        icon: iced::window::icon::from_file_data(include_bytes!("../assets/icon.png"), None).ok(),
-
-        // --- CAMBIOS PARA CUSTOM TITLEBAR ---
-        visible: !is_quickplay,
-        decorations: false, // Desactivar barra nativa
-        transparent: true,  // Permitir transparencia real (bordes redondeados/semitransparencia)
-        // ------------------------------------
-        position: iced::window::Position::Centered,
-        exit_on_close_request: false,
-
-        ..Default::default()
-    })
-    .settings(iced::Settings {
-        antialiasing: true, // Mejor borde redondeado
-        ..Default::default()
-    })
-    .scale_factor(|app: &RusTale| app.settings.scale_factor)
-    .run()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -704,25 +704,26 @@ impl RusTale {
 
         let window_sub = window::events().map(|(_id, event)| Message::WindowEvent(event));
 
-        // SUSCRIPCIoN GLOBAL DE MOUSE
-        // Siempre activa para que los cursores funcionen correctamente en todos los lados
-        let global_mouse = event::listen_with(|event, _status, _id| match event {
-            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                Some(Message::MousePressed)
-            }
-            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                // Usamos ResizeReleased que ya maneja both functionalities
-                Some(Message::ResizeReleased)
-            }
-            _ => None,
-        });
+        // 2. GLOBAL INPUTS (Solo si ventana está visible/activa)
+        let global_mouse = if !self.is_minimized && self.is_window_visible && self.is_focused {
+            event::listen_with(|event, _status, _id| match event {
+                Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                    Some(Message::MousePressed)
+                }
+                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                    // Usamos ResizeReleased que ya maneja both functionalities
+                    Some(Message::ResizeReleased)
+                }
+                _ => None,
+            })
+        } else {
+            Subscription::none() 
+        };
 
-        // CAMBIO AQUi: Eliminamos "&& self.settings.theme.lsd_mode"
-        // Necesitamos rastrear el mouse siempre que la ventana sea visible para:
-        // 1. Efectos LSD (si estan activos)
-        // 2. Redimensionamiento de ventana (siempre activo)
-        // 3. Mantener self.cursor_position actualizado para el calculo del arrastre inicial
-        let mouse_sub = if self.is_window_visible && self.is_focused {
+        // 3. EVENTOS UI (Settings/Mods/Shaders) - CORTE RADICAL SI NO ES VISIBLE
+        let is_interactive = self.is_window_visible && !self.is_minimized && self.is_focused;
+
+        let mouse_sub = if is_interactive {
             iced::event::listen_with(|event, _status, _window_id| {
                 if let iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) = event {
                     Some(Message::CursorMoved(position))
@@ -739,23 +740,25 @@ impl RusTale {
             Subscription::none()
         };
 
-        let tick_sub = if self.is_window_visible && !self.is_minimized && self.is_focused {
-            if self.settings.theme.lsd_mode {
-                iced::time::every(std::time::Duration::from_millis(33)).map(Message::Tick)
-            } else if self.settings_state.is_open {
-                iced::time::every(std::time::Duration::from_millis(66)).map(Message::Tick)
+        // 4. TICK SYSTEM (El mayor consumidor de recursos)
+        let tick_sub = if is_interactive {
+            // Reducimos ticks dramáticamente si un modal estático está abierto y tapa el shader
+            if self.settings_state.is_open || self.mods_state.is_open {
+                 iced::time::every(std::time::Duration::from_millis(100)).map(Message::Tick) // 10 FPS fondo
+            } else if self.settings.theme.lsd_mode {
+                 iced::time::every(std::time::Duration::from_millis(33)).map(Message::Tick) // 30 FPS shader
             } else {
                 Subscription::none()
             }
         } else {
-            Subscription::none()
+            Subscription::none() // Cero ticks si está minimizado o background
         };
 
         // Watchdog subscription: Check every 30 seconds for stuck states
         let watchdog_sub = iced::time::every(std::time::Duration::from_secs(30)).map(|_| Message::WatchdogCheck);
 
-        // NUEVO: Escucha de teclado para cambiar shaders
-        let keyboard_sub = if self.is_window_visible {
+        // Keyboard también condicionado a visibilidad y foco
+        let keyboard_sub = if is_interactive {
             iced::event::listen_with(|event, _status, _window_id| {
                 if let Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event {
                     match key {
@@ -1252,16 +1255,9 @@ impl RusTale {
                     self.is_window_visible = false;
                 }
 
-                let news_task = if self.settings.enable_news {
-                    let client = self.api_client.clone();
-                    Task::perform(
-                        async move {
-                            crate::news::fetch_news(&client)
-                                .await
-                                .map_err(|e| e.to_string())
-                        },
-                        |res| Message::News(NewsMessage::NewsLoaded(res)),
-                    )
+                // LAZY LOADING DE NOTICIAS: Solo cargar si está habilitado Y no ha cargado antes
+                let news_task = if self.settings.enable_news && self.news_section.should_load() {
+                    Task::done(Message::News(NewsMessage::LoadNews))
                 } else {
                     Task::none()
                 };
@@ -1520,6 +1516,13 @@ impl RusTale {
                         self.last_status_change = std::time::Instant::now();
 
                         println!("[Game] Game launched successfully");
+
+                        // [OPTIMIZACIÓN] Liberar recursos pesados ahora que jugamos
+                        self.news_section.images.clear(); // Adiós imágenes
+                        self.mods_state.thumbnails.clear(); // Adiós miniaturas mods
+                        
+                        // Ejecutar limpieza profunda del SO
+                        crate::util::trim_memory(); 
 
                         // Rebuild tray menu to show "Stop Game"
                         self.rebuild_tray_menu();
@@ -1822,6 +1825,9 @@ impl RusTale {
             }
             Message::CloseSettings => {
                 self.settings_state.is_open = false;
+                
+                // Recortar memoria después de cerrar settings
+                crate::util::trim_memory();
 
                 // Si por alguna razon el estado quedo en "Checking" (aunque con la correccion
                 // anterior no deberia), esto fuerza una re-evaluacion con los settings actuales (no guardados).
@@ -2484,10 +2490,20 @@ impl RusTale {
             }
             Message::MinimizeWindow => {
                 self.is_minimized = true;
-                println!("[Window] Window minimized - Disabling ticks");
+                println!("[Window] Window minimized - Enabling aggressive RAM saving");
+                
+                // Limpiar caché de UI y Shader para liberar structs
+                self.news_section.images.clear(); // Soltar imágenes de noticias
+                
                 window::oldest().and_then(|id| {
-                    // El segundo argumento es 'minimized' (true para minimizar)
-                    window::minimize(id, true)
+                    Task::batch(vec![
+                        window::minimize(id, true),
+                        // Ejecutar recorte de memoria después de minimizar
+                        Task::perform(async {}, |_| {
+                            crate::util::trim_memory(); 
+                            Message::None 
+                        })
+                    ])
                 })
             }
             Message::MaximizeWindow => {

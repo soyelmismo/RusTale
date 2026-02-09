@@ -589,6 +589,50 @@ async fn remove_dir_recursive_exclude(dir: &Path, exclude_file: &Path) -> Result
     Ok(())
 }
 
+/// Realiza una limpieza agresiva de la memoria en Windows y Linux.
+///
+/// En Windows: Mueve páginas al archivo de paginación (EmptyWorkingSet).
+/// En Linux: Fuerza a 'mimalloc' (Rust) y 'glibc' (GTK/System) a devolver memoria al Kernel.
+pub fn trim_memory() {
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::System::ProcessStatus::K32EmptyWorkingSet;
+        use windows_sys::Win32::System::Threading::GetCurrentProcess;
+        unsafe {
+            let process = GetCurrentProcess();
+            K32EmptyWorkingSet(process);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        unsafe {
+            // 1. MIMALLOC (Rust Heap):
+            // El crate 'mimalloc' exporta los símbolos C. Llamamos a mi_collect(true)
+            // para forzar la devolución de páginas abandonadas al OS.
+            // Enlazamos débilmente por si el allocador cambia en el futuro.
+            unsafe extern "C" {
+                fn mi_collect(force: bool);
+            }
+            // Ejecutamos garbage collector de mimalloc
+            mi_collect(true);
+
+            // 2. GLIBC (System Heap - GTK/WGPU/Drivers):
+            // GTK y librerías C usan malloc del sistema. malloc_trim(0)
+            // libera toda la memoria libre al final del heap hacia el Kernel.
+            // Esto es CRÍTICO para aplicaciones gráficas en Linux.
+            unsafe extern "C" {
+                fn malloc_trim(pad: usize) -> i32;
+            }
+            malloc_trim(0);
+        }
+    }
+    
+    // Log silencioso para debug interno si se requiere, pero evitamos spam en release.
+    #[cfg(debug_assertions)]
+    println!("[Memory] Aggressive Trim execution completed.");
+}
+
 /// Helper para limpiar rutas, especialmente en Windows (eliminar \\?\)
 pub fn sanitize_path(path: &std::path::PathBuf) -> std::path::PathBuf {
     // 1. Obtener ruta absoluta canónica
