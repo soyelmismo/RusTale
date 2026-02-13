@@ -522,6 +522,8 @@ impl RusTale {
             .user_agent(format!("RusTale-Downloader/{}", env!("CARGO_PKG_VERSION")))
             // Connection timeout: fails if not connected in 30s
             .connect_timeout(std::time::Duration::from_secs(30))
+            // General timeout: fails if no response in 5 minutes
+            .timeout(std::time::Duration::from_secs(300))
             // Keepalive to maintain open TCP connection
             .tcp_keepalive(std::time::Duration::from_secs(60))
             // Force HTTP/1.1 for stability in large downloads (avoids HTTP2 bugs in some CDNs)

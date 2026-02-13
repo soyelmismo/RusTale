@@ -139,10 +139,10 @@ pub async fn ensure_installed(
     channel: &str,
     target_version: Option<i32>,
     policy: InstallPolicy,
-    progress_callback: impl Fn(&str, f64, &str),
+    progress_callback: impl Fn(&str, f64, &str, u64, u64, Option<String>),
     cancel_token: Option<Arc<AtomicBool>>,
 ) -> Result<()> {
-    progress_callback("check", 0.0, "Checking installation...");
+    progress_callback("check", 0.0, "Checking installation...", 0, 0, None);
 
     // --- FAST PATH: Offline Verification ---
     if policy == InstallPolicy::OfflineVerify {
@@ -162,16 +162,16 @@ pub async fn ensure_installed(
                     println!("[Install] Agent not found, will download after game launch");
                 }
             }
-            progress_callback("complete", 100.0, "Verified.");
+            progress_callback("complete", 100.0, "Verified.", 0, 0, None);
             return Ok(());
         }
 
         if !game_ok {
-            progress_callback("check", 0.0, "Files missing, downloading...");
+            progress_callback("check", 0.0, "Files missing, downloading...", 0, 0, None);
         } else if !jre_ok {
-            progress_callback("check", 0.0, "JRE missing, downloading...");
+            progress_callback("check", 0.0, "JRE missing, downloading...", 0, 0, None);
         } else if !butler_ok {
-            progress_callback("check", 0.0, "Butler missing, downloading...");
+            progress_callback("check", 0.0, "Butler missing, downloading...", 0, 0, None);
         }
     }
     // ----------------------------------------
@@ -194,7 +194,7 @@ pub async fn ensure_installed(
     println!("[Install] Skipping agent download during installation - will download after game launch");
 
     // 3. Find latest version or use target
-    progress_callback("version", 0.0, "Checking for game updates...");
+    progress_callback("version", 0.0, "Checking for game updates...", 0, 0, None);
 
     let requested_version = target_version.unwrap_or(0);
     let mut version_manifest =
@@ -219,7 +219,7 @@ pub async fn ensure_installed(
     let files_exist = is_game_installed(base_dir, channel, &install_dir_name).await;
 
     if files_exist && version_manifest.current_local == 0 && is_latest {
-        progress_callback("check", 50.0, "Detected manual installation. Adopting...");
+        progress_callback("check", 50.0, "Detected manual installation. Adopting...", 0, 0, None);
 
         // CLEANUP: Check if there's a leftover .original file from a previous patch/mod
         // and restore it to ensure we are adopting a clean state.
@@ -235,6 +235,9 @@ pub async fn ensure_installed(
                 "check",
                 55.0,
                 "Found dirty patch. Restoring original binary...",
+                0,
+                0,
+                None,
             );
             // Restore: move .original -> .exe (overwriting if necessary)
             fs::rename(&original_path, &client_path).await?;
@@ -249,7 +252,7 @@ pub async fn ensure_installed(
 
     // Verificar si ya esta al dia
     if files_exist && (!is_latest || version_manifest.current_local == remote_version) {
-        progress_callback("complete", 100.0, "Game is up to date");
+        progress_callback("complete", 100.0, "Game is up to date", 0, 0, None);
         return Ok(());
     }
 
@@ -266,6 +269,9 @@ pub async fn ensure_installed(
             "download",
             0.0,
             &format!("Installing game version {}...", target_ver_val),
+            0,
+            0,
+            None,
         );
 
         let pwr_path = crate::game::patcher::download_pwr(
@@ -279,7 +285,7 @@ pub async fn ensure_installed(
         .await?;
 
         // Apply patch (install)
-        progress_callback("install", 0.0, "Installing game files...");
+        progress_callback("install", 0.0, "Installing game files...", 0, 0, None);
         crate::game::patcher::apply_pwr(
             base_dir,
             channel,
@@ -311,12 +317,15 @@ pub async fn ensure_installed(
                 "download",
                 0.0,
                 &format!(
-                    "Updating part {}/{}: version {} -> {}...",
+                    "Downloading patch {}/{}: {} -> {}",
                     idx + 1,
                     total_steps,
                     current_ver,
                     next_ver
                 ),
+                0,
+                0,
+                None,
             );
 
             let pwr_path = crate::game::patcher::download_pwr(
@@ -333,6 +342,9 @@ pub async fn ensure_installed(
                 "install",
                 0.0,
                 &format!("Applying patch {}/{}...", idx + 1, total_steps),
+                0,
+                0,
+                None,
             );
 
             crate::game::patcher::apply_pwr(
@@ -369,7 +381,7 @@ pub async fn ensure_installed(
         let _ = save_local_version(base_dir, channel, target_ver_val).await;
     }
 
-    progress_callback("complete", 100.0, "Game installed successfully");
+    progress_callback("complete", 100.0, "Game installed successfully", 0, 0, None);
 
     if start_version != target_ver_val {
         let _ = crate::game::patcher::clean_patches_cache(&progress_callback).await;

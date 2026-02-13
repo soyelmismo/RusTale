@@ -43,7 +43,7 @@ pub async fn get_version_manifest(
 pub async fn install_butler(
     client: &reqwest::Client,
     base_dir: &PathBuf,
-    progress_callback: impl Fn(&str, f64, &str),
+    progress_callback: impl Fn(&str, f64, &str, u64, u64, Option<String>),
     cancel_token: Option<Arc<AtomicBool>>,
 ) -> Result<PathBuf> {
     let paths = crate::game::paths::GamePaths::new(base_dir.clone());
@@ -54,7 +54,7 @@ pub async fn install_butler(
     // Check if already installed
     if butler_path.exists() {
         let _ = crate::util::make_executable(&butler_path).await;
-        progress_callback("butler", 100.0, "Butler already installed");
+        progress_callback("butler", 100.0, "Butler already installed", 0, 0, None);
         return Ok(butler_path);
     }
 
@@ -66,7 +66,7 @@ pub async fn install_butler(
         _ => anyhow::bail!("Unsupported OS for Butler"),
     };
 
-    progress_callback("butler", 0.0, "Downloading Butler...");
+    progress_callback("butler", 0.0, "Downloading Butler...", 0, 0, None);
 
     let zip_path = tools_dir.join("butler.zip");
 
@@ -75,13 +75,15 @@ pub async fn install_butler(
         client,
         url,
         &zip_path,
-        |pct, speed| progress_callback("butler", pct as f64, &format!("Downloading Butler... ({})", speed)),
+        |pct, speed, total, downloaded, eta| {
+            progress_callback("butler", pct as f64, &format!("Downloading Butler... ({})", speed), total, downloaded, eta);
+        },
         cancel_token,
         |fallback_data| crate::game::fallback::get_butler_url(fallback_data),
         "Butler",
     ).await?;
 
-    progress_callback("butler", 70.0, "Extracting Butler...");
+    progress_callback("butler", 70.0, "Extracting Butler...", 0, 0, None);
 
     // Extract using spawn_blocking to avoid UI freeze
     let zip_path_clone = zip_path.clone();
@@ -104,7 +106,7 @@ pub async fn install_butler(
     // Cleanup
     let _ = tokio::fs::remove_file(&zip_path).await;
 
-    progress_callback("butler", 100.0, "Butler installed");
+    progress_callback("butler", 100.0, "Butler installed", 0, 0, None);
 
     Ok(butler_path)
 }
@@ -309,7 +311,7 @@ pub async fn download_server_pwr(
     channel: &str,
     target_version: i32,
     dest: &PathBuf,
-    progress_callback: impl Fn(f32, &str),
+    progress_callback: impl Fn(f32, &str, u64, u64, Option<String>),
     cancel_token: Option<Arc<AtomicBool>>,
 ) -> anyhow::Result<()> {
     let os = std::env::consts::OS;
@@ -323,7 +325,9 @@ pub async fn download_server_pwr(
         client,
         &url,
         dest,
-        progress_callback,
+        |pct, speed, total, downloaded, eta| {
+            progress_callback(pct, &speed, total, downloaded, eta);
+        },
         cancel_token,
         |fallback_data| crate::game::fallback::get_version_url(fallback_data, channel, target_version),
         "server PWR file",
@@ -335,7 +339,7 @@ pub async fn download_with_fallback<F>(
     client: &reqwest::Client,
     primary_url: &str,
     dest: &PathBuf,
-    progress_callback: impl Fn(f32, &str),
+    progress_callback: impl Fn(f32, &str, u64, u64, Option<String>),
     cancel_token: Option<Arc<AtomicBool>>,
     fallback_url_resolver: F,
     file_type: &str,
@@ -349,22 +353,7 @@ where
         primary_url,
         dest,
         |pct, speed, total, downloaded, eta| {
-                let size_info = if total > 0 {
-                    format!("{} / {}", 
-                        crate::game::downloader::format_bytes(downloaded), 
-                        crate::game::downloader::format_bytes(total)
-                    )
-                } else {
-                    crate::game::downloader::format_bytes(downloaded)
-                };
-                
-                let eta_info = if let Some(eta_str) = &eta {
-                    format!(" • ETA: {}", eta_str)
-                } else {
-                    String::new()
-                };
-                
-                progress_callback(pct, &format!("{}{}{}", speed, size_info, eta_info));
+                progress_callback(pct, &speed, total, downloaded, eta);
             },
         cancel_token.clone(),
     )
@@ -383,22 +372,7 @@ where
                             &fallback_url,
                             dest,
                             |pct, speed, total, downloaded, eta| {
-                let size_info = if total > 0 {
-                    format!("{} / {}", 
-                        crate::game::downloader::format_bytes(downloaded), 
-                        crate::game::downloader::format_bytes(total)
-                    )
-                } else {
-                    crate::game::downloader::format_bytes(downloaded)
-                };
-                
-                let eta_info = if let Some(eta_str) = &eta {
-                    format!(" • ETA: {}", eta_str)
-                } else {
-                    String::new()
-                };
-                
-                progress_callback(pct, &format!("{}{}{}", speed, size_info, eta_info));
+                progress_callback(pct, &speed, total, downloaded, eta);
             },
                             cancel_token,
                         )
@@ -426,7 +400,7 @@ pub async fn download_pwr(
     channel: &str,
     prev_version: i32,
     target_version: i32,
-    progress_callback: &impl Fn(&str, f64, &str),
+    progress_callback: impl Fn(&str, f64, &str, u64, u64, Option<String>),
     cancel_token: Option<Arc<AtomicBool>>,
 ) -> anyhow::Result<PathBuf> {
     let cache_dir = crate::config::get_cache_dir("patches").await;
@@ -448,6 +422,9 @@ pub async fn download_pwr(
             "Downloading update ({} -> {})...",
             prev_version, target_version
         ),
+        0,
+        0,
+        None,
     );
 
     // Download with automatic fallback
@@ -455,11 +432,14 @@ pub async fn download_pwr(
         client,
         &url_remote,
         &dest,
-        |pct, speed| {
+        |pct, speed, total, downloaded, eta| {
             progress_callback(
                 "download",
-                pct as f64,
+                pct.into(),
                 &format!("Downloading patch... ({})", speed),
+                total,
+                downloaded,
+                eta,
             );
         },
         cancel_token,
@@ -467,7 +447,7 @@ pub async fn download_pwr(
         "PWR file",
     ).await?;
 
-    progress_callback("download", 40.0, "PWR file downloaded");
+    progress_callback("download", 40.0, "PWR file downloaded", 0, 0, None);
 
     Ok(dest)
 }
@@ -478,7 +458,7 @@ pub async fn apply_pwr(
     channel: &str,
     pwr_file: &PathBuf,
     install_dir_name: &str,
-    progress_callback: &impl Fn(&str, f64, &str),
+    progress_callback: impl Fn(&str, f64, &str, u64, u64, Option<String>),
 ) -> anyhow::Result<()> {
     let game_install_dir = base_dir.join(channel).join(install_dir_name);
     let staging_dir = base_dir.join(channel).join("staging-temp");
@@ -560,11 +540,11 @@ pub async fn apply_pwr(
                 if let Some(pct) = parse_butler_line(line) {
                     current_pct = pct as f64;
                     let file = line.split('%').last().unwrap_or("").trim();
-                    progress_callback("install", current_pct, file);
+                    progress_callback("install", current_pct, file, 0, 0, None);
                 }
             } else {
                 if line.len() < 100 && !line.starts_with("\u{2590}") {
-                    progress_callback("install", current_pct, line);
+                    progress_callback("install", current_pct, line, 0, 0, None);
                 }
             }
         }
@@ -617,11 +597,11 @@ fn get_arch_name() -> &'static str {
     }
 }
 
-pub async fn clean_patches_cache(progress_callback: &impl Fn(&str, f64, &str)) -> Result<()> {
+pub async fn clean_patches_cache(progress_callback: &impl Fn(&str, f64, &str, u64, u64, Option<String>)) -> Result<()> {
     let patches_cache_dir = crate::config::get_cache_dir("game_patches").await;
 
     if patches_cache_dir.exists() {
-        progress_callback("cleanup", 0.0, "Cleaning patches cache...");
+        progress_callback("cleanup", 0.0, "Cleaning patches cache...", 0, 0, None);
 
         // Delete all .pwr files in the patches directory
         let mut entries = tokio::fs::read_dir(&patches_cache_dir).await?;
@@ -633,7 +613,7 @@ pub async fn clean_patches_cache(progress_callback: &impl Fn(&str, f64, &str)) -
             }
         }
 
-        progress_callback("cleanup", 100.0, "Patch cache cleaned");
+        progress_callback("cleanup", 100.0, "Patch cache cleaned", 0, 0, None);
     }
 
     Ok(())

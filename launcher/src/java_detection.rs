@@ -22,7 +22,7 @@ pub async fn ensure_java_available(base_dir: &std::path::Path) -> anyhow::Result
     crate::java::download_jre(
         &client,
         &base_dir.to_path_buf(),
-        |component, progress, status| {
+        |component, progress, status, _total, _downloaded, _eta| {
             eprintln!("Java {}: {:.1}% - {}", component, progress, status);
         },
         None, // Sin token de cancelacion por ahora

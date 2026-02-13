@@ -92,7 +92,7 @@ pub async fn repair_installation(
     }
 
     // Limpiar cache de parches de Aurora (opcional pero recomendado)
-    let _ = crate::game::patcher::clean_patches_cache(&|_, _, _| {}).await;
+    let _ = crate::game::patcher::clean_patches_cache(&|_, _, _, _, _, _| {}).await;
 
     progress_callback(100.0, "Repair Complete");
     Ok(())

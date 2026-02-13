@@ -18,7 +18,7 @@ struct JREJSON {
 pub async fn download_jre(
     client: &reqwest::Client,
     base_dir: &PathBuf,
-    progress_callback: impl Fn(&str, f64, &str),
+    progress_callback: impl Fn(&str, f64, &str, u64, u64, Option<String>),
     cancel_token: Option<Arc<AtomicBool>>,
 ) -> Result<()> {
     // Try primary JRE API first
@@ -49,7 +49,7 @@ async fn download_jre_from_data(
     client: &reqwest::Client,
     jre_data: &JREJSON,
     base_dir: &PathBuf,
-    progress_callback: &impl Fn(&str, f64, &str),
+    progress_callback: &impl Fn(&str, f64, &str, u64, u64, Option<String>),
     cancel_token: Option<Arc<AtomicBool>>,
 ) -> anyhow::Result<()> {
     let os_name = get_os_name();
@@ -77,7 +77,7 @@ async fn download_jre_from_data(
 
     // Download if not cached
     if !cache_file.exists() {
-        progress_callback("jre", 10.0, &format!("Downloading {}...", file_name));
+        progress_callback("jre", 10.0, &format!("Downloading {}...", file_name), 0, 0, None);
 
         crate::game::downloader::download_file(
             client,
@@ -103,6 +103,9 @@ async fn download_jre_from_data(
                     "jre",
                     pct as f64,
                     &format!("Downloading JRE... ({}{}{})", speed, size_info, eta_info),
+                    total,
+                    downloaded,
+                    eta,
                 );
             },
             cancel_token,
@@ -110,7 +113,7 @@ async fn download_jre_from_data(
         .await?;
     }
 
-    progress_callback("jre", 70.0, "Extracting JRE...");
+    progress_callback("jre", 70.0, "Extracting JRE...", 0, 0, None);
 
     // Clean up old installation
     if latest_dir.exists() {
@@ -129,7 +132,7 @@ async fn download_jre_from_data(
     .await
     .context("JRE extraction task failed")??;
 
-    progress_callback("jre", 100.0, "JRE installed");
+    progress_callback("jre", 100.0, "JRE installed", 0, 0, None);
 
     Ok(())
 }
@@ -202,7 +205,7 @@ fn extract_archive(archive_path: &PathBuf, dest_dir: &PathBuf) -> Result<()> {
 async fn download_jre_fallback(
     client: &reqwest::Client,
     base_dir: &PathBuf,
-    progress_callback: &impl Fn(&str, f64, &str),
+    progress_callback: &impl Fn(&str, f64, &str, u64, u64, Option<String>),
     cancel_token: Option<Arc<AtomicBool>>,
 ) -> anyhow::Result<()> {
     println!("Using fallback JRE download...");
@@ -225,7 +228,7 @@ async fn download_jre_fallback(
 
     // Download if not cached
     if !cache_file.exists() {
-        progress_callback("jre", 10.0, &format!("Downloading {} from fallback...", file_name));
+        progress_callback("jre", 10.0, &format!("Downloading {} from fallback...", file_name), 0, 0, None);
 
         crate::game::downloader::download_file(
             client,
@@ -251,6 +254,9 @@ async fn download_jre_fallback(
                     "jre",
                     pct as f64,
                     &format!("Downloading JRE from fallback... ({}{}{})", speed, size_info, eta_info),
+                    total,
+                    downloaded,
+                    eta,
                 );
             },
             cancel_token,
@@ -258,7 +264,7 @@ async fn download_jre_fallback(
         .await?;
     }
 
-    progress_callback("jre", 70.0, "Extracting JRE...");
+    progress_callback("jre", 70.0, "Extracting JRE...", 0, 0, None);
 
     // Clean up old installation
     if latest_dir.exists() {
@@ -277,7 +283,7 @@ async fn download_jre_fallback(
     .await
     .context("JRE extraction task failed")??;
 
-    progress_callback("jre", 100.0, "JRE installed from fallback");
+    progress_callback("jre", 100.0, "JRE installed from fallback", 0, 0, None);
 
     Ok(())
 }

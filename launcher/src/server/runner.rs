@@ -140,9 +140,24 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
 
     // 1. Tool Validation (JRE e Itch/Butler)
     println!("[1/5] Validating tools...");
-    let callback = |task: &str, pct: f64, msg: &str| {
+    let callback = |task: &str, pct: f64, msg: &str, total: u64, downloaded: u64, eta: Option<String>| {
         if pct == 0.0 || pct == 100.0 {
-            println!("[{}] {}", task, msg);
+            let size_info = if total > 0 {
+                format!(" ({} / {})", 
+                    crate::game::downloader::format_bytes(downloaded), 
+                    crate::game::downloader::format_bytes(total)
+                )
+            } else {
+                String::new()
+            };
+            
+            let eta_info = if let Some(eta_str) = &eta {
+                format!(" • ETA: {}", eta_str)
+            } else {
+                String::new()
+            };
+            
+            println!("[{}] {}{}{}", task, msg, size_info, eta_info);
         }
     };
 
@@ -481,7 +496,24 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
                 &config.branch,
                 target_ver_num,
                 &pwr_path,
-                |pct, _speed| println!("Downloading patch... {}%", pct),
+                |pct, speed, total, downloaded, eta| {
+                    let size_info = if total > 0 {
+                        format!(" ({} / {})", 
+                            crate::game::downloader::format_bytes(downloaded), 
+                            crate::game::downloader::format_bytes(total)
+                        )
+                    } else {
+                        String::new()
+                    };
+                    
+                    let eta_info = if let Some(eta_str) = &eta {
+                        format!(" • ETA: {}", eta_str)
+                    } else {
+                        String::new()
+                    };
+                    
+                    println!("Downloading patch... {}% ({}{}{})", pct, speed, size_info, eta_info);
+                },
                 None,
             ).await {
                 anyhow::bail!("Failed to download server patch: {}", e);

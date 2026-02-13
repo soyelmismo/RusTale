@@ -120,46 +120,9 @@ impl Recipe for Runner {
                             Some(0)
                         },
                         install_policy,
-                        move |phase, sub_p, msg| {
+                        move |phase, sub_p, msg, total_bytes, downloaded_bytes, eta| {
                             let sub_p_f32 = sub_p as f32;
                             let general_p = progress_calculator.calculate(phase, sub_p_f32);
-                            
-                            // Extract size information from message if available
-                            let (total_bytes, downloaded_bytes) = if msg.contains('/') {
-                                // Try to parse format like "123.4 MB / 456.7 MB"
-                                if let Some((downloaded_part, total_part)) = msg.split_once(" / ") {
-                                    let parse_bytes = |s: &str| -> u64 {
-                                        if s.contains("MB") {
-                                            (s.trim().trim_end_matches("MB").trim().parse::<f64>().unwrap_or(0.0) * 1_000_000.0) as u64
-                                        } else if s.contains("KB") {
-                                            (s.trim().trim_end_matches("KB").trim().parse::<f64>().unwrap_or(0.0) * 1_000.0) as u64
-                                        } else {
-                                            s.trim().trim_end_matches("B").trim().parse::<u64>().unwrap_or(0)
-                                        }
-                                    };
-                                    (parse_bytes(total_part), parse_bytes(downloaded_part))
-                                } else {
-                                    (0, 0)
-                                }
-                            } else {
-                                (0, 0)
-                            };
-                            
-                            // Extract ETA from message if available (format: "speed (ETA: Xs)")
-                            let eta = if msg.contains("ETA:") {
-                                if let Some(start) = msg.find("ETA:") {
-                                    let eta_part = &msg[start + 4..];
-                                    if let Some(end) = eta_part.find(')') {
-                                        Some(eta_part[..end].trim().to_string())
-                                    } else {
-                                        None
-                                    }
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            };
                             
                             let _ = progress_tx.try_send(Message::DownloadProgress {
                                 progress: general_p,

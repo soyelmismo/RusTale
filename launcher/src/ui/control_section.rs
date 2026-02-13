@@ -203,21 +203,6 @@ pub fn view<'a>(
         column![
             info_section,
             if *status == LauncherStatus::Downloading || *status == LauncherStatus::Migrating {
-                let size_info = if total_bytes > 0 {
-                    format!("{} / {}", 
-                        format_bytes(downloaded_bytes), 
-                        format_bytes(total_bytes)
-                    )
-                } else {
-                    format_bytes(downloaded_bytes)
-                };
-                
-                let eta_info = if let Some(eta_str) = eta {
-                    format!(" • ETA: {}", eta_str)
-                } else {
-                    String::new()
-                };
-                
                 column![
                     row![
                         theme::text_micro(localization.t("launcher.status.step"), ctx),
@@ -231,11 +216,37 @@ pub fn view<'a>(
                     .height(4)
                     .width(Length::Fill)
                     .style(move |t| theme::container_style_transparent(&palette, t)),
-                    row![
-                        theme::text_micro(format!("{}{}", size_info, eta_info), ctx),
-                        Space::new().width(Length::Fill),
-                        theme::text_micro(status_text, ctx)
-                    ]
+                    if total_bytes > 0 {
+                        column![
+                            row![
+                                theme::text_micro("Downloaded:", ctx),
+                                Space::new().width(Length::Fill),
+                                theme::text_micro(format!("{:.0}%", download_progress), ctx)
+                            ],
+                            row![
+                                theme::text_micro(format!("{}/{}", 
+                                    format_bytes(downloaded_bytes), 
+                                    format_bytes(total_bytes)
+                                ), ctx),
+                                Space::new().width(Length::Fill),
+                                if let Some(eta_str) = eta {
+                                    theme::text_micro(format!("ETA: {}", eta_str), ctx)
+                                } else {
+                                    theme::text_micro("", ctx)
+                                }
+                            ]
+                        ]
+                        .spacing(2)
+                    } else {
+                        column![
+                            row![
+                                theme::text_micro(format_bytes(downloaded_bytes), ctx),
+                                Space::new().width(Length::Fill),
+                                theme::text_micro(status_text, ctx)
+                            ]
+                        ]
+                        .spacing(2)
+                    }
                 ]
                 .spacing(5)
             } else {
