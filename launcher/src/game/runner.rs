@@ -468,21 +468,21 @@ impl Recipe for Runner {
                 }
 
                 // --- PHASE 4.5: MODS SYNC ---
-                // Synchronize the current version's jar mods to UserData/mods
+                // Synchronize the current version's jar mods to UserData/Mods
                 {
                     let version_mods_src = paths.mods_dir(&settings.channel, &version_str);
-                    let global_mods_target = user_data_dir.join("mods");
+                    let global_mods_target = user_data_dir.join("Mods");
 
-                    println!("[Runner] Syncing mods to UserData/mods...");
+                    println!("[Runner] Syncing mods to UserData/Mods...");
 
                     // 1. Clean destination folder (avoid mixing mods from other versions)
                     if global_mods_target.exists() {
                         if let Err(e) = tokio::fs::remove_dir_all(&global_mods_target).await {
-                            eprintln!("[Runner] Warning: Failed to clean UserData/mods: {}", e);
+                            eprintln!("[Runner] Warning: Failed to clean UserData/Mods: {}", e);
                         }
                     }
                     if let Err(e) = tokio::fs::create_dir_all(&global_mods_target).await {
-                        eprintln!("[Runner] Error creating UserData/mods: {}", e);
+                        eprintln!("[Runner] Error creating UserData/Mods: {}", e);
                     }
 
                     // 2. Copy enabled mods
