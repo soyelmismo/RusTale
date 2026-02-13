@@ -14,7 +14,7 @@ pub async fn download_file(
     client: &reqwest::Client,
     url: &str,
     destination: &PathBuf,
-    progress_callback: impl Fn(f32, String),
+    progress_callback: impl Fn(f32, String, u64, u64, Option<String>),
     cancel_token: Option<Arc<AtomicBool>>,
 ) -> Result<()> {
     let temp_destination = destination.with_extension("downloading");
@@ -24,6 +24,7 @@ pub async fn download_file(
     }
 
     let mut total_size = 0u64;
+    let _download_start_time = std::time::Instant::now();
 
     if let Ok(resp) = client.head(url).send().await {
         if resp.status().is_success() {
@@ -133,7 +134,22 @@ pub async fn download_file(
                                         0.0
                                     };
 
-                                    progress_callback(pct, speed_str);
+                                    // Calculate ETA
+                                    let eta = if total_size > 0 && speed > 0.0 {
+                                        let remaining_bytes = total_size.saturating_sub(downloaded_len) as f64;
+                                        let seconds_remaining = remaining_bytes / speed;
+                                        if seconds_remaining < 60.0 {
+                                            Some(format!("{:.0}s", seconds_remaining))
+                                        } else if seconds_remaining < 3600.0 {
+                                            Some(format!("{:.0}m", seconds_remaining / 60.0))
+                                        } else {
+                                            Some(format!("{:.1}h", seconds_remaining / 3600.0))
+                                        }
+                                    } else {
+                                        None
+                                    };
+
+                                    progress_callback(pct, speed_str, total_size, downloaded_len, eta);
                                     last_report = std::time::Instant::now();
                                     bytes_since_last_report = 0;
                                 }
@@ -174,12 +190,15 @@ pub async fn download_file(
                 0.0
             },
             format!("Network error. Retrying in {}s...", wait.as_secs()),
+            total_size,
+            downloaded_len,
+            None,
         );
         tokio::time::sleep(wait).await;
     }
 
     tokio::fs::rename(&temp_destination, destination).await?;
-    progress_callback(100.0, "Complete".to_string());
+    progress_callback(100.0, "Complete".to_string(), total_size, total_size, None);
     Ok(())
 }
 
@@ -190,5 +209,16 @@ fn format_speed(bytes_per_sec: f64) -> String {
         format!("{:.2} KB/s", bytes_per_sec / 1_000.0)
     } else {
         format!("{:.0} B/s", bytes_per_sec)
+    }
+}
+
+#[allow(dead_code)]
+pub fn format_bytes(bytes: u64) -> String {
+    if bytes > 1_000_000 {
+        format!("{:.1} MB", bytes as f64 / 1_000_000.0)
+    } else if bytes > 1_000 {
+        format!("{:.1} KB", bytes as f64 / 1_000.0)
+    } else {
+        format!("{} B", bytes)
     }
 }

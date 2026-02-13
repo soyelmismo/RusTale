@@ -87,19 +87,6 @@ pub fn get_server_public_jwk_as_value() -> serde_json::Value {
     }
 }
 
-pub fn get_public_jwk_as_value() -> serde_json::Value {
-    // Para token forgery local, siempre usamos la NUESTRA, no la remota
-    initialize_constant_keys();
-    let local_jwks = HOST_JWKS_CACHE.get().expect("Local cache empty");
-    
-    if let Some(key) = local_jwks.keys.first() {
-        serde_json::json!({
-            "kty": key.kty, "crv": key.crv, "x": key.x, "kid": key.kid, "use": key.use_key
-        })
-    } else {
-        serde_json::json!({})
-    }
-}
 
 pub fn get_private_jwk_as_value() -> serde_json::Value {
     // Para arquitectura descentralizada donde el cliente es su propio emisor
@@ -222,12 +209,6 @@ pub fn update_jwks_from_remote(jwks: JwkSet) {
 
 // Deprecated logic kept for compatibility
 pub fn ensure_local_signing_capability() { initialize_constant_keys(); }
-pub fn initialize_server_keys_if_local() { initialize_constant_keys(); }
-pub fn force_regenerate_keys() { 
-    // Ahora es un no-op seguro. No regeneramos para mantener la estabilidad del puerto.
-    // Solo registramos el intento.
-    println!("[Crypto] Ignoring regen request. Keeping persistent identity."); 
-}
 
 /// Obtiene EXCLUSIVAMENTE las llaves públicas locales del servidor emulado.
 /// Ignora el caché remoto. Usado por el servidor interno para anunciar su propia identidad.

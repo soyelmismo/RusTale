@@ -92,7 +92,6 @@ pub struct ModsState {
     pub mods_with_updates: HashSet<String>, // Ahora contiene remote_ids
     // Cache para evitar recalculos en view()
     pub update_status_cache: HashMap<String, bool>, // file_name/mod_id -> has_update
-    pub cache_dirty: bool,                          // Marcar cuando se necesita recalcular
     // Mapa para recordar que version selecciono el usuario en la UI para cada mod (Browse tab)
     pub selected_versions: HashMap<String, String>,
     // Set de mods que estan cargando versiones actualmente
@@ -123,7 +122,6 @@ impl Default for ModsState {
             checking_updates: false,
             mods_with_updates: HashSet::new(),
             update_status_cache: HashMap::new(),
-            cache_dirty: false,
             selected_versions: HashMap::new(),
             loading_versions: HashSet::new(),
             cached_versions: HashMap::new(),
@@ -511,7 +509,24 @@ impl ModsState {
                                     &client,
                                     &uc,
                                     &dest,
-                                    |_, _| {},
+                                    |_, _, total, downloaded, eta| {
+                                        let size_info = if total > 0 {
+                                            format!("{} / {}", 
+                                                crate::game::downloader::format_bytes(downloaded), 
+                                                crate::game::downloader::format_bytes(total)
+                                            )
+                                        } else {
+                                            crate::game::downloader::format_bytes(downloaded)
+                                        };
+                                        
+                                        let eta_info = if let Some(eta_str) = &eta {
+                                            format!(" • ETA: {}", eta_str)
+                                        } else {
+                                            String::new()
+                                        };
+                                        
+                                        println!("[Mods] Downloading: {}{}", size_info, eta_info);
+                                    },
                                     None,
                                 )
                                 .await
@@ -1025,7 +1040,24 @@ impl ModsState {
                                 &client_clone,
                                 &download_url,
                                 &new_path,
-                                |_, _| {},
+                                |_, _, total, downloaded, eta| {
+                                        let size_info = if total > 0 {
+                                            format!("{} / {}", 
+                                                crate::game::downloader::format_bytes(downloaded), 
+                                                crate::game::downloader::format_bytes(total)
+                                            )
+                                        } else {
+                                            crate::game::downloader::format_bytes(downloaded)
+                                        };
+                                        
+                                        let eta_info = if let Some(eta_str) = &eta {
+                                            format!(" • ETA: {}", eta_str)
+                                        } else {
+                                            String::new()
+                                        };
+                                        
+                                        println!("[Mods] Downloading: {}{}", size_info, eta_info);
+                                    },
                                 None,
                             )
                             .await
@@ -2100,7 +2132,7 @@ impl ModsState {
             theme::list_item_row(
                 row![
                     // Icono visual (ZIP para patches, o logo si existe)
-                    Element::from(if let Some(logo) = &p.logo_url {
+                    Element::from(if let Some(_logo) = &p.logo_url {
                         if let Some(rid) = &p.remote_id {
                             if let Some(h) = self.thumbnails.get(rid) {
                                 theme::magic_image::<ModsMessage>(

@@ -51,8 +51,23 @@ pub async fn start_playit(
             client,
             binary_url,
             &bin_path,
-            |pct, speed| {
-                print!("\r[Tunnel] Downloading: {:.1}% ({})     ", pct, speed);
+            |pct, speed, total, downloaded, eta| {
+                let size_info = if total > 0 {
+                    format!("{} / {}", 
+                        crate::game::downloader::format_bytes(downloaded), 
+                        crate::game::downloader::format_bytes(total)
+                    )
+                } else {
+                    crate::game::downloader::format_bytes(downloaded)
+                };
+                
+                let eta_info = if let Some(eta_str) = &eta {
+                    format!(" • ETA: {}", eta_str)
+                } else {
+                    String::new()
+                };
+                
+                print!("\r[Tunnel] Downloading: {:.1}% ({}{}{})     ", pct, speed, size_info, eta_info);
                 let _ = std::io::stdout().flush();
             },
             None,

@@ -1,5 +1,3 @@
-use anyhow::{Context, Result};
-use reqwest::Client;
 use std::path::PathBuf;
 use std::sync::{Arc, atomic::AtomicBool};
 
@@ -10,7 +8,7 @@ pub const AGENT_URL: &str =
 /// Used during installation to avoid blocking
 pub async fn quick_verify_agent(
     root_dir: &PathBuf,
-) -> Result<bool> {
+) -> anyhow::Result<bool> {
     let paths = crate::game::paths::GamePaths::new(root_dir.clone());
     let agent_path = paths.dualauth_agent();
     
@@ -27,11 +25,11 @@ pub async fn quick_verify_agent(
 }
 
 pub async fn ensure_agent(
-    client: &Client,
+    client: &reqwest::Client,
     root_dir: &PathBuf,
     progress_callback: &impl Fn(&str, f64, &str),
     _cancel_token: Option<Arc<AtomicBool>>,
-) -> Result<PathBuf> {
+) -> anyhow::Result<PathBuf> {
     let paths = crate::game::paths::GamePaths::new(root_dir.clone());
     let agent_path = paths.dualauth_agent();
 
@@ -84,11 +82,26 @@ pub async fn ensure_agent(
             client,
             AGENT_URL,
             &agent_path,
-            |pct, speed| {
+            |pct, speed, total, downloaded, eta| {
+                let size_info = if total > 0 {
+                    format!("{} / {}", 
+                        crate::game::downloader::format_bytes(downloaded), 
+                        crate::game::downloader::format_bytes(total)
+                    )
+                } else {
+                    crate::game::downloader::format_bytes(downloaded)
+                };
+                
+                let eta_info = if let Some(eta_str) = &eta {
+                    format!(" • ETA: {}", eta_str)
+                } else {
+                    String::new()
+                };
+                
                 progress_callback(
                     "agent",
                     pct as f64,
-                    &format!("Downloading Server Auth Agent... ({})", speed),
+                    &format!("Downloading Server Auth Agent... ({}{}{})", speed, size_info, eta_info),
                 );
             },
             _cancel_token,

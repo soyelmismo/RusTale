@@ -325,6 +325,9 @@ pub enum Message {
         progress: f32,
         sub_progress: f32,
         speed: String,
+        total_bytes: u64,
+        downloaded_bytes: u64,
+        eta: Option<String>,
     },
     GameLaunched(Result<(), String>),
     GameStopped,
@@ -401,6 +404,9 @@ struct RusTale {
     download_progress: f32,
     sub_progress: f32,
     status_text: String,
+    total_bytes: u64,
+    downloaded_bytes: u64,
+    eta: Option<String>,
     error: Option<String>,
     running_game: Option<(GameSettings, String, String, Option<i32>, LauncherStatus)>, // (Settings, Name, ID/UUID, TargetVersion)
     bg_handle: Option<image::Handle>,
@@ -479,23 +485,7 @@ struct RusTale {
 }
 
 impl RusTale {
-    // Funcion para calcular opacidad de contenedores en LSD mode con transicion suave
-    fn containers_opacity(&self) -> f32 {
-        // Solo aplicar efecto si LSD mode esta activado
-        if self.settings.theme.lsd_mode {
-            if self.is_mouse_pressed {
-                // Transicion suave a 0.0 (invisible) cuando se presiona
-                0.0
-            } else {
-                // Transicion suave a 1.0 (totalmente visible) cuando se suelta
-                1.0
-            }
-        } else {
-            // Siempre visible si no esta en LSD mode
-            1.0
-        }
-    }
-
+    
     // Funcion para obtener opacidad actual usando el acumulador
     fn ui_alpha_actual(&self) -> f32 {
         if !self.settings.theme.lsd_mode {
@@ -598,6 +588,9 @@ impl RusTale {
                 download_progress: 0.0,
                 sub_progress: 0.0,
                 status_text: "Initializing...".to_string(),
+                total_bytes: 0,
+                downloaded_bytes: 0,
+                eta: None,
                 error: None,
                 running_game: None,
                 bg_handle: initial_bg, // Assign the handle immediately (can be Some or None)
@@ -1133,7 +1126,7 @@ impl RusTale {
                 // Detectamos si hay algun modal abierto
                 let is_modal_active = self.settings_state.is_open || self.mods_state.is_open;
 
-                let mut tasks = Vec::new();
+                let tasks = Vec::new();
 
                 // --- LoGICA DE PRIORIDAD DE INTERFAZ ---
                 if is_modal_active {
@@ -1388,7 +1381,11 @@ impl RusTale {
                     Task::none()
                 };
 
-                let mut tasks = vec![Task::done(Message::CheckStatus), news_task, update_task];
+                let mut tasks = vec![
+                    Task::done(Message::CheckStatus), 
+                    news_task, 
+                    update_task
+                ];
 
                 if self.is_quickplay_mode {
                     tasks.push(
@@ -1491,7 +1488,7 @@ impl RusTale {
                 self.settings = settings;
                 self.status = status;
 
-                // CAMBIO: Si recibimos un dato remoto nuevo, actualizamos cache y generamos lista
+                // Si recibimos un dato remoto nuevo, actualizamos cache y generamos lista
                 if let Some(ver) = latest {
                     self.latest_version = Some(ver);
                     if ver > 0 {
@@ -1602,6 +1599,9 @@ impl RusTale {
                 progress,
                 sub_progress,
                 speed,
+                total_bytes,
+                downloaded_bytes,
+                eta,
             } => {
                 // Track progress changes for stuck detection using GENERAL progress
                 let progress_changed = (progress - self.last_download_progress).abs() > 0.1;
@@ -1619,6 +1619,9 @@ impl RusTale {
                 self.download_progress = progress;
                 self.sub_progress = sub_progress;
                 self.status_text = speed.clone();
+                self.total_bytes = total_bytes;
+                self.downloaded_bytes = downloaded_bytes;
+                self.eta = eta;
 
                 println!(
                     "[Progress] General: {:.1}% | Step: {:.1}% | Status: {}",
@@ -3047,6 +3050,9 @@ impl RusTale {
                 is_interaction_disabled,
                 self.server_patch_progress,
                 self.show_server_patch_progress,
+                self.total_bytes,
+                self.downloaded_bytes,
+                self.eta.as_ref(),
                 ctx,
             ),
         ]
@@ -3159,9 +3165,6 @@ impl RusTale {
 
         // 2. Capa Shader: Se superpone con Alpha variable
         let bg: Element<'_, Message> = if self.settings.theme.lsd_mode {
-            // [FIX] La capa siempre es visible (alpha = 1.0)
-            // La intensidad del shader se controla internamente con effect_intensity
-            let _shader_opacity = 1.0; // Capa siempre visible
 
             // Crear o actualizar instancia del shader dinamicamente
             let mut shader_opt = self.lsd_shader_instance.borrow_mut();

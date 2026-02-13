@@ -13,8 +13,8 @@ pub enum LauncherStatus {
     Migrating,
 }
 
-/// Calculates the current launcher status based on settings and file system state
-/// This function implements the core verification logic:
+/// Calculates current launcher status based on settings and file system state
+/// This function implements core verification logic:
 /// 1. Check if user has game installed for selected channel/version
 /// 2. If "latest" mode, check local version vs remote version
 /// 3. If update available, return NeedsUpdate
@@ -29,8 +29,10 @@ pub async fn calculate_status(
 ) -> (LauncherStatus, Option<i32>) {
     let channel = &settings.channel;
     let is_latest_mode = settings.game_version == 0;
+    
+    println!("[DEBUG] calculate_status - channel: {}, is_latest_mode: {}, cached: {:?}", channel, is_latest_mode, cached_remote_latest);
 
-    // Determine the version string for folder lookup
+    // Determine version string for folder lookup
     let version_str = if is_latest_mode {
         "latest".to_string()
     } else {
@@ -41,14 +43,17 @@ pub async fn calculate_status(
     let exe_path = paths.client_exe(channel, &version_str);
 
     let is_installed = tokio::fs::metadata(&exe_path).await.is_ok();
+    println!("[DEBUG] Game installed at {}: {}", exe_path.display(), is_installed);
 
     if !is_installed {
         // Game not installed at all
+        println!("[DEBUG] Game not installed, returning NeedsInstall");
         return (LauncherStatus::NeedsInstall, None);
     }
 
     // If not in latest mode, and it's installed, we're ready
     if !is_latest_mode {
+        println!("[DEBUG] Not latest mode and installed, returning Ready");
         return (LauncherStatus::Ready, None);
     }
 
@@ -90,18 +95,25 @@ pub async fn calculate_status(
             }
         }
         Err(_) => {
-            // Can't reach server, but game is installed
-            // Read local version just to have something
-            let version_file = paths.version_json(channel);
-            let local_ver = if let Ok(content) = tokio::fs::read_to_string(&version_file).await {
-                serde_json::from_str::<serde_json::Value>(&content)
-                    .ok()
-                    .and_then(|v| v.get("version").and_then(|n| n.as_i64()))
-                    .unwrap_or(0) as i32
-            } else {
-                0
-            };
-            (LauncherStatus::Ready, Some(local_ver))
+            // Can't reach server, try fallback API
+            match crate::game::fallback::fetch_fallback_data(client).await {
+                Ok(fallback_data) => {
+                    match crate::game::fallback::get_latest_version(&fallback_data, &settings.channel) {
+                        Ok(fallback_ver) => {
+                            println!("Found latest version via fallback: {}", fallback_ver);
+                            (LauncherStatus::NeedsInstall, Some(fallback_ver))
+                        }
+                        Err(e) => {
+                            println!("Fallback error: {}", e);
+                            (LauncherStatus::NeedsInstall, None)
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("Failed to fetch fallback data: {}", e);
+                    (LauncherStatus::NeedsInstall, None)
+                }
+            }
         }
     }
 }

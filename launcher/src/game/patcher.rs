@@ -1,11 +1,8 @@
 use anyhow::{Context, Result};
-use std::io::{BufReader, BufWriter};
 use std::sync::{Arc, atomic::AtomicBool};
-use std::{path::PathBuf, process::Stdio};
+use std::path::PathBuf;
+use std::process::Stdio;
 use tokio::io::AsyncBufReadExt;
-use zip::write::SimpleFileOptions;
-
-use crate::config::OnlineFixMode;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GameVersionInfo {
@@ -351,7 +348,24 @@ where
         client,
         primary_url,
         dest,
-        |pct, speed| progress_callback(pct, &speed),
+        |pct, speed, total, downloaded, eta| {
+                let size_info = if total > 0 {
+                    format!("{} / {}", 
+                        crate::game::downloader::format_bytes(downloaded), 
+                        crate::game::downloader::format_bytes(total)
+                    )
+                } else {
+                    crate::game::downloader::format_bytes(downloaded)
+                };
+                
+                let eta_info = if let Some(eta_str) = &eta {
+                    format!(" • ETA: {}", eta_str)
+                } else {
+                    String::new()
+                };
+                
+                progress_callback(pct, &format!("{}{}{}", speed, size_info, eta_info));
+            },
         cancel_token.clone(),
     )
     .await;
@@ -368,7 +382,24 @@ where
                             client,
                             &fallback_url,
                             dest,
-                            |pct, speed| progress_callback(pct, &speed),
+                            |pct, speed, total, downloaded, eta| {
+                let size_info = if total > 0 {
+                    format!("{} / {}", 
+                        crate::game::downloader::format_bytes(downloaded), 
+                        crate::game::downloader::format_bytes(total)
+                    )
+                } else {
+                    crate::game::downloader::format_bytes(downloaded)
+                };
+                
+                let eta_info = if let Some(eta_str) = &eta {
+                    format!(" • ETA: {}", eta_str)
+                } else {
+                    String::new()
+                };
+                
+                progress_callback(pct, &format!("{}{}{}", speed, size_info, eta_info));
+            },
                             cancel_token,
                         )
                         .await?;

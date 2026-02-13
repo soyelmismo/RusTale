@@ -280,12 +280,5 @@ impl ModRepository for CurseForgeRepository {
         anyhow::bail!("No API keys available")
     }
 
-    async fn get_latest_compatible(&self, mod_id: &str, _current_file_id: &str) -> Result<Option<GenericFile>> {
-        // En un caso real filtrariamos por version del juego compatible. 
-        // Como CF ordena files por fecha, asumimos el primero.
-        let versions = self.get_versions(mod_id).await?;
-        // Tomamos el primero como "ultimo"
-        Ok(versions.first().cloned())
-    }
 }
 

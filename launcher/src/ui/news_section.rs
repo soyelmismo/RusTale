@@ -5,7 +5,7 @@ use iced::widget::{
     ProgressBar, Space, button, column, container, image, row, scrollable, svg,
 };
 use iced::{
-    Alignment, Background, Border, Color, ContentFit, Element, Length, Renderer, Task, Theme,
+    Alignment, Background, ContentFit, Element, Length, Renderer, Task, Theme,
 };
 use std::collections::HashMap;
 

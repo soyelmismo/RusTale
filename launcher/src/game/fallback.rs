@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::collections::HashMap;
 
 #[derive(Debug, Deserialize)]
@@ -9,18 +9,27 @@ pub struct FallbackAPI {
     pub butler: ButlerData,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
 pub struct HytaleData {
     pub release: PlatformData,
     #[serde(rename = "pre-release")]
     pub pre_release: PlatformData,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 pub struct PlatformData {
-    pub linux: HashMap<String, String>,
-    pub windows: HashMap<String, String>,
-    pub mac: HashMap<String, String>,
+    pub linux: PlatformFiles,
+    pub windows: PlatformFiles,
+    pub mac: PlatformFiles,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct PlatformFiles {
+    #[serde(flatten)]
+    pub files: HashMap<String, String>,
+    #[allow(dead_code)]
+    pub patch: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -37,7 +46,7 @@ pub struct ButlerData {
     pub mac: HashMap<String, String>,
 }
 
-/// Fetch fallback data from the alternative API
+/// Fetch fallback data from alternative API
 pub async fn fetch_fallback_data(client: &reqwest::Client) -> Result<FallbackAPI> {
     let response = client
         .get("https://thecute.cloud/ShipOfYarn/api.php")
@@ -48,7 +57,15 @@ pub async fn fetch_fallback_data(client: &reqwest::Client) -> Result<FallbackAPI
         anyhow::bail!("Fallback API returned status: {}", response.status());
     }
 
-    let data: FallbackAPI = response.json().await?;
+    let response_text = response.text().await.context("Failed to read response body")?;
+    println!("[Fallback] Raw response: {}", response_text);
+    
+    let data: FallbackAPI = serde_json::from_str(&response_text)
+        .map_err(|e| {
+            println!("[Fallback] JSON parse error: {}", e);
+            anyhow::anyhow!("Failed to decode fallback response: {}", e)
+        })?;
+    
     Ok(data)
 }
 
@@ -117,9 +134,9 @@ pub fn get_latest_version(fallback_data: &FallbackAPI, channel: &str) -> Result<
 
     let os_name = std::env::consts::OS;
     let os_data = match os_name {
-        "linux" => &platform_data.linux,
-        "windows" => &platform_data.windows,
-        "macos" => &platform_data.mac,
+        "linux" => &platform_data.linux.files,
+        "windows" => &platform_data.windows.files,
+        "macos" => &platform_data.mac.files,
         _ => anyhow::bail!("Unsupported OS: {}", os_name),
     };
 
@@ -152,9 +169,9 @@ pub fn get_version_url(fallback_data: &FallbackAPI, channel: &str, version: i32)
     let arch_name = get_arch_name();
     
     let os_data = match os_name {
-        "linux" => &platform_data.linux,
-        "windows" => &platform_data.windows,
-        "macos" => &platform_data.mac,
+        "linux" => &platform_data.linux.files,
+        "windows" => &platform_data.windows.files,
+        "macos" => &platform_data.mac.files,
         _ => anyhow::bail!("Unsupported OS: {}", os_name),
     };
 

@@ -4,6 +4,16 @@ use crate::{Message, theme, util};
 use iced::widget::{ProgressBar, Space, button, column, container, row, svg};
 use iced::{Alignment, Element, Length};
 
+fn format_bytes(bytes: u64) -> String {
+    if bytes > 1_000_000 {
+        format!("{:.1} MB", bytes as f64 / 1_000_000.0)
+    } else if bytes > 1_000 {
+        format!("{:.1} KB", bytes as f64 / 1_000.0)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
 pub fn view<'a>(
     status: &'a LauncherStatus,
     settings: &'a GameSettings,
@@ -15,8 +25,12 @@ pub fn view<'a>(
     is_disabled: bool,
     server_patch_progress: f32,
     show_server_patch_progress: bool,
+    total_bytes: u64,
+    downloaded_bytes: u64,
+    eta: Option<&'a String>,
     ctx: theme::UIContext,
 ) -> Element<'a, Message> {
+
     let palette = ctx.palette;
     let play_button_text = match status {
         LauncherStatus::Playing => localization.t("launcher.stop"),
@@ -189,6 +203,21 @@ pub fn view<'a>(
         column![
             info_section,
             if *status == LauncherStatus::Downloading || *status == LauncherStatus::Migrating {
+                let size_info = if total_bytes > 0 {
+                    format!("{} / {}", 
+                        format_bytes(downloaded_bytes), 
+                        format_bytes(total_bytes)
+                    )
+                } else {
+                    format_bytes(downloaded_bytes)
+                };
+                
+                let eta_info = if let Some(eta_str) = eta {
+                    format!(" • ETA: {}", eta_str)
+                } else {
+                    String::new()
+                };
+                
                 column![
                     row![
                         theme::text_micro(localization.t("launcher.status.step"), ctx),
@@ -201,7 +230,12 @@ pub fn view<'a>(
                     )
                     .height(4)
                     .width(Length::Fill)
-                    .style(move |t| theme::container_style_transparent(&palette, t))
+                    .style(move |t| theme::container_style_transparent(&palette, t)),
+                    row![
+                        theme::text_micro(format!("{}{}", size_info, eta_info), ctx),
+                        Space::new().width(Length::Fill),
+                        theme::text_micro(status_text, ctx)
+                    ]
                 ]
                 .spacing(5)
             } else {

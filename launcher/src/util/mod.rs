@@ -12,7 +12,6 @@ use libc;
 
 pub mod icons;
 pub mod image_cache;
-pub mod ui_helpers;
 pub mod win_job;
 
 /// Cache global para evitar syscalls repetidas de current_exe()
@@ -831,7 +830,6 @@ pub fn get_memory_stats() -> MemoryStats {
     let current_mb = current as f64 / 1024.0 / 1024.0;
     
     MemoryStats {
-        current_bytes: current,
         current_mb: current_mb,
         auto_trims: AUTO_TRIM_COUNT.load(Ordering::Relaxed),
         last_activity: LAST_ACTIVITY.lock()
@@ -843,7 +841,6 @@ pub fn get_memory_stats() -> MemoryStats {
 /// Estadísticas de memoria para monitoreo
 #[derive(Debug, Clone)]
 pub struct MemoryStats {
-    pub current_bytes: u64,
     pub current_mb: f64,
     pub auto_trims: u64,
     pub last_activity: Duration,

@@ -19,7 +19,6 @@ pub mod zip_mods;
 
 // Re-exports for easier access
 pub use install::ensure_installed;
-pub use launch::{launch_game, launch_game_with_async_agent};
+pub use launch::launch_game_with_async_agent;
 pub use paths::GamePaths;
-pub use agent::quick_verify_agent;
 pub use status::{LauncherStatus, calculate_status};

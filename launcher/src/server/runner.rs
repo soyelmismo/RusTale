@@ -1,4 +1,3 @@
-use crate::game::paths::GamePaths;
 use crate::server::assets::{
     find_best_client_version, generate_server_args_with_direct_assets, validate_client_version,
 };

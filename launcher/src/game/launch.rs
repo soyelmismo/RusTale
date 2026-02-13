@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tokio::process::{Child, Command};
 use std::sync::{Arc, atomic::AtomicBool};
 
@@ -19,21 +19,6 @@ pub fn launch_game_with_async_agent(
     launch_game_with_agent(player_name, player_uuid, executable_path, game_working_dir, user_data_dir, java_exec, extra_auth_args, env_vars, Some(client))
 }
 
-/// Launches the Hytale game client asynchronously
-/// This function is "dumb" - it only executes the game with the provided paths.
-/// All verification and path resolution should be done by the caller.
-pub fn launch_game(
-    player_name: &str,
-    player_uuid: &str,
-    executable_path: &PathBuf,  // Absolute path to HytaleClient.exe
-    game_working_dir: &PathBuf, // Absolute path to the version directory
-    user_data_dir: &PathBuf,    // Absolute path to UserData directory
-    java_exec: &str,            // Path to java executable
-    extra_auth_args: Vec<String>,
-    env_vars: std::collections::HashMap<String, String>,
-) -> Result<Child> {
-    launch_game_with_agent(player_name, player_uuid, executable_path, game_working_dir, user_data_dir, java_exec, extra_auth_args, env_vars, None)
-}
 
 /// Launches the Hytale game client with optional async agent download
 /// Internal function that handles both the game launch and optional agent download

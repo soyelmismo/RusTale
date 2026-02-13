@@ -68,7 +68,7 @@ pub fn build_uber_shader() -> String {
         super::lsd_shader::DEFAULT_FALLBACK.to_string()
     };
 
-    let mut safe_content = entropy_src;
+    let safe_content = entropy_src;
     
     // Limpieza de compatibilidad por si acaso (atan2 -> atan en WGSL estandar viejo)
     //safe_content = safe_content.replace("atan2(", "atan("); 

@@ -71,9 +71,6 @@ pub trait ModRepository: Send + Sync {
     
     // Obtener versiones disponibles para un Mod
     async fn get_versions(&self, mod_id: &str) -> Result<Vec<GenericFile>>;
-    
-    // Verificar si hay update para un archivo especifico
-    async fn get_latest_compatible(&self, mod_id: &str, current_file_id: &str) -> Result<Option<GenericFile>>;
 }
 
 #[derive(Debug, Clone)]

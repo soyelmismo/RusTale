@@ -6,8 +6,6 @@ pub async fn ensure_java_available(base_dir: &std::path::Path) -> anyhow::Result
     let latest_dir = jre_base_dir.join("latest");
 
     if crate::java::is_jre_installed_at(&latest_dir) {
-        // Java ya esta disponible
-        let java_exec = crate::java::get_java_exec(&base_dir.to_path_buf())?;
 
         // Movemos la operacion bloqueante a un hilo separado para no congelar la UI/LSD
         let version =
@@ -15,9 +13,7 @@ pub async fn ensure_java_available(base_dir: &std::path::Path) -> anyhow::Result
         // -------------------
 
         return Ok(JavaInfo {
-            path: java_exec,
             version,
-            source: JavaSource::Managed,
         });
     }
 
@@ -33,9 +29,6 @@ pub async fn ensure_java_available(base_dir: &std::path::Path) -> anyhow::Result
     )
     .await?;
 
-    // 3. Verificar que se instalo correctamente
-    let java_exec = crate::java::get_java_exec(&base_dir.to_path_buf())?;
-
     // Clonamos latest_dir antes de moverlo al closure
     let latest_dir_clone = latest_dir.clone();
     let version =
@@ -43,9 +36,7 @@ pub async fn ensure_java_available(base_dir: &std::path::Path) -> anyhow::Result
     // ---------------------------
 
     Ok(JavaInfo {
-        path: java_exec,
         version,
-        source: JavaSource::Managed,
     })
 }
 
@@ -88,12 +79,6 @@ fn get_java_version_sync(jre_dir: &std::path::Path) -> anyhow::Result<String> {
 
 #[derive(Debug, Clone)]
 pub struct JavaInfo {
-    pub path: String,
     pub version: String,
-    pub source: JavaSource,
 }
 
-#[derive(Debug, Clone)]
-pub enum JavaSource {
-    Managed,
-}

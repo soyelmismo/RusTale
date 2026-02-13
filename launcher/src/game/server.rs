@@ -45,8 +45,6 @@ struct RefreshRequest {
 
 #[derive(Deserialize, Debug)]
 struct AuthorizeRequest {
-    #[serde(rename = "identityToken")]
-    identity_token: String,
     // El servidor al que te quieres unir
     #[serde(alias = "server_id")]
     audience: Option<String>,
@@ -84,8 +82,6 @@ struct ServerAutoAuthRequest {
     server_name: Option<String>,
     #[serde(alias = "serverName")]
     server_name_alt: Option<String>,
-    #[serde(flatten)]
-    extra: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Serialize)]

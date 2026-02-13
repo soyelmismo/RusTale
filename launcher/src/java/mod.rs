@@ -5,12 +5,10 @@ use std::sync::{Arc, atomic::AtomicBool};
 #[derive(Debug, serde::Deserialize)]
 struct JREPlatform {
     url: String,
-    sha256: String,
 }
 
 #[derive(Debug, serde::Deserialize)]
 struct JREJSON {
-    version: String,
     download_url: std::collections::HashMap<String, std::collections::HashMap<String, JREPlatform>>,
 }
 
@@ -85,11 +83,26 @@ async fn download_jre_from_data(
             client,
             &platform.url,
             &cache_file,
-            |pct, speed| {
+            |pct, speed, total, downloaded, eta| {
+                let size_info = if total > 0 {
+                    format!("{} / {}", 
+                        crate::game::downloader::format_bytes(downloaded), 
+                        crate::game::downloader::format_bytes(total)
+                    )
+                } else {
+                    crate::game::downloader::format_bytes(downloaded)
+                };
+                
+                let eta_info = if let Some(eta_str) = &eta {
+                    format!(" • ETA: {}", eta_str)
+                } else {
+                    String::new()
+                };
+                
                 progress_callback(
                     "jre",
                     pct as f64,
-                    &format!("Downloading JRE... ({})", speed),
+                    &format!("Downloading JRE... ({}{}{})", speed, size_info, eta_info),
                 );
             },
             cancel_token,
@@ -165,21 +178,6 @@ fn get_arch_name() -> &'static str {
     }
 }
 
-fn verify_sha256(path: &PathBuf, expected: &str) -> Result<()> {
-    use sha2::{Digest, Sha256};
-
-    let data = std::fs::read(path).context("Failed to read file for verification")?;
-    let mut hasher = Sha256::new();
-    hasher.update(&data);
-    let result = hasher.finalize();
-    let actual = hex::encode(result);
-
-    if actual.to_lowercase() != expected.to_lowercase() {
-        anyhow::bail!("SHA256 mismatch");
-    }
-    Ok(())
-}
-
 fn extract_archive(archive_path: &PathBuf, dest_dir: &PathBuf) -> Result<()> {
     std::fs::create_dir_all(dest_dir)?;
 
@@ -200,31 +198,6 @@ fn extract_archive(archive_path: &PathBuf, dest_dir: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn flatten_jre_dir(jre_dir: &PathBuf) -> Result<()> {
-    let entries: Vec<_> = std::fs::read_dir(jre_dir)?.filter_map(|e| e.ok()).collect();
-
-    // If there is only one directory inside, move everything up
-    if entries.len() != 1 {
-        return Ok(());
-    }
-
-    let entry = &entries[0];
-    if !entry.path().is_dir() {
-        return Ok(());
-    }
-
-    let nested = entry.path();
-    let files: Vec<_> = std::fs::read_dir(&nested)?.filter_map(|e| e.ok()).collect();
-
-    for f in files {
-        let old_path = f.path();
-        let new_path = jre_dir.join(f.file_name());
-        std::fs::rename(&old_path, &new_path)?;
-    }
-
-    std::fs::remove_dir_all(&nested)?;
-    Ok(())
-}
 
 async fn download_jre_fallback(
     client: &reqwest::Client,
@@ -258,11 +231,26 @@ async fn download_jre_fallback(
             client,
             &jre_url,
             &cache_file,
-            |pct, speed| {
+            |pct, speed, total, downloaded, eta| {
+                let size_info = if total > 0 {
+                    format!("{} / {}", 
+                        crate::game::downloader::format_bytes(downloaded), 
+                        crate::game::downloader::format_bytes(total)
+                    )
+                } else {
+                    crate::game::downloader::format_bytes(downloaded)
+                };
+                
+                let eta_info = if let Some(eta_str) = &eta {
+                    format!(" • ETA: {}", eta_str)
+                } else {
+                    String::new()
+                };
+                
                 progress_callback(
                     "jre",
                     pct as f64,
-                    &format!("Downloading JRE from fallback... ({})", speed),
+                    &format!("Downloading JRE from fallback... ({}{}{})", speed, size_info, eta_info),
                 );
             },
             cancel_token,
