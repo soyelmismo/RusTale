@@ -608,7 +608,7 @@ fn get_memory_usage() -> u64 {
             pmc.cb = mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
             
             if K32GetProcessMemoryInfo(GetCurrentProcess(), &mut pmc, pmc.cb) != 0 {
-                pmc.WorkingSetSize
+                pmc.WorkingSetSize as u64
             } else {
                 0
             }
