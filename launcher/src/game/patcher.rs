@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::io::{BufReader, BufWriter};
 use std::sync::{Arc, atomic::AtomicBool};
 use std::{path::PathBuf, process::Stdio};
 use tokio::io::AsyncBufReadExt;
@@ -73,21 +73,16 @@ pub async fn install_butler(
 
     let zip_path = tools_dir.join("butler.zip");
 
-    // Download using downloader utility with progress
-    crate::game::downloader::download_file(
+    // Download with automatic fallback
+    download_with_fallback(
         client,
         url,
         &zip_path,
-        |pct, speed| {
-            progress_callback(
-                "butler",
-                pct as f64,
-                &format!("Downloading Butler... ({})", speed),
-            );
-        },
+        |pct, speed| progress_callback("butler", pct as f64, &format!("Downloading Butler... ({})", speed)),
         cancel_token,
-    )
-    .await?;
+        |fallback_data| crate::game::fallback::get_butler_url(fallback_data),
+        "Butler",
+    ).await?;
 
     progress_callback("butler", 70.0, "Extracting Butler...");
 
@@ -177,6 +172,25 @@ pub async fn find_latest_version(
     }
 
     if found_base == 0 {
+        // Try fallback API
+        println!("Main server failed, trying fallback API...");
+        match crate::game::fallback::fetch_fallback_data(client).await {
+            Ok(fallback_data) => {
+                match crate::game::fallback::get_latest_version(&fallback_data, channel) {
+                    Ok(version) => {
+                        println!("Found latest version via fallback: {}", version);
+                        return Ok(version);
+                    }
+                    Err(e) => {
+                        println!("Fallback API failed to get version: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                println!("Failed to fetch fallback data: {}", e);
+            }
+        }
+
         // Double check if at least version 1 exists to ensure server is reachable
         if version_exists(1).await {
             found_base = 1;
@@ -292,7 +306,90 @@ pub async fn find_latest_version(
     Ok(latest)
 }
 
-/// Downloads a PWR patch file
+/// Downloads a server patch file with automatic fallback
+pub async fn download_server_pwr(
+    client: &reqwest::Client,
+    channel: &str,
+    target_version: i32,
+    dest: &PathBuf,
+    progress_callback: impl Fn(f32, &str),
+    cancel_token: Option<Arc<AtomicBool>>,
+) -> anyhow::Result<()> {
+    let os = std::env::consts::OS;
+    let arch = "amd64";
+    let url = format!(
+        "https://game-patches.hytale.com/patches/{}/{}/{}/0/{}.pwr",
+        os, arch, channel, target_version
+    );
+    
+    download_with_fallback(
+        client,
+        &url,
+        dest,
+        progress_callback,
+        cancel_token,
+        |fallback_data| crate::game::fallback::get_version_url(fallback_data, channel, target_version),
+        "server PWR file",
+    ).await
+}
+
+/// Downloads a file with automatic fallback to alternative API
+pub async fn download_with_fallback<F>(
+    client: &reqwest::Client,
+    primary_url: &str,
+    dest: &PathBuf,
+    progress_callback: impl Fn(f32, &str),
+    cancel_token: Option<Arc<AtomicBool>>,
+    fallback_url_resolver: F,
+    file_type: &str,
+) -> anyhow::Result<()>
+where
+    F: FnOnce(&crate::game::fallback::FallbackAPI) -> anyhow::Result<String>,
+{
+    // Try primary download first
+    let download_result = crate::game::downloader::download_file(
+        client,
+        primary_url,
+        dest,
+        |pct, speed| progress_callback(pct, &speed),
+        cancel_token.clone(),
+    )
+    .await;
+
+    // If primary fails, try fallback
+    if download_result.is_err() {
+        println!("Main {} download failed, trying fallback API...", file_type);
+        match crate::game::fallback::fetch_fallback_data(client).await {
+            Ok(fallback_data) => {
+                match fallback_url_resolver(&fallback_data) {
+                    Ok(fallback_url) => {
+                        println!("Downloading {} from fallback: {}", file_type, fallback_url);
+                        crate::game::downloader::download_file(
+                            client,
+                            &fallback_url,
+                            dest,
+                            |pct, speed| progress_callback(pct, &speed),
+                            cancel_token,
+                        )
+                        .await?;
+                    }
+                    Err(e) => {
+                        println!("Fallback API failed to get {} URL: {}", file_type, e);
+                        return download_result; // Return original error
+                    }
+                }
+            }
+            Err(e) => {
+                println!("Failed to fetch fallback data: {}", e);
+                return download_result; // Return original error
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Downloads a PWR patch file with automatic fallback
 pub async fn download_pwr(
     client: &reqwest::Client,
     channel: &str,
@@ -300,20 +397,13 @@ pub async fn download_pwr(
     target_version: i32,
     progress_callback: &impl Fn(&str, f64, &str),
     cancel_token: Option<Arc<AtomicBool>>,
-) -> Result<PathBuf> {
-    let cache_dir = crate::config::get_cache_dir("game_patches").await;
-
+) -> anyhow::Result<PathBuf> {
+    let cache_dir = crate::config::get_cache_dir("patches").await;
     let os_name = std::env::consts::OS;
     let arch = get_arch_name();
 
     let file_name = format!("{}-{}.pwr", prev_version, target_version);
     let dest = cache_dir.join(&file_name);
-
-    // Check if already cached
-    if dest.exists() {
-        progress_callback("download", 40.0, "PWR file cached");
-        return Ok(dest);
-    }
 
     let url_remote = format!(
         "https://game-patches.hytale.com/patches/{}/{}/{}/{}/{}.pwr",
@@ -329,8 +419,8 @@ pub async fn download_pwr(
         ),
     );
 
-    // Download file with progress
-    crate::game::downloader::download_file(
+    // Download with automatic fallback
+    download_with_fallback(
         client,
         &url_remote,
         &dest,
@@ -342,8 +432,9 @@ pub async fn download_pwr(
             );
         },
         cancel_token,
-    )
-    .await?;
+        |fallback_data| crate::game::fallback::get_version_url(fallback_data, channel, target_version),
+        "PWR file",
+    ).await?;
 
     progress_callback("download", 40.0, "PWR file downloaded");
 

@@ -474,15 +474,19 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         let pwr_path = cache_dir.join(&pwr_name);
 
         if !pwr_path.exists() {
-            let os = std::env::consts::OS;
-            let arch = "amd64";
-            let url = format!(
-                "https://game-patches.hytale.com/patches/{}/{}/{}/0/{}.pwr",
-                os, arch, config.branch, target_ver_num
-            );
-            println!("Downloading Patch: {}", url);
-            crate::game::downloader::download_file(&client, &url, &pwr_path, |_, _| {}, None)
-                .await?;
+            println!("Downloading Patch for version {}", target_ver_num);
+            
+            // Download with automatic fallback (URL logic embedded)
+            if let Err(e) = crate::game::patcher::download_server_pwr(
+                &client,
+                &config.branch,
+                target_ver_num,
+                &pwr_path,
+                |pct, _speed| println!("Downloading patch... {}%", pct),
+                None,
+            ).await {
+                anyhow::bail!("Failed to download server patch: {}", e);
+            }
         }
 
         println!("Applying patch via Butler...");

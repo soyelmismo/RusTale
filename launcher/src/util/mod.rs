@@ -284,15 +284,14 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
     cmd.env("DISABLE_SENTRY", "1");
 
     // --- NEW: JAVA AGENT INJECTION (SMART CHECK) ---
-    // Use GamePaths for consistency with runner.rs
-    let paths = crate::game::paths::GamePaths::new(bin_dir.parent().and_then(|p| p.parent()).and_then(|p| p.parent()).unwrap_or(bin_dir).to_path_buf());
+    // Use GamePaths with the proper data_dir
+    let paths = crate::game::paths::GamePaths::new(crate::config::get_app_dir());
     let agent_path = paths.dualauth_agent();
     
     if agent_path.exists() {
-        // FIX CRÍTICO: Verificar si el argumento YA ESTÁ PRESENTE.
-        // Esto evita la duplicación cuando server/runner.rs ya lo ha añadido.
-        let agent_filename = agent_path.file_name().and_then(|f| f.to_str()).unwrap_or("dualauth-agent.jar");
-        let already_present = args.iter().any(|a| a.contains("-javaagent") && a.contains(agent_filename));
+        // Check if Java Agent is already present to avoid duplication
+        let agent_arg = format!("-javaagent:{}", agent_path.to_string_lossy());
+        let already_present = args.iter().any(|a| a == &agent_arg);
 
         if !already_present {
             println!("[Proxy] Injecting Java Agent: {:?}", agent_path);

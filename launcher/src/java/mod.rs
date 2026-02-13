@@ -16,35 +16,44 @@ struct JREJSON {
 
 /// Downloads and installs JRE if not already installed.
 /// Installs into `.../RusTale/tools/jre/latest` to persist across game deletions.
+/// Downloads JRE with automatic fallback
 pub async fn download_jre(
     client: &reqwest::Client,
     base_dir: &PathBuf,
     progress_callback: impl Fn(&str, f64, &str),
     cancel_token: Option<Arc<AtomicBool>>,
 ) -> Result<()> {
-    // Define the persistent tools directory
-    let tools_dir = base_dir.join("tools");
-    let jre_base_dir = tools_dir.join("jre");
-    let latest_dir = jre_base_dir.join("latest");
-
-    // Check if JRE is already installed and valid
-    if is_jre_installed_at(&latest_dir) {
-        let java_exec = latest_dir.join("bin").join("java");
-        let _ = crate::util::make_executable(&java_exec).await;
-        progress_callback("jre", 100.0, "JRE already installed");
-        return Ok(());
-    }
-
-    progress_callback("jre", 0.0, "Fetching JRE metadata...");
-
+    // Try primary JRE API first
     let resp = client
         .get("https://launcher.hytale.com/version/release/jre.json")
         .send()
-        .await
-        .context("Failed to fetch JRE info")?;
+        .await;
 
-    let jre_data: JREJSON = resp.json().await.context("Failed to parse JRE info")?;
+    match resp {
+        Ok(response) => {
+            if response.status().is_success() {
+                let jre_data: JREJSON = response.json().await.context("Failed to parse JRE info")?;
+                download_jre_from_data(client, &jre_data, base_dir, &progress_callback, cancel_token).await
+            } else {
+                println!("Main JRE API failed, trying fallback...");
+                download_jre_fallback(client, base_dir, &progress_callback, cancel_token).await
+            }
+        }
+        Err(e) => {
+            println!("Main JRE API error: {}, trying fallback...", e);
+            download_jre_fallback(client, base_dir, &progress_callback, cancel_token).await
+        }
+    }
+}
 
+/// Downloads JRE from parsed data
+async fn download_jre_from_data(
+    client: &reqwest::Client,
+    jre_data: &JREJSON,
+    base_dir: &PathBuf,
+    progress_callback: &impl Fn(&str, f64, &str),
+    cancel_token: Option<Arc<AtomicBool>>,
+) -> anyhow::Result<()> {
     let os_name = get_os_name();
     let arch = get_arch_name();
 
@@ -58,9 +67,12 @@ pub async fn download_jre(
         arch, os_name
     ))?;
 
-    // Use a cache directory for the zip file
+    let paths = crate::game::paths::GamePaths::new(base_dir.clone());
+    let jre_base_dir = paths.jre();
+    let latest_dir = jre_base_dir.join("latest");
     let cache_dir = crate::config::get_cache_dir("jre").await;
     tokio::fs::create_dir_all(&jre_base_dir).await?;
+    tokio::fs::create_dir_all(&cache_dir).await?;
 
     let file_name = platform.url.split('/').last().unwrap_or("jre.zip");
     let cache_file = cache_dir.join(file_name);
@@ -77,7 +89,7 @@ pub async fn download_jre(
                 progress_callback(
                     "jre",
                     pct as f64,
-                    &format!("Downloading {}... ({})", file_name, speed),
+                    &format!("Downloading JRE... ({})", speed),
                 );
             },
             cancel_token,
@@ -85,59 +97,26 @@ pub async fn download_jre(
         .await?;
     }
 
-    progress_callback("jre", 70.0, "Verifying JRE integrity...");
+    progress_callback("jre", 70.0, "Extracting JRE...");
 
-    let cache_file_clone = cache_file.clone();
-    let expected_sha = platform.sha256.clone();
-
-    // Verify SHA256 in a blocking task
-    tokio::task::spawn_blocking(move || verify_sha256(&cache_file_clone, &expected_sha))
-        .await
-        .context("SHA task join error")??;
-
-    progress_callback("jre", 80.0, "Extracting JRE...");
-
-    // Extract to a temporary folder first
-    let temp_dir = jre_base_dir.join(format!("tmp-{}", &jre_data.version));
-    if temp_dir.exists() {
-        tokio::fs::remove_dir_all(&temp_dir).await?;
-    }
-
-    let cache_file_clone = cache_file.clone();
-    let temp_dir_clone = temp_dir.clone();
-
-    // Extract in a blocking task
-    tokio::task::spawn_blocking(move || {
-        extract_archive(&cache_file_clone, &temp_dir_clone)?;
-        flatten_jre_dir(&temp_dir_clone)
-    })
-    .await
-    .context("Extraction task join error")??;
-
-    progress_callback("jre", 95.0, "Finalizing installation...");
-
-    // Remove old version if exists
+    // Clean up old installation
     if latest_dir.exists() {
         tokio::fs::remove_dir_all(&latest_dir).await?;
     }
+    tokio::fs::create_dir_all(&latest_dir).await?;
 
-    // Atomic rename (or move)
-    tokio::fs::rename(&temp_dir, &latest_dir)
-        .await
-        .context("Failed to move JRE to final location")?;
+    // Extract using spawn_blocking to avoid UI freeze
+    let cache_file_clone = cache_file.clone();
+    let latest_dir_clone = latest_dir.clone();
 
-    // Set executable permissions on Unix
-    let java_exec = latest_dir.join("bin").join("java");
-    let _ = crate::util::make_executable(&java_exec).await;
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        extract_archive(&cache_file_clone, &latest_dir_clone)?;
+        Ok(())
+    })
+    .await
+    .context("JRE extraction task failed")??;
 
-    // --- NUEVO: Limpieza del ZIP ---
-    // Como ya instalamos, borramos el ZIP para ahorrar espacio y evitar reusar uno corrupto en el futuro
-    if cache_file.exists() {
-        let _ = tokio::fs::remove_file(&cache_file).await;
-    }
-    // -------------------------------
-
-    progress_callback("jre", 100.0, "JRE ready");
+    progress_callback("jre", 100.0, "JRE installed");
 
     Ok(())
 }
@@ -244,5 +223,73 @@ fn flatten_jre_dir(jre_dir: &PathBuf) -> Result<()> {
     }
 
     std::fs::remove_dir_all(&nested)?;
+    Ok(())
+}
+
+async fn download_jre_fallback(
+    client: &reqwest::Client,
+    base_dir: &PathBuf,
+    progress_callback: &impl Fn(&str, f64, &str),
+    cancel_token: Option<Arc<AtomicBool>>,
+) -> anyhow::Result<()> {
+    println!("Using fallback JRE download...");
+    
+    let fallback_data = crate::game::fallback::fetch_fallback_data(client).await
+        .context("Failed to fetch fallback data")?;
+    
+    let jre_url = crate::game::fallback::get_jre_url(&fallback_data)
+        .context("Failed to get JRE URL from fallback")?;
+    
+    let paths = crate::game::paths::GamePaths::new(base_dir.clone());
+    let jre_base_dir = paths.jre();
+    let latest_dir = jre_base_dir.join("latest");
+    let cache_dir = crate::config::get_cache_dir("jre").await;
+    tokio::fs::create_dir_all(&jre_base_dir).await?;
+    tokio::fs::create_dir_all(&cache_dir).await?;
+
+    let file_name = jre_url.split('/').last().unwrap_or("jre.zip");
+    let cache_file = cache_dir.join(file_name);
+
+    // Download if not cached
+    if !cache_file.exists() {
+        progress_callback("jre", 10.0, &format!("Downloading {} from fallback...", file_name));
+
+        crate::game::downloader::download_file(
+            client,
+            &jre_url,
+            &cache_file,
+            |pct, speed| {
+                progress_callback(
+                    "jre",
+                    pct as f64,
+                    &format!("Downloading JRE from fallback... ({})", speed),
+                );
+            },
+            cancel_token,
+        )
+        .await?;
+    }
+
+    progress_callback("jre", 70.0, "Extracting JRE...");
+
+    // Clean up old installation
+    if latest_dir.exists() {
+        tokio::fs::remove_dir_all(&latest_dir).await?;
+    }
+    tokio::fs::create_dir_all(&latest_dir).await?;
+
+    // Extract using spawn_blocking to avoid UI freeze
+    let cache_file_clone = cache_file.clone();
+    let latest_dir_clone = latest_dir.clone();
+
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        extract_archive(&cache_file_clone, &latest_dir_clone)?;
+        Ok(())
+    })
+    .await
+    .context("JRE extraction task failed")??;
+
+    progress_callback("jre", 100.0, "JRE installed from fallback");
+
     Ok(())
 }
