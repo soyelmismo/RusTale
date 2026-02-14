@@ -2,6 +2,8 @@ use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::sync::{Arc, atomic::AtomicBool};
 
+pub mod proxy;
+
 #[derive(Debug, serde::Deserialize)]
 struct JREPlatform {
     url: String,
@@ -66,7 +68,7 @@ async fn download_jre_from_data(
     ))?;
 
     let paths = crate::game::paths::GamePaths::new(base_dir.clone());
-    let jre_base_dir = paths.jre();
+    let jre_base_dir = paths.tools().join("jre");
     let latest_dir = jre_base_dir.join("latest");
     let cache_dir = crate::config::get_cache_dir("jre").await;
     tokio::fs::create_dir_all(&jre_base_dir).await?;
@@ -217,7 +219,7 @@ async fn download_jre_fallback(
         .context("Failed to get JRE URL from fallback")?;
     
     let paths = crate::game::paths::GamePaths::new(base_dir.clone());
-    let jre_base_dir = paths.jre();
+    let jre_base_dir = paths.tools().join("jre");
     let latest_dir = jre_base_dir.join("latest");
     let cache_dir = crate::config::get_cache_dir("jre").await;
     tokio::fs::create_dir_all(&jre_base_dir).await?;

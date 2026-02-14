@@ -320,18 +320,6 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
                     eprintln!("Failed to copy Server folder: {}", e);
                 } else {
                     println!("Files copied successfully!");
-
-                    // CLEANUP: If we copied a patched server jar, restore the original
-                    let potential_original = dst_server.join("HytaleServer.original");
-                    let potential_jar = dst_server.join("HytaleServer.jar");
-
-                    if potential_original.exists() {
-                        println!("Found local .original backup. Restoring vanilla state...");
-                        if let Err(e) = tokio::fs::rename(&potential_original, &potential_jar).await
-                        {
-                            eprintln!("Failed to restore original JAR: {}", e);
-                        }
-                    }
                 }
             }
         }
@@ -443,20 +431,8 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         }
     }
 
-    // JAR recovery fallback - check for .original backup before downloading
-    let server_original_fallback = install_dir.join("Server").join("HytaleServer.original");
-
-    // New pre-check logic
-    let jar_available = if server_jar_raw.exists() {
-        true
-    } else if server_original_fallback.exists() {
-        println!("[Recovery] JAR missing but .original found. Restoring vanilla state...");
-        tokio::fs::copy(&server_original_fallback, &server_jar_raw)
-            .await
-            .is_ok()
-    } else {
-        false
-    };
+    // Check if we need to download based on JAR availability
+    let jar_available = server_jar_raw.exists();
 
     // Check if we need to download based on JAR and assets availability
     let assets_exist_in_server = local_assets_path.exists();
@@ -545,13 +521,9 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         }
     }
 
-    // 4. Preparar Directorio de Ejecucion (Ensure vanilla state)
-    let server_dir = server_jar_raw.parent().unwrap();
-    if let Err(e) = crate::game::patcher::ensure_vanilla_jar(server_dir) {
-        eprintln!("[Runner] Warning: Failed to ensure vanilla jar: {}", e);
-    }
+    // 4. Preparar Directorio de Ejecucion
     let target_jar_path = server_jar_raw.clone();
-    println!("Using vanilla JAR: {:?}", target_jar_path);
+    println!("Using JAR: {:?}", target_jar_path);
 
     // 5. Preparar Entorno de Ejecucion
     println!("[4/5] Preparing Runtime...");
@@ -561,7 +533,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
 
     // --- PROXY SETUP (SERVER) ---
     // Ensure the proxy is active and updated
-    let final_java = match crate::game::patcher::setup_java_proxy(&java_path) {
+    let final_java = match crate::java::proxy::setup_java_proxy(&java_path) {
         Ok(p) => {
             println!("[Runner] (Server) Java Proxy updated and active.");
             p.to_string_lossy().to_string()

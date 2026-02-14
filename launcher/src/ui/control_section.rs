@@ -219,11 +219,6 @@ pub fn view<'a>(
                     if total_bytes > 0 {
                         column![
                             row![
-                                theme::text_micro("Downloaded:", ctx),
-                                Space::new().width(Length::Fill),
-                                theme::text_micro(format!("{:.0}%", download_progress), ctx)
-                            ],
-                            row![
                                 theme::text_micro(format!("{}/{}", 
                                     format_bytes(downloaded_bytes), 
                                     format_bytes(total_bytes)

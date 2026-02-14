@@ -76,21 +76,6 @@ pub async fn repair_installation(
         }
     }
 
-    // 4. Restore Original Server JAR
-    progress_callback(80.0, "Restoring Original Server...");
-    let server_folder = version_root.join("Server");
-    if let Err(e) = crate::game::patcher::ensure_vanilla_jar(&server_folder) {
-        eprintln!(
-            "[Repair] Warning: Failed to restore Server folder JAR: {}",
-            e
-        );
-    }
-
-    // Also check root for cases where Server folder is not used or JAR is at root
-    if let Err(e) = crate::game::patcher::ensure_vanilla_jar(&version_root) {
-        eprintln!("[Repair] Warning: Failed to restore Root folder JAR: {}", e);
-    }
-
     // Limpiar cache de parches de Aurora (opcional pero recomendado)
     let _ = crate::game::patcher::clean_patches_cache(&|_, _, _, _, _, _| {}).await;
 

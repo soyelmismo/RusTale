@@ -221,29 +221,6 @@ pub async fn ensure_installed(
     if files_exist && version_manifest.current_local == 0 && is_latest {
         progress_callback("check", 50.0, "Detected manual installation. Adopting...", 0, 0, None);
 
-        // CLEANUP: Check if there's a leftover .original file from a previous patch/mod
-        // and restore it to ensure we are adopting a clean state.
-        let paths = crate::game::paths::GamePaths::new(base_dir.clone());
-        let client_path = paths.client_exe(channel, &install_dir_name);
-
-        let mut original_path = client_path.clone().into_os_string();
-        original_path.push(".original");
-        let original_path = PathBuf::from(original_path);
-
-        if fs::metadata(&original_path).await.is_ok() {
-            progress_callback(
-                "check",
-                55.0,
-                "Found dirty patch. Restoring original binary...",
-                0,
-                0,
-                None,
-            );
-            // Restore: move .original -> .exe (overwriting if necessary)
-            fs::rename(&original_path, &client_path).await?;
-            println!("Restored original binary from {:?}", original_path);
-        }
-
         save_local_version(base_dir, channel, remote_version).await?;
 
         version_manifest.current_local = remote_version;

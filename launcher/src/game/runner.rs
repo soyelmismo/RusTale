@@ -187,7 +187,7 @@ impl Recipe for Runner {
 
                 if settings.enable_online_fix {
                     println!("[Runner] Enabling Online Fix (Hijack Mode)...");
-                    match crate::game::patcher::setup_java_proxy(&java_real_path) {
+                    match crate::java::proxy::setup_java_proxy(&java_real_path) {
                         Ok(p) => {
                             java_exec_for_client = p.to_string_lossy().to_string();
                         }
@@ -199,7 +199,7 @@ impl Recipe for Runner {
                     }
                 } else {
                     println!("[Runner] Online Fix Disabled. Ensuring vanilla state...");
-                    if let Err(e) = crate::game::patcher::remove_java_proxy(&java_real_path) {
+                    if let Err(e) = crate::java::proxy::remove_java_proxy(&java_real_path) {
                         eprintln!("[Runner] Failed to remove Java Proxy: {}", e);
                     }
                     java_exec_for_client = java_real_path.to_string_lossy().to_string();
@@ -284,14 +284,6 @@ impl Recipe for Runner {
                                 break;
                             }
                         }
-                    }
-
-                    // Ensure vanilla JAR state (restore from .original if exists)
-                    if let Err(e) = crate::game::patcher::ensure_vanilla_jar(&server_dir) {
-                        eprintln!(
-                            "[Runner] Warning: Failed to ensure vanilla jar state: {}",
-                            e
-                        );
                     }
 
                     // Verificamos si al menos el server_dir existe
