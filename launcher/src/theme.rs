@@ -1694,21 +1694,29 @@ fn get_seeded_disparity(offset: (f32, f32), seed: usize, intensity: f32) -> (f32
         return (0.0, 0.0);
     }
 
-    let s = (seed % 100) as f32; // Limit seed magnitude
-
-    // 2. Reduce sin/cos usage. Use simple pseudo-random hash logic for static scatter.
-    // f32::sin is costly in a loop of 1000s of chars.
-    let scatter_x = ((s * 1.5).fract() - 0.5) * 0.4; // Replaces sin() scatter
-    let scatter_y = ((s * 2.5).fract() - 0.5) * 0.4;
-
-    // Only perform heavy trig for the chaotic movement part
-    let chaotic_offset_x = (offset.0 - offset.1 * 0.5) * 0.85;
-    let chaotic_offset_y = (offset.0 * 0.5 + offset.1) * 0.85;
-
-    (
-        (scatter_x + chaotic_offset_x) * intensity,
-        (scatter_y + chaotic_offset_y) * intensity,
-    )
+    // 1. Hash de alta calidad para cada semilla (valores únicos por letra)
+    let s = seed as f32;
+    let hash_x = ((s * 12.9898).fract() * 43758.5453).fract();
+    let hash_y = ((s * 78.233).fract() * 43758.5453).fract();
+    
+    // 2. Componente caótico temporal con múltiples frecuencias primas (no armónicas)
+    let t1 = offset.0 * 1.3;  // Frecuencia prima 1
+    let t2 = offset.1 * 2.7;  // Frecuencia prima 2 (no armónica de 1.3)
+    let t3 = (offset.0 + offset.1) * 5.3;  // Frecuencia prima 3
+    
+    // 3. Mapa caótico no lineal (evita patrones predecibles)
+    let chaos_x = (t1.sin() * 0.5 + t2.cos() * 0.3 + (t1 * t3).sin() * 0.2) * hash_x;
+    let chaos_y = (t2.sin() * 0.4 + t3.cos() * 0.4 + (t2 * t1).cos() * 0.2) * hash_y;
+    
+    // 4. Dispersión aleatoria individual por letra
+    let scatter_x = (hash_x - 0.5) * 0.6;
+    let scatter_y = (hash_y - 0.5) * 0.6;
+    
+    // 5. Combinación final con entropía real
+    let final_x = (chaos_x + scatter_x) * intensity;
+    let final_y = (chaos_y + scatter_y) * intensity;
+    
+    (final_x, final_y)
 }
 
 pub fn text<'a, M: 'a>(

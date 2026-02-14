@@ -187,8 +187,12 @@ impl ModsState {
                 self.patch_mods.clear();
                 self.installing_ids.clear();
                 self.installed_ids.clear();
-                // Limpiar cache al reabrir para refrescar datos frescos
+                self.installing_mods.clear();
                 self.mods_with_updates.clear();
+                self.update_status_cache.clear();
+                self.selected_versions.clear();
+                self.loading_versions.clear();
+                self.cached_versions.clear();
 
                 let load_task = self.load_mods_task(base_dir.clone(), settings.clone());
                 // Tambien verificar actualizaciones automaticamente al abrir
@@ -657,7 +661,6 @@ impl ModsState {
                             .unwrap_or_default()
                             .to_string_lossy()
                             .to_string();
-                        let zpc = zp.clone();
                         tokio::task::spawn_blocking(move || {
                             crate::game::zip_mods::install_new_patch(
                                 zp,
@@ -676,7 +679,12 @@ impl ModsState {
                         .await
                         .map_err(|e| e.to_string())?
                         .map_err(|e| e.to_string())?;
-                        let _ = tokio::fs::remove_file(zpc).await;
+                        
+                        // Solo eliminar el archivo temporal si la instalación fue exitosa
+                        // El ZIP híbrido ya está copiado en Mods/ por apply_patch_logic
+                        println!("[Mods] Installation completed, keeping downloaded file for reference");
+                        // let _ = tokio::fs::remove_file(zpc).await; // COMENTADO - No eliminar archivo descargado
+                        
                         Ok(())
                     },
                     ModsMessage::PatchOperationFinished,
@@ -730,8 +738,13 @@ impl ModsState {
             }
             ModsMessage::PatchOperationFinished(res) => {
                 self.loading = false;
+                println!("[Mods] PatchOperationFinished received, checking file status...");
+                
                 match res {
-                    Ok(_) => Task::done(ModsMessage::RefreshLocalBackground),
+                    Ok(_) => {
+                        println!("[Mods] Patch operation successful, triggering RefreshLocalBackground");
+                        Task::done(ModsMessage::RefreshLocalBackground)
+                    },
                     Err(e) => {
                         self.error = Some(format!("Failed: {}", e));
                         Task::none()
@@ -1221,11 +1234,37 @@ impl ModsState {
         );
         Task::perform(
             async move {
+                println!("[Mods] load_mods_task starting, checking Mods directory before integrity check...");
+                
+                // Check Mods directory status before integrity check
+                let paths = crate::game::GamePaths::new(bdc.clone());
+                let mods_dir = paths.mods_dir(&c, &v);
+                if mods_dir.exists() {
+                    println!("[Mods] load_mods_task: Mods directory contents:");
+                    if let Ok(mut entries) = tokio::fs::read_dir(&mods_dir).await {
+                        let mut count = 0;
+                        while let Ok(Some(entry)) = entries.next_entry().await {
+                            println!("[Mods] load_mods_task:   {:?}", entry.path());
+                            count += 1;
+                        }
+                        println!("[Mods] load_mods_task: Total files in Mods: {}", count);
+                    }
+                } else {
+                    println!("[Mods] load_mods_task: Mods directory does not exist");
+                }
+                
+                // Run integrity verification first
+                if let Ok(fixed_mods) = crate::game::zip_mods::verify_patch_integrity(&paths, &c, &v) {
+                    if !fixed_mods.is_empty() {
+                        println!("[Mods] Integrity check fixed: {:?}", fixed_mods);
+                    }
+                }
+
                 let j = crate::game::mods::list_mods(&bdc, &c, &v)
                     .await
                     .map_err(|e| e.to_string())?;
                 let p = crate::game::zip_mods::list_patches(
-                    crate::game::GamePaths::new(bdc).core_patches_dir(&c, &v),
+                    paths.core_patches_dir(&c, &v),
                 )
                 .map_err(|e| e.to_string())?;
                 Ok((j, p))
