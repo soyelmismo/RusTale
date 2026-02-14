@@ -890,3 +890,43 @@ pub fn sanitize_path(path: &std::path::PathBuf) -> std::path::PathBuf {
     
     absolute
 }
+
+/// Detecta si estamos ejecutando en Wayland (solo Linux)
+/// Desactiva módulos custom de redimensionamiento y title bar si es true
+#[cfg(target_os = "linux")]
+pub fn is_wayland() -> bool {
+    // Método 1: Variable de entorno WAYLAND_DISPLAY (más confiable)
+    if std::env::var("WAYLAND_DISPLAY").is_ok() {
+        return true;
+    }
+    
+    // Método 2: Variable de entorno XDG_SESSION_TYPE
+    if let Ok(session_type) = std::env::var("XDG_SESSION_TYPE") {
+        if session_type.to_lowercase() == "wayland" {
+            return true;
+        }
+    }
+    
+    // Método 3: Variable de entorno WAYLAND_SOCKET
+    if std::env::var("WAYLAND_SOCKET").is_ok() {
+        return true;
+    }
+    
+    // Método 4: Verificar procesos de compositores Wayland (fallback)
+    if let Ok(output) = std::process::Command::new("pgrep")
+        .args(&["-f", "sway|weston|gnome-shell.*wayland|kwin_wayland"])
+        .output()
+    {
+        if !output.stdout.is_empty() {
+            return true;
+        }
+    }
+    
+    false
+}
+
+/// En sistemas no-Linux, nunca estamos en Wayland
+#[cfg(not(target_os = "linux"))]
+pub fn is_wayland() -> bool {
+    false
+}

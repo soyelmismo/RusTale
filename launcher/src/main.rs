@@ -249,6 +249,17 @@ pub fn main() -> std::process::ExitCode {
         let (width, height) = config::load_width_height();
         let is_quickplay = args.quickplay || config_initialization_mode.quickplay;
 
+        // Detectar Wayland para desactivar módulos custom
+        #[cfg(target_os = "linux")]
+        let is_wayland = util::is_wayland();
+        #[cfg(not(target_os = "linux"))]
+        let is_wayland = false;
+        
+        #[cfg(target_os = "linux")]
+        if is_wayland {
+            println!("[Wayland] Detectado - usando decoraciones nativas y desactivando redimensionamiento custom");
+        }
+
         let res = iced::application(
             move || RusTale::new(is_quickplay),
             RusTale::update,
@@ -266,8 +277,8 @@ pub fn main() -> std::process::ExitCode {
 
             // --- CAMBIOS PARA CUSTOM TITLEBAR ---
             visible: !is_quickplay,
-            decorations: false, // Desactivar barra nativa
-            transparent: true, // Permitir transparencia real (bordes redondeados/semitransparencia)
+            decorations: if is_wayland { true } else { false }, // Forzar decoraciones nativas en Wayland
+            transparent: !is_wayland, // En Wayland: transparent=false, en X11: transparent=true
             // ------------------------------------
             position: iced::window::Position::Centered,
             exit_on_close_request: false,
@@ -481,6 +492,7 @@ struct RusTale {
     is_cursor_hidden: bool, // Para trackear estado del puntero
     last_user_interaction: std::time::Instant, // Para resetear con clicks también
     is_fullscreen: bool,    // Estado separado para fullscreen (F11)
+    is_wayland: bool,       // Detectar si estamos en Wayland para desactivar redimensionamiento custom
                             // -----------------------------------------------------
 }
 
@@ -509,6 +521,12 @@ impl RusTale {
         let paths = GamePaths::new(base_dir);
 
         let (width, height) = config::load_width_height();
+
+        // Detectar Wayland para desactivar módulos custom
+        #[cfg(target_os = "linux")]
+        let is_wayland = util::is_wayland();
+        #[cfg(not(target_os = "linux"))]
+        let is_wayland = false;
 
         // 1. API CLIENT: Fast, fails quickly if no response
         let api_client = reqwest::Client::builder()
@@ -682,6 +700,7 @@ impl RusTale {
                 is_cursor_hidden: false, // Inicialmente visible
                 last_user_interaction: std::time::Instant::now(), // Inicializar con tiempo actual
                 is_fullscreen: false,    // Inicialmente no fullscreen
+                is_wayland,             // Valor detectado para desactivar redimensionamiento custom
                                          // -----------------------------------------------------
             },
             Task::batch(vec![
@@ -2630,6 +2649,11 @@ impl RusTale {
             }
             Message::AppExit => self.save_and_exit(),
             Message::WindowDrag => {
+                // Desactivar drag personalizado en Wayland
+                if self.is_wayland {
+                    return Task::none();
+                }
+                
                 let now = std::time::Instant::now();
                 let duration = now.duration_since(self.last_title_click);
                 self.last_title_click = now;
@@ -2644,6 +2668,11 @@ impl RusTale {
                 }
             }
             Message::MinimizeWindow => {
+                // Desactivar minimizar personalizado en Wayland
+                if self.is_wayland {
+                    return Task::none();
+                }
+                
                 self.is_minimized = true;
                 println!("[Window] Window minimized - Enabling aggressive RAM saving");
 
@@ -2757,6 +2786,11 @@ impl RusTale {
             }
 
             Message::ResizePressed(dir) => {
+                // Desactivar redimensionamiento personalizado en Wayland
+                if self.is_wayland {
+                    return Task::none();
+                }
+                
                 self.resizing_direction = Some(dir);
 
                 // Guardamos el estado inicial exacto
@@ -2774,6 +2808,11 @@ impl RusTale {
             }
 
             Message::ResizeReleased => {
+                // Desactivar redimensionamiento personalizado en Wayland
+                if self.is_wayland {
+                    return Task::none();
+                }
+                
                 self.resizing_direction = None;
                 self.is_mouse_pressed = false; // Tambien liberar el estado del mouse
                 self.last_mouse_release_time = std::time::Instant::now(); // Registrar cuando se solto
@@ -3289,12 +3328,20 @@ impl RusTale {
             .interaction(Interaction::Grab);
 
         // Estructura principal visual (Fondo + Barra + Contenido)
-        let visual_content = column![
-            title_bar,
+        let visual_content: Element<'_, Message> = if self.is_wayland {
+            // En Wayland, no mostrar title bar personalizado, solo el contenido
             container(main_content)
                 .width(Length::Fill)
                 .height(Length::Fill)
-        ];
+                .into()
+        } else {
+            column![
+                title_bar,
+                container(main_content)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+            ].into()
+        };
 
         let final_view = stack![bg, tint_overlay, visual_content];
 
@@ -3351,8 +3398,8 @@ impl RusTale {
             });
 
         // --- SISTEMA DE REDIMENSIONAMIENTO (8 LADOS) ---
-        if self.is_maximized || self.is_fullscreen {
-            // Aplicar cursor segun estado de ocultamiento incluso cuando está maximizado o en fullscreen
+        if self.is_maximized || self.is_fullscreen || self.is_wayland {
+            // Aplicar cursor segun estado de ocultamiento incluso cuando está maximizado, en fullscreen o en Wayland
             mouse_area(window_frame)
                 .interaction(self.get_cursor_interaction())
                 .on_move(Message::CursorMoved)

@@ -183,6 +183,57 @@ fn get_arch_name() -> &'static str {
     }
 }
 
+fn flatten_jre_directory(dest_dir: &PathBuf) -> Result<()> {
+    // Check if extraction created a subdirectory (common with JRE distributions)
+    // and move its contents up one level
+    if let Ok(entries) = std::fs::read_dir(dest_dir) {
+        let subdirs: Vec<PathBuf> = entries
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| path.is_dir())
+            .collect();
+            
+        // If there's exactly one subdirectory and it looks like a JRE directory
+        if subdirs.len() == 1 {
+            let subdir = &subdirs[0];
+            let subdir_name = subdir.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("");
+                
+            // Common JRE directory patterns
+            if subdir_name.starts_with("jdk-") || 
+               subdir_name.contains("jre") || 
+               subdir_name.starts_with("java-") {
+                
+                println!("[JRE] Moving contents from subdirectory: {}", subdir_name);
+                
+                // Move all contents from subdirectory to dest_dir
+                if let Ok(entries) = std::fs::read_dir(subdir) {
+                    for entry in entries.flatten() {
+                        let src_path = entry.path();
+                        let dest_path = dest_dir.join(entry.file_name());
+                        
+                        if src_path.is_file() {
+                            std::fs::rename(&src_path, &dest_path)
+                                .context(format!("Failed to move file {:?}", src_path))?;
+                        } else if src_path.is_dir() {
+                            std::fs::rename(&src_path, &dest_path)
+                                .context(format!("Failed to move directory {:?}", src_path))?;
+                        }
+                    }
+                }
+                
+                // Remove the now-empty subdirectory
+                std::fs::remove_dir_all(subdir)
+                    .context(format!("Failed to remove subdirectory {:?}", subdir))?;
+                    
+                println!("[JRE] Successfully flattened JRE directory structure");
+            }
+        }
+    }
+    Ok(())
+}
+
 fn extract_archive(archive_path: &PathBuf, dest_dir: &PathBuf) -> Result<()> {
     std::fs::create_dir_all(dest_dir)?;
 
@@ -191,12 +242,14 @@ fn extract_archive(archive_path: &PathBuf, dest_dir: &PathBuf) -> Result<()> {
     if archive_path.to_string_lossy().ends_with(".zip") {
         let mut archive = zip::ZipArchive::new(file).context("Failed to read ZIP archive")?;
         archive.extract(dest_dir).context("Failed to extract ZIP")?;
+        flatten_jre_directory(dest_dir)?;
     } else if archive_path.to_string_lossy().ends_with(".tar.gz") {
         let gz = flate2::read::GzDecoder::new(file);
         let mut archive = tar::Archive::new(gz);
         archive
             .unpack(dest_dir)
             .context("Failed to extract tar.gz")?;
+        flatten_jre_directory(dest_dir)?;
     } else {
         anyhow::bail!("Unsupported archive format");
     }
