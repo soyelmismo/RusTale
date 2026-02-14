@@ -454,6 +454,10 @@ struct RusTale {
     last_download_progress: f32,            // Track last download progress for stuck detection
     is_news_visible: bool, // Track if news section is currently visible
 
+    // --- MOUSE THROTTLING FOR LSD PERFORMANCE ---
+    last_mouse_update_time: std::time::Instant, // Para throttling de actualizaciones del mouse
+    mouse_update_interval: std::time::Duration, // Intervalo mínimo entre actualizaciones del mouse
+
     // --- NUEVOS CAMPOS PARA REDIMENSIoN ---
     resizing_direction: Option<ResizeDirection>,
     current_window_size: Size,
@@ -662,6 +666,10 @@ impl RusTale {
                 last_status_change: std::time::Instant::now(), // Track state changes for timeout detection
                 last_download_progress: 0.0, // Track last download progress for stuck detection
                 is_news_visible: true, // Initially visible (news section is shown by default)
+
+                // --- MOUSE THROTTLING FOR LSD PERFORMANCE ---
+                last_mouse_update_time: std::time::Instant::now(),
+                mouse_update_interval: std::time::Duration::from_millis(30), // 33 FPS para actualizaciones del mouse (mejor rendimiento)
 
                 // --- NUEVOS CAMPOS PARA REDIMENSIoN ---
                 resizing_direction: None,
@@ -968,189 +976,62 @@ impl RusTale {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::CursorMoved(relative_position) => {
-                self.cursor_position = relative_position;
-                self.last_mouse_move_time = std::time::Instant::now();
-                self.last_user_interaction = std::time::Instant::now(); // Reset interacción
+                // [MOUSE THROTTLING] Solo actualizar si ha pasado suficiente tiempo desde la última actualización
+                let now = std::time::Instant::now();
+                let time_since_last_update = now.duration_since(self.last_mouse_update_time);
+                
+                if time_since_last_update >= self.mouse_update_interval {
+                    // Actualizar posición y tiempos
+                    self.cursor_position = relative_position;
+                    self.last_mouse_move_time = now;
+                    self.last_user_interaction = now; // Reset interacción
+                    self.last_mouse_update_time = now; // Actualizar tiempo del último update
+                    
+                    // [GIRO PREDICTIVO] Registrar actividad del usuario
+                    crate::util::register_activity();
+                    
+                    // [FIX LSD] Restauración inmediata de opacidad al mover mouse
+                    if self.settings.theme.lsd_mode && !self.settings_state.is_open && !self.mods_state.is_open {
+                        // Restaurar opacidad inmediatamente si está baja
+                        if self.ui_opacity_accumulator < 0.9 {
+                            println!("[LSD] Mouse movido - Restaurando opacidad: {:.2} → 1.0", self.ui_opacity_accumulator);
+                            self.ui_opacity_accumulator = 1.0;
+                            
+                            // Mostrar cursor si estaba oculto
+                            if self.is_cursor_hidden {
+                                self.is_cursor_hidden = false;
+                                println!("[LSD] Cursor restaurado");
+                            }
+                        }
+                    }
+
+                    // Si el cursor estaba oculto y el usuario mueve el mouse, lo mostramos inmediatamente
+                    if self.is_cursor_hidden {
+                        self.is_cursor_hidden = false;
+                        // No podemos cambiar el ícono directamente en Iced, pero podemos actualizar el estado
+                    }
+                }
+                // Si no ha pasado suficiente tiempo, ignoramos este evento para mejorar rendimiento
+            }
+
+            Message::MousePressed => {
+                self.is_mouse_pressed = true;
+                self.last_user_interaction = std::time::Instant::now(); // Reset interacción al hacer click
+                self.shader_click_time = std::time::Instant::now();
                 
                 // [GIRO PREDICTIVO] Registrar actividad del usuario
                 crate::util::register_activity();
                 
-                // [FIX LSD] Restauración inmediata de opacidad al mover mouse
+                // [FIX LSD] Restauración inmediata de opacidad al hacer clic
                 if self.settings.theme.lsd_mode && !self.settings_state.is_open && !self.mods_state.is_open {
                     // Restaurar opacidad inmediatamente si está baja
                     if self.ui_opacity_accumulator < 0.9 {
-                        println!("[LSD] Mouse movido - Restaurando opacidad: {:.2} → 1.0", self.ui_opacity_accumulator);
+                        println!("[LSD] Mouse clic - Restaurando opacidad: {:.2} → 1.0", self.ui_opacity_accumulator);
                         self.ui_opacity_accumulator = 1.0;
-                        
-                        // Mostrar cursor si estaba oculto
-                        if self.is_cursor_hidden {
-                            self.is_cursor_hidden = false;
-                            println!("[LSD] Cursor restaurado");
-                        }
                     }
                 }
-
-                // Si el cursor estaba oculto y el usuario mueve el mouse, lo mostramos inmediatamente
-                if self.is_cursor_hidden {
-                    self.is_cursor_hidden = false;
-                    // No podemos cambiar el ícono directamente en Iced, pero podemos actualizar el estado
-                }
-
-                if let Some(dir) = self.resizing_direction {
-                    // 1. Calcular donde esta el mouse en la PANTALLA ahora mismo
-                    // Nota: relative_position es inestable mientras movemos la ventana,
-                    // pero current_window_pos + relative_position siempre da la pos absoluta correcta.
-                    let current_mouse_screen_x = self.current_window_pos.x + relative_position.x;
-                    let current_mouse_screen_y = self.current_window_pos.y + relative_position.y;
-
-                    // 2. Calcular cuanto se ha movido el mouse desde que hicimos click
-                    let delta_x = current_mouse_screen_x - self.drag_start_mouse_screen_pos.x;
-                    let delta_y = current_mouse_screen_y - self.drag_start_mouse_screen_pos.y;
-
-                    // 3. Aplicar ese delta al tamano/posicion ORIGINAL (Snapshot)
-                    let start_w = self.drag_start_window_size.width;
-                    let start_h = self.drag_start_window_size.height;
-                    let start_x = self.drag_start_window_pos.x;
-                    let start_y = self.drag_start_window_pos.y;
-
-                    let mut new_w = start_w;
-                    let mut new_h = start_h;
-                    let mut new_x = start_x;
-                    let mut new_y = start_y;
-
-                    let min_w = 480.0;
-                    let min_h = 390.0;
-
-                    match dir {
-                        ResizeDirection::East => {
-                            new_w = (start_w + delta_x).max(min_w);
-                        }
-                        ResizeDirection::South => {
-                            new_h = (start_h + delta_y).max(min_h);
-                        }
-                        ResizeDirection::SouthEast => {
-                            new_w = (start_w + delta_x).max(min_w);
-                            new_h = (start_h + delta_y).max(min_h);
-                        }
-                        ResizeDirection::West => {
-                            // Al mover a la izquierda, el ancho crece si delta es negativo
-                            let proposed_width = start_w - delta_x;
-                            if proposed_width >= min_w {
-                                new_w = proposed_width;
-                                new_x = start_x + delta_x;
-                            } else {
-                                // Si llegamos al minimo, fijamos posicion y ancho
-                                new_w = min_w;
-                                new_x = start_x + (start_w - min_w);
-                            }
-                        }
-                        ResizeDirection::North => {
-                            let proposed_height = start_h - delta_y;
-                            if proposed_height >= min_h {
-                                new_h = proposed_height;
-                                new_y = start_y + delta_y;
-                            } else {
-                                new_h = min_h;
-                                new_y = start_y + (start_h - min_h);
-                            }
-                        }
-                        ResizeDirection::NorthWest => {
-                            // North logic
-                            let proposed_height = start_h - delta_y;
-                            if proposed_height >= min_h {
-                                new_h = proposed_height;
-                                new_y = start_y + delta_y;
-                            } else {
-                                new_h = min_h;
-                                new_y = start_y + (start_h - min_h);
-                            }
-
-                            // West logic
-                            let proposed_width = start_w - delta_x;
-                            if proposed_width >= min_w {
-                                new_w = proposed_width;
-                                new_x = start_x + delta_x;
-                            } else {
-                                new_w = min_w;
-                                new_x = start_x + (start_w - min_w);
-                            }
-                        }
-                        ResizeDirection::NorthEast => {
-                            // North logic
-                            let proposed_height = start_h - delta_y;
-                            if proposed_height >= min_h {
-                                new_h = proposed_height;
-                                new_y = start_y + delta_y;
-                            } else {
-                                new_h = min_h;
-                                new_y = start_y + (start_h - min_h);
-                            }
-                            // East logic
-                            new_w = (start_w + delta_x).max(min_w);
-                        }
-                        ResizeDirection::SouthWest => {
-                            // South logic
-                            new_h = (start_h + delta_y).max(min_h);
-                            // West logic
-                            let proposed_width = start_w - delta_x;
-                            if proposed_width >= min_w {
-                                new_w = proposed_width;
-                                new_x = start_x + delta_x;
-                            } else {
-                                new_w = min_w;
-                                new_x = start_x + (start_w - min_w);
-                            }
-                        }
-                    }
-
-                    // 4. Aplicar cambios
-                    let mut commands = Vec::new();
-
-                    if (new_x - self.current_window_pos.x).abs() > 0.5
-                        || (new_y - self.current_window_pos.y).abs() > 0.5
-                    {
-                        // Esto evita que el frame siguiente dibuje la ventana en la posicion vieja
-                        // mientras el sistema operativo la mueve.
-                        self.current_window_pos = Point::new(new_x, new_y);
-
-                        commands.push(
-                            window::oldest()
-                                .and_then(move |id| window::move_to(id, Point::new(new_x, new_y))),
-                        );
-                    }
-
-                    // El umbral puede ser bajo (0.5 o 1.0) si aplicamos la logica predictiva.
-                    // Si cambia el tamaño aunque sea un pixel, debemos reaccionar.
-                    if (new_w - self.current_window_size.width).abs() > 0.5
-                        || (new_h - self.current_window_size.height).abs() > 0.5
-                    {
-                        let new_size = Size::new(new_w, new_h);
-
-                        // No esperamos a que Wayland nos avise. Asumimos que el resize sucedera.
-                        // Esto obliga a la UI (view) a recalcular layout EXACTAMENTE con los nuevos pixeles
-                        // que estamos a punto de pedir. Resultado: Pixel-perfect, sin stretch.
-                        self.window_size = new_size;
-                        self.current_window_size = new_size;
-
-                        // Sincronizamos settings globales para que el modo compacto se active instantaneamente
-                        self.settings.width = new_w as u32;
-                        self.settings.height = new_h as u32;
-                        // Y los temporales por si hay un modal abierto
-                        self.settings_state.temp_settings.width = new_w as u32;
-                        self.settings_state.temp_settings.height = new_h as u32;
-
-                        commands.push(
-                            window::oldest().and_then(move |id| window::resize(id, new_size)),
-                        );
-                    }
-
-                    if !commands.is_empty() {
-                        return Task::batch(commands);
-                    }
-                }
-
-                return Task::none();
             }
+
             Message::Tick(_now) => {
                 // Bloqueo de seguridad: si desactivas el LSD pero quedaba un evento en cola.
                 if !self.settings.theme.lsd_mode {
@@ -1315,6 +1196,7 @@ impl RusTale {
         }
 
         match message {
+            Message::CursorMoved(_) => Task::none(), // Manejado en el primer match
             Message::Mods(msg) => {
                 let base_dir = config::get_app_dir();
                 let client = self.api_client.clone();
@@ -1370,8 +1252,6 @@ impl RusTale {
 
                 Task::none()
             }
-
-            Message::CursorMoved(_) => Task::none(), // Caso faltante para CursorMoved
 
             Message::Initialize => Task::perform(
                 async {

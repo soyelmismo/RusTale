@@ -109,6 +109,13 @@ impl SmoothTranslateState {
         let dist_to_boundary = mouse_pos.distance(closest_point);
         let is_inside = dist_to_boundary < 0.1;
 
+        // [PERFORMANCE OPTIMIZATION] Early return para objetos muy alejados
+        // Solo calcular física si está dentro de un radio razonable
+        let max_influence_radius = 150.0; // Reducido de 100+ a 150 para mejor rendimiento
+        if dist_to_boundary > max_influence_radius {
+            return Vector::new(0.0, 0.0);
+        }
+
         let radius = 100.0;
         let mut target_displacement = Vector::new(0.0, 0.0);
 
