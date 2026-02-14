@@ -2,12 +2,14 @@ use crate::news::BlogPost;
 use crate::util::image_cache::load_news_image;
 use crate::{Message, theme, util};
 use iced::widget::{
-    ProgressBar, Space, button, column, container, image, row, scrollable, svg,
+    ProgressBar, Space, button, column, container, image, row, scrollable, svg, Id,
 };
 use iced::{
     Alignment, Background, ContentFit, Element, Length, Renderer, Task, Theme,
 };
 use std::collections::HashMap;
+
+const NEWS_SCROLL_ID: &str = "news_scroll";
 
 #[derive(Debug, Clone)]
 pub enum NewsMessage {
@@ -17,6 +19,8 @@ pub enum NewsMessage {
     ReloadImages, // Nuevo mensaje para recargar imágenes después de liberar memoria
     OpenPost(String),
     OpenAllNews,
+    ScrollOffsetChanged(f32), // Nuevo mensaje para tracking de scroll
+    GetScrollOffset, // Nuevo mensaje para solicitar el offset actual
 }
 
 pub struct NewsSection {
@@ -25,6 +29,8 @@ pub struct NewsSection {
     pub loading: bool,
     pub loaded_once: bool, // Nueva bandera para lazy loading
     pub error: Option<String>,
+    pub scroll_offset: f32, // Posición actual del scroll
+    pub viewport_height: f32, // Altura del viewport visible
 }
 
 impl NewsSection {
@@ -35,6 +41,8 @@ impl NewsSection {
             loading: false, // Default: NO cargando
             loaded_once: false, // Default: NO ha cargado
             error: None,
+            scroll_offset: 0.0,
+            viewport_height: 600.0, // Valor por defecto, se actualizará dinámicamente
         }
     }
 
@@ -179,7 +187,36 @@ impl NewsSection {
                 },
                 |_| Message::None,
             ),
+            NewsMessage::ScrollOffsetChanged(delta) => {
+                if delta == f32::MIN {
+                    // Home key - resetear al inicio
+                    self.scroll_offset = 0.0;
+                } else if delta == f32::MAX {
+                    // End key - scroll al final
+                    let post_height_estimate = 120.0;
+                    let post_spacing = 8.0;
+                    let total_post_height = post_height_estimate + post_spacing;
+                    let total_content_height = self.posts.len() as f32 * total_post_height;
+                    self.scroll_offset = (total_content_height - self.viewport_height).max(0.0);
+                } else {
+                    // Scroll normal - acumular el delta
+                    self.scroll_offset += delta;
+                    // Asegurar que el offset no sea negativo
+                    self.scroll_offset = self.scroll_offset.max(0.0);
+                }
+                Task::none()
+            }
+            NewsMessage::GetScrollOffset => {
+                // Ya no necesitamos este mensaje con el enfoque de eventos
+                Task::none()
+            }
         }
+    }
+
+    pub fn update_viewport_height(&mut self, window_height: f32) {
+        // El viewport de noticias es aproximadamente 70% de la altura de ventana
+        // considerando el header, footer y otros elementos UI
+        self.viewport_height = (window_height * 0.7).max(300.0); // Mínimo 300px
     }
 
     pub fn view<'a>(
@@ -299,21 +336,61 @@ impl NewsSection {
         ctx: theme::UIContext,
     ) -> Element<'a, NewsMessage, Theme, Renderer> {
         let palette = ctx.palette;
+        
+        // [PRECISE VIEWPORT OPTIMIZATION]
+        // Calcular qué posts son visibles basados en el scroll actual
+        let post_height_estimate = 120.0; // Altura estimada por post (imagen + texto + padding)
+        let post_spacing = 8.0;
+        let total_post_height = post_height_estimate + post_spacing;
+        
+        // Calcular el rango de posts visibles
+        let start_index = ((self.scroll_offset / total_post_height).floor() as usize).saturating_sub(1); // Uno extra como buffer
+        let visible_count = ((self.viewport_height / total_post_height).ceil() as usize) + 2; // 2 extra como buffer
+        
+        let end_index = (start_index + visible_count).min(self.posts.len());
+        let start_index = start_index.min(self.posts.len().saturating_sub(1));
+        
+        let posts_to_render: Vec<&BlogPost> = if start_index < self.posts.len() {
+            self.posts[start_index..end_index].iter().collect()
+        } else {
+            Vec::new()
+        };
+        
+        // Crear espacio vacío arriba para mantener la posición del scroll
+        let top_space = Space::new().width(Length::Fill).height(Length::Fixed(start_index as f32 * total_post_height));
+        
+        // Crear espacio vacío abajo para permitir scroll completo
+        let bottom_space = Space::new().width(Length::Fill).height(Length::Fixed(
+            (self.posts.len().saturating_sub(end_index)) as f32 * total_post_height
+        ));
+        
         let posts_list = theme::magic_scrollable(
             scrollable(
-                column(
-                    self.posts
-                        .iter()
-                        .map(|post| self.view_post(post, loc, is_disabled, ctx))
-                        .collect::<Vec<_>>(),
-                )
-                .spacing(8),
+                column![
+                    top_space,
+                    column(
+                        posts_to_render
+                            .iter()
+                            .enumerate()
+                            .map(|(i, post)| {
+                                // Ajustar el índice real para mantener consistencia
+                                let real_index = start_index + i;
+                                self.view_post_with_index(post, real_index, loc, is_disabled, ctx)
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                    .spacing(post_spacing),
+                    bottom_space,
+                ]
+                .spacing(0),
             )
+            .id(Id::new(NEWS_SCROLL_ID))
             .height(Length::Fill)
             .style(move |t: &Theme, s| theme::scrollable_style(&palette, t, s))
             .into(),
             ctx,
         );
+        
         if self.error.is_some() {
             column![
                 posts_list,
@@ -335,6 +412,17 @@ impl NewsSection {
         } else {
             posts_list.into()
         }
+    }
+
+    fn view_post_with_index<'a>(
+        &'a self,
+        post: &'a BlogPost,
+        _index: usize, // Índice real del post (para uso futuro si es necesario)
+        loc: &'a crate::lang::Localization,
+        is_disabled: bool,
+        ctx: theme::UIContext,
+    ) -> Element<'a, NewsMessage, Theme, Renderer> {
+        self.view_post(post, loc, is_disabled, ctx)
     }
 
     fn view_post<'a>(

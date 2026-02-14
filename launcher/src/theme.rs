@@ -1742,13 +1742,24 @@ pub fn text<'a, M: 'a>(
     )
 }
 
-// NUEVA FUNCIoN: Aplica efecto LSD letra por letra a un string
+// NUEVA FUNCIoN: Aplica efecto LSD letra por letra a un string con optimización batching
 // Acepta cualquier tipo de string (String, &str, etc.) para evitar problemas de lifetime
 pub fn text_lsd_letters<'a, M: 'a>(
     text_str: impl Into<String>,
     size: impl Into<iced::Pixels>,
     color: Color,
     ctx: UIContext,
+) -> Element<'a, M, Theme, Renderer> {
+    text_lsd_letters_batched(text_str, size, color, ctx, 1)
+}
+
+// VERSIÓN CON BATCHING: Para uso interno con optimización
+pub fn text_lsd_letters_batched<'a, M: 'a>(
+    text_str: impl Into<String>,
+    size: impl Into<iced::Pixels>,
+    color: Color,
+    ctx: UIContext,
+    batch_size: usize,
 ) -> Element<'a, M, Theme, Renderer> {
     let text_owned = text_str.into();
     let size_px = size.into();
@@ -1757,30 +1768,39 @@ pub fn text_lsd_letters<'a, M: 'a>(
         return iced_text(text_owned).size(size_px).color(color).into();
     }
 
+    // Determinar batch_size dinámico basado en longitud del texto
+    let effective_batch_size = if batch_size == 1 {
+        // Batching dinámico solo cuando se solicita explícitamente batch_size > 1
+        1
+    } else {
+        batch_size
+    };
+
     let lsd_intensity = ctx.lsd_intensity;
     let lsd_enabled = ctx.lsd_enabled;
     let mouse_pos = ctx.mouse_pos;
 
-    // EFECTO LETRA POR LETRA
-    let mut letter_row = iced::widget::row!().spacing(0);
+    // EFECTO POR BATCHES en lugar de letra por letra
+    let mut batch_row = iced::widget::row!().spacing(0);
 
-    // Iterar sobre cada caracter y aplicar el efecto LSD individualmente
-    for (i, ch) in text_owned.chars().enumerate() {
-        // Crear un texto individual para este caracter
-        let char_text = iced_text(ch.to_string()).size(size_px).color(color);
+    // Agrupar caracteres en batches
+    let chars: Vec<char> = text_owned.chars().collect();
+    for (batch_idx, batch) in chars.chunks(effective_batch_size).enumerate() {
+        // Unir los caracteres del batch en un solo string
+        let batch_string: String = batch.iter().collect();
+        
+        // Crear texto para todo el batch
+        let batch_text = iced_text(batch_string).size(size_px).color(color);
+        let batch_element: Element<'a, M, Theme, Renderer> = batch_text.into();
 
-        let char_element: Element<'a, M, Theme, Renderer> = char_text.into();
+        // Calcular offset único para cada batch
+        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 100 + batch_idx, lsd_intensity);
 
-        // Calcular offset unico (La funcion ya devuelve valores ponderados por intensidad)
-        let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, 100 + i, lsd_intensity);
-
-        // NO vuelvas a multiplicar por lsd_intensity aqui
-
-        // Envolver cada letra
-        let magic_char = Element::new(
+        // Envolver cada batch con SmoothTranslate
+        let magic_batch = Element::new(
             SmoothTranslate::new(
-                char_element,
-                (vx, vy), // Pasar vectores directos
+                batch_element,
+                (vx, vy),
                 mouse_pos,
                 false,
                 lsd_intensity,
@@ -1790,10 +1810,10 @@ pub fn text_lsd_letters<'a, M: 'a>(
             .with_stillness(ctx.mouse_stillness),
         );
 
-        letter_row = letter_row.push(magic_char);
+        batch_row = batch_row.push(magic_batch);
     }
 
-    letter_row.into()
+    batch_row.into()
 }
 
 pub fn svg<'a, M: 'a>(content: impl Into<Element<'a, M>>, ctx: UIContext) -> Element<'a, M> {
@@ -2279,6 +2299,16 @@ pub fn text_paragraph<'a, M: 'a + Clone>(
             .into();
     }
 
+    // [OPTIMIZACIÓN BATCH] Para texto largo, usar batching para reducir lag
+    let text_len = text_owned.chars().count();
+    let batch_size = if text_len > 50 {
+        4  // Texto muy largo: máxima optimización
+    } else if text_len > 20 {
+        3  // Texto medio: optimización balanceada
+    } else {
+        1  // Texto corto:保持 efecto original completo
+    };
+
     // 1. Dividir el texto en palabras
     let words_str: Vec<&str> = text_owned.split_whitespace().collect();
     let mut words_widgets = Vec::new();
@@ -2286,39 +2316,17 @@ pub fn text_paragraph<'a, M: 'a + Clone>(
     // 2. Espaciado manual (estimado en 4px)
     let space_width = 4.0;
 
-    for (word_idx, word) in words_str.iter().enumerate() {
-        // Procesar palabra: Letra por letra
-        let mut letters_in_word = iced::widget::row!().spacing(0);
+    for (_, word) in words_str.iter().enumerate() {
+        // Procesar palabra: Usar batching optimizado
+        let word_element = text_lsd_letters_batched(
+            *word,
+            size_px,
+            color,
+            ctx,
+            batch_size
+        );
 
-        for (char_idx, ch) in word.chars().enumerate() {
-            let char_text = iced_text(ch.to_string()).size(size_px).color(color);
-            let char_element: Element<'a, M, Theme, Renderer> = char_text.into();
-
-            // Semilla unica continua
-            let seed = 1000 + (word_idx * 50) + char_idx;
-
-            // Calculo LSD
-            let (vx, vy) = get_seeded_disparity(ctx.lsd_offset, seed, ctx.lsd_intensity);
-
-            // NO vuelvas a multiplicar por lsd_intensity aqui
-
-            // Envoltura con SmoothTranslate
-            let magic_char = Element::new(
-                SmoothTranslate::new(
-                    char_element,
-                    (vx, vy), // Pasar vectores directos
-                    ctx.mouse_pos,
-                    false,
-                    ctx.lsd_intensity,
-                    ctx.lsd_enabled,
-                )
-                .resizing(ctx.is_resizing),
-            ); // Esto mantiene el jitter apagado, pero el switch de arriba es el que salva los FPS
-
-            letters_in_word = letters_in_word.push(magic_char);
-        }
-
-        words_widgets.push(letters_in_word.into());
+        words_widgets.push(word_element);
     }
 
     Element::new(LsdWrapper {

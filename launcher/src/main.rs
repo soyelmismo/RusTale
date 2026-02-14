@@ -452,6 +452,7 @@ struct RusTale {
     last_title_click: std::time::Instant,
     last_status_change: std::time::Instant, // Track state changes for timeout detection
     last_download_progress: f32,            // Track last download progress for stuck detection
+    is_news_visible: bool, // Track if news section is currently visible
 
     // --- NUEVOS CAMPOS PARA REDIMENSIoN ---
     resizing_direction: Option<ResizeDirection>,
@@ -660,6 +661,7 @@ impl RusTale {
                 last_title_click: std::time::Instant::now(),
                 last_status_change: std::time::Instant::now(), // Track state changes for timeout detection
                 last_download_progress: 0.0, // Track last download progress for stuck detection
+                is_news_visible: true, // Initially visible (news section is shown by default)
 
                 // --- NUEVOS CAMPOS PARA REDIMENSIoN ---
                 resizing_direction: None,
@@ -838,6 +840,24 @@ impl RusTale {
         let memory_stats_sub =
             iced::time::every(std::time::Duration::from_secs(5)).map(|_| Message::MemoryStatsUpdate);
 
+        // News scroll tracking: Usar eventos de scroll para detectar cambios
+        let news_scroll_sub = if self.is_news_visible && self.settings.theme.lsd_mode {
+            iced::event::listen_with(|event, _status, _window_id| {
+                if let iced::Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) = event {
+                    // ScrollDelta tiene diferentes campos según la plataforma
+                    let scroll_delta = match delta {
+                        iced::mouse::ScrollDelta::Lines { y, .. } => y * 10.0,
+                        iced::mouse::ScrollDelta::Pixels { y, .. } => y,
+                    };
+                    Some(Message::News(NewsMessage::ScrollOffsetChanged(scroll_delta)))
+                } else {
+                    None
+                }
+            })
+        } else {
+            Subscription::none()
+        };
+
         // Keyboard también condicionado a visibilidad y foco
         let keyboard_sub = if is_interactive {
             iced::event::listen_with(|event, _status, _window_id| {
@@ -848,12 +868,37 @@ impl RusTale {
                             Some(Message::NextShader)
                         }
                         // Alternativa: Tecla 'S'
-                        iced::keyboard::Key::Character(c) if c.as_str() == "s" => {
-                            Some(Message::NextShader)
+                        iced::keyboard::Key::Character(s) if s.as_str() == "s" => Some(Message::NextShader),
+                        // Flecha izquierda para shader anterior (usar NextShader con lógica inversa)
+                        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowLeft) => {
+                            Some(Message::NextShader) // Se manejará en update
                         }
-                        // --- NUEVO: Soporte F11 ---
-                        iced::keyboard::Key::Named(iced::keyboard::key::Named::F11) => {
-                            Some(Message::ToggleFullscreen)
+                        // Alternativa: Tecla 'A'
+                        iced::keyboard::Key::Character(a) if a.as_str() == "a" => Some(Message::NextShader), // Se manejará en update
+                        // Flecha arriba - scroll en noticias
+                        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp) => {
+                            Some(Message::News(NewsMessage::ScrollOffsetChanged(-30.0)))
+                        }
+                        // Flecha abajo - scroll en noticias
+                        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown) => {
+                            Some(Message::News(NewsMessage::ScrollOffsetChanged(30.0)))
+                        }
+                        // Page Up - scroll grande en noticias
+                        iced::keyboard::Key::Named(iced::keyboard::key::Named::PageUp) => {
+                            Some(Message::News(NewsMessage::ScrollOffsetChanged(-300.0)))
+                        }
+                        // Page Down - scroll grande en noticias
+                        iced::keyboard::Key::Named(iced::keyboard::key::Named::PageDown) => {
+                            Some(Message::News(NewsMessage::ScrollOffsetChanged(300.0)))
+                        }
+                        // Home - resetear scroll al inicio
+                        iced::keyboard::Key::Named(iced::keyboard::key::Named::Home) => {
+                            Some(Message::News(NewsMessage::ScrollOffsetChanged(f32::MIN)))
+                        }
+                        // End - scroll al final (calculado dinámicamente)
+                        iced::keyboard::Key::Named(iced::keyboard::key::Named::End) => {
+                            // Esto se manejará en el update con un cálculo dinámico
+                            Some(Message::News(NewsMessage::ScrollOffsetChanged(f32::MAX)))
                         }
                         _ => None,
                     }
@@ -876,6 +921,7 @@ impl RusTale {
             mouse_sub,
             global_mouse,
             keyboard_sub, // <--- Agregar esto al batch final
+            news_scroll_sub, // <--- Agregar tracking de scroll
         ])
     }
 
@@ -2616,6 +2662,9 @@ impl RusTale {
                 self.current_window_size = size;
                 self.window_size = size;
 
+                // Actualizar viewport height de la sección de noticias
+                self.news_section.update_viewport_height(size.height);
+
                 // Forzamos actualizacion manual de los settings para que la logica de Iced
                 // detecte el cambio de ancho (Modo compacto vs Full) instantaneamente.
                 self.settings.width = size.width as u32;
@@ -2623,14 +2672,17 @@ impl RusTale {
 
                 // EL FIX: En Linux, redimensionar necesita una señal de redibujado limpia.
                 // Usamos window::request_user_attention o simplemente devolvemos la tarea de is_maximized.
-                return window::oldest().and_then(move |id| {
-                    // Obligamos a que WGPU recalcule el viewport fisico pidiendo el foco interno.
-                    Task::batch(vec![
-                        window::gain_focus(id),
-                        window::is_maximized(id)
-                            .map(move |max| Message::WindowResizedWithMaximized(size, max)),
-                    ])
-                });
+                if self.resizing_direction.is_none() {
+                    return window::oldest().and_then(move |id| {
+                        // Task::batch para asegurar que el viewport se limpie
+                        Task::batch(vec![
+                            window::gain_focus(id),
+                            window::is_maximized(id)
+                                .map(move |max| Message::WindowResizedWithMaximized(size, max)),
+                        ])
+                    });
+                }
+                Task::none()
             }
             Message::WindowResizedWithMaximized(size, is_maximized) => {
                 self.window_size = size;
