@@ -14,6 +14,7 @@ pub enum NewsMessage {
     LoadNews,
     NewsLoaded(Result<Vec<BlogPost>, String>),
     ImageLoaded(String, Result<image::Handle, String>),
+    ReloadImages, // Nuevo mensaje para recargar imágenes después de liberar memoria
     OpenPost(String),
     OpenAllNews,
 }
@@ -39,7 +40,9 @@ impl NewsSection {
 
     // Nuevo método helper para saber si iniciar la carga
     pub fn should_load(&self) -> bool {
-        !self.loaded_once && !self.loading
+        // Cargar si nunca ha cargado, o si hay posts pero no imágenes (ej: después de liberar memoria)
+        (!self.loaded_once && !self.loading) || 
+        (!self.posts.is_empty() && self.images.is_empty() && !self.loading)
     }
 
     pub fn update(&mut self, message: NewsMessage, client: reqwest::Client) -> Task<Message> {
@@ -48,16 +51,47 @@ impl NewsSection {
                 self.loading = true;
                 self.loaded_once = true; // Marcar como intentado
                 self.error = None;
-                self.images.clear();
-                // Iniciar carga real de noticias
-                Task::perform(
-                    async move {
-                        crate::news::fetch_news(&client)
-                            .await
-                            .map_err(|e| e.to_string())
-                    },
-                    |res| Message::News(NewsMessage::NewsLoaded(res)),
-                )
+                
+                // Si ya hay posts, solo cargar imágenes faltantes (recuperación de memoria)
+                if !self.posts.is_empty() {
+                    let mut image_tasks = Vec::new();
+                    for post in &self.posts {
+                        if let Some(cover) = &post.cover_image {
+                            let key = cover.s3_key.clone();
+                            if !self.images.contains_key(&key) {
+                                let c = client.clone();
+                                image_tasks.push(Task::perform(
+                                    async move {
+                                        let res = load_news_image(&c, &key)
+                                            .await
+                                            .map_err(|e| e.to_string());
+                                        (key, res)
+                                    },
+                                    |(key, res)| {
+                                        Message::News(NewsMessage::ImageLoaded(key, res))
+                                    },
+                                ));
+                            }
+                        }
+                    }
+                    self.loading = false; // No estamos cargando posts, solo imágenes
+                    if image_tasks.is_empty() {
+                        Task::none()
+                    } else {
+                        Task::batch(image_tasks)
+                    }
+                } else {
+                    // Carga completa de noticias y imágenes
+                    self.images.clear();
+                    Task::perform(
+                        async move {
+                            crate::news::fetch_news(&client)
+                                .await
+                                .map_err(|e| e.to_string())
+                        },
+                        |res| Message::News(NewsMessage::NewsLoaded(res)),
+                    )
+                }
             }
             NewsMessage::NewsLoaded(result) => {
                 self.loading = false;
@@ -102,6 +136,36 @@ impl NewsSection {
                     self.images.insert(key, handle);
                 }
                 Task::none()
+            }
+            NewsMessage::ReloadImages => {
+                // Recargar imágenes si hay posts pero no imágenes (después de liberar memoria)
+                if !self.posts.is_empty() && self.images.is_empty() && !self.loading {
+                    let mut image_tasks = Vec::new();
+                    for post in &self.posts {
+                        if let Some(cover) = &post.cover_image {
+                            let key = cover.s3_key.clone();
+                            let c = client.clone();
+                            image_tasks.push(Task::perform(
+                                async move {
+                                    let res = load_news_image(&c, &key)
+                                        .await
+                                        .map_err(|e| e.to_string());
+                                    (key, res)
+                                },
+                                |(key, res)| {
+                                    Message::News(NewsMessage::ImageLoaded(key, res))
+                                },
+                            ));
+                        }
+                    }
+                    if image_tasks.is_empty() {
+                        Task::none()
+                    } else {
+                        Task::batch(image_tasks)
+                    }
+                } else {
+                    Task::none()
+                }
             }
             NewsMessage::OpenPost(url) => Task::perform(
                 async move {

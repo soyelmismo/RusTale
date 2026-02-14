@@ -117,11 +117,19 @@ async fn download_jre_from_data(
 
     progress_callback("jre", 70.0, "Extracting JRE...", 0, 0, None);
 
-    // Clean up old installation
-    if latest_dir.exists() {
-        tokio::fs::remove_dir_all(&latest_dir).await?;
+    // Only clean up if the directory exists but doesn't contain a valid JRE
+    let should_clean = if latest_dir.exists() {
+        !crate::java::is_jre_installed_at(&latest_dir)
+    } else {
+        true // Directory doesn't exist, we need to create it
+    };
+
+    if should_clean {
+        if latest_dir.exists() {
+            tokio::fs::remove_dir_all(&latest_dir).await?;
+        }
+        tokio::fs::create_dir_all(&latest_dir).await?;
     }
-    tokio::fs::create_dir_all(&latest_dir).await?;
 
     // Extract using spawn_blocking to avoid UI freeze
     let cache_file_clone = cache_file.clone();
@@ -163,7 +171,12 @@ pub fn is_jre_installed_at(jre_dir: &PathBuf) -> bool {
     } else {
         jre_dir.join("bin").join("java")
     };
-    java_bin.exists()
+    
+    println!("[JRE Debug] Checking for Java at: {}", java_bin.display());
+    let exists = java_bin.exists();
+    println!("[JRE Debug] Java exists: {}", exists);
+    
+    exists
 }
 
 fn get_os_name() -> &'static str {
@@ -321,11 +334,19 @@ async fn download_jre_fallback(
 
     progress_callback("jre", 70.0, "Extracting JRE...", 0, 0, None);
 
-    // Clean up old installation
-    if latest_dir.exists() {
-        tokio::fs::remove_dir_all(&latest_dir).await?;
+    // Only clean up if the directory exists but doesn't contain a valid JRE
+    let should_clean = if latest_dir.exists() {
+        !crate::java::is_jre_installed_at(&latest_dir)
+    } else {
+        true // Directory doesn't exist, we need to create it
+    };
+
+    if should_clean {
+        if latest_dir.exists() {
+            tokio::fs::remove_dir_all(&latest_dir).await?;
+        }
+        tokio::fs::create_dir_all(&latest_dir).await?;
     }
-    tokio::fs::create_dir_all(&latest_dir).await?;
 
     // Extract using spawn_blocking to avoid UI freeze
     let cache_file_clone = cache_file.clone();

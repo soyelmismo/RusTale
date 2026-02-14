@@ -284,8 +284,22 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
 
     // --- NEW: JAVA AGENT INJECTION (SMART CHECK) ---
     // Use GamePaths with the proper data_dir
-    let paths = crate::game::paths::GamePaths::new(crate::config::get_app_dir());
-    let agent_path = paths.dualauth_agent();
+    // Check if we're in server mode to use the correct agent path
+    let agent_path = if let Ok(mode) = std::env::var("AURORA_MODE") {
+        if mode == "local" || mode == "sanasol" {
+            // Server mode - use server's agent path
+            let server_dir = crate::config::get_app_dir().join("server");
+            server_dir.join("tools").join("dualauth-agent.jar")
+        } else {
+            // Client mode - use normal agent path
+            let paths = crate::game::paths::GamePaths::new(crate::config::get_app_dir());
+            paths.dualauth_agent()
+        }
+    } else {
+        // No mode specified - use normal path
+        let paths = crate::game::paths::GamePaths::new(crate::config::get_app_dir());
+        paths.dualauth_agent()
+    };
     
     if agent_path.exists() {
         // Check if Java Agent is already present to avoid duplication

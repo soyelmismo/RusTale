@@ -185,7 +185,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         tokio::task::spawn_blocking(move || crate::util::copy_recursive_sync(mt, st)).await??;
     }
 
-    crate::java::download_jre(&client, &root_dir, &callback, None).await?;
+    let _java_info = crate::java_detection::ensure_java_available(&root_dir).await?;
     let _butler_path =
         crate::game::patcher::install_butler(&client, &root_dir, &callback, None).await?;
 
@@ -663,10 +663,22 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         cmd.env("HYTALE_TRUSTED_ISSUERS", config.trusted_issuers.join(","));
     }
 
-    // Inject Java Agent
+    // Inject Java Agent (with duplication check)
     let agent_path = crate::game::paths::GamePaths::new(root_dir.clone()).dualauth_agent();
     if agent_path.exists() {
-        cmd.arg(format!("-javaagent:{}", agent_path.to_string_lossy()));
+        // Check if Java Agent is already present to avoid duplication
+        let agent_arg = format!("-javaagent:{}", agent_path.to_string_lossy());
+        
+        // Get current args from the command to check for duplication
+        let current_args = cmd.as_std().get_args().collect::<Vec<&std::ffi::OsStr>>();
+        let already_present = current_args.iter().any(|a| a.to_string_lossy() == agent_arg);
+
+        if !already_present {
+            cmd.arg(agent_arg);
+            println!("[Server] Injecting Java Agent: {:?}", agent_path);
+        } else {
+            println!("[Server] Java Agent already present in arguments. Skipping injection.");
+        }
     } else {
         println!(
             "  - WARNING: Java Agent NOT FOUND at {:?}. Authentication may fail.",

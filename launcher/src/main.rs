@@ -2696,8 +2696,16 @@ impl RusTale {
                 if self.is_minimized {
                     self.is_minimized = false;
                     println!("[Window] Window restored from minimized - Enabling ticks");
+                    
+                    // Recargar imágenes de noticias después de restaurar ventana (si está habilitado)
+                    let mut tasks = vec![window::oldest().and_then(|id| window::toggle_maximize(id))];
+                    if self.settings.enable_news {
+                        tasks.push(Task::done(Message::News(NewsMessage::ReloadImages)));
+                    }
+                    Task::batch(tasks)
+                } else {
+                    window::oldest().and_then(|id| window::toggle_maximize(id))
                 }
-                window::oldest().and_then(|id| window::toggle_maximize(id))
             }
             Message::ToggleFullscreen => {
                 // Alternamos el estado interno de fullscreen
@@ -2774,6 +2782,11 @@ impl RusTale {
                     window::Event::Focused => {
                         self.is_focused = true;
                         println!("[Window] Window gained focus - Enabling ticks");
+                        
+                        // Recargar imágenes de noticias si están vacías y la sección está habilitada
+                        if self.settings.enable_news && !self.news_section.posts.is_empty() && self.news_section.images.is_empty() {
+                            return Task::done(Message::News(NewsMessage::ReloadImages));
+                        }
                     }
                     window::Event::Unfocused => {
                         self.is_focused = false;

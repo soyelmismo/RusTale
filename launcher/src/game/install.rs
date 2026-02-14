@@ -153,8 +153,8 @@ pub async fn ensure_installed(
 
         let paths = crate::game::paths::GamePaths::new(base_dir.clone());
         let game_ok = is_game_installed(base_dir, channel, check_ver).await;
-        let jre_ok = paths.java_exec().exists();
-        let butler_ok = paths.butler().exists();
+        let jre_ok = tokio::fs::metadata(&paths.java_exec()).await.is_ok();
+        let butler_ok = tokio::fs::metadata(&paths.butler()).await.is_ok();
         if game_ok && jre_ok && butler_ok {
             // Incluso en modo offline, verificamos rápidamente si el agente existe (sin descargar)
             if let Ok(exists) = crate::game::agent::quick_verify_agent(base_dir).await {
@@ -178,8 +178,9 @@ pub async fn ensure_installed(
 
     // --- NETWORK PATH: Full Update/Install ---
 
-    // 1. Download JRE if needed
-    crate::java::download_jre(client, base_dir, &progress_callback, cancel_token.clone()).await?;
+    // 1. Ensure JRE is available (only downloads if needed)
+    println!("[JRE Debug] game/install.rs - base_dir: {}", base_dir.display());
+    let _java_info = crate::java_detection::ensure_java_available(base_dir).await?;
 
     // 2. Install Butler if needed
     crate::game::patcher::install_butler(

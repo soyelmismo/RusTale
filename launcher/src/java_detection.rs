@@ -5,7 +5,11 @@ pub async fn ensure_java_available(base_dir: &std::path::Path) -> anyhow::Result
     let jre_base_dir = tools_dir.join("jre");
     let latest_dir = jre_base_dir.join("latest");
 
+    println!("[JRE Debug] base_dir: {}", base_dir.display());
+    println!("[JRE Debug] latest_dir: {}", latest_dir.display());
+
     if crate::java::is_jre_installed_at(&latest_dir) {
+        println!("[JRE] JRE already installed at: {}", latest_dir.display());
 
         // Movemos la operacion bloqueante a un hilo separado para no congelar la UI/LSD
         let version =
