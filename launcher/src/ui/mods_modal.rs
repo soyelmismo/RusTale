@@ -1251,8 +1251,8 @@ impl ModsState {
             }
             
             // --- VIEWPORT OPTIMIZATION HANDLERS ---
-            ModsMessage::ScrollOffsetChanged(delta) => {
-                self.scroll_offset = (self.scroll_offset + delta).max(0.0);
+            ModsMessage::ScrollOffsetChanged(offset) => {
+                self.scroll_offset = offset;
                 Task::none()
             }
             ModsMessage::UpdateViewportHeight(height) => {
@@ -1546,6 +1546,7 @@ impl ModsState {
         theme::magic_scrollable(
             scrollable(theme::magic_column(content_items, ctx))
                 .id(Id::new(MODS_SCROLL_ID))
+                .on_scroll(|viewport| ModsMessage::ScrollOffsetChanged(viewport.absolute_offset().y))
                 .height(Length::Fill)
                 .style(move |t: &Theme, s| theme::scrollable_style(&palette, t, s))
                 .into(),
@@ -1768,6 +1769,7 @@ impl ModsState {
         )
     }
 
+
     fn view_browse<'a>(
         &'a self,
         localization: &'a crate::lang::Localization,
@@ -1839,6 +1841,7 @@ impl ModsState {
             theme::magic_container(
                 container(theme::magic_scrollable(
                     scrollable(l)
+                        .on_scroll(|viewport| ModsMessage::ScrollOffsetChanged(viewport.absolute_offset().y))
                         .height(Length::Fill)
                         .style(move |t: &Theme, s| theme::scrollable_style(&palette, t, s))
                         .into(),

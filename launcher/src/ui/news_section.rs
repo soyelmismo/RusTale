@@ -187,23 +187,9 @@ impl NewsSection {
                 },
                 |_| Message::None,
             ),
-            NewsMessage::ScrollOffsetChanged(delta) => {
-                if delta == f32::MIN {
-                    // Home key - resetear al inicio
-                    self.scroll_offset = 0.0;
-                } else if delta == f32::MAX {
-                    // End key - scroll al final
-                    let post_height_estimate = 120.0;
-                    let post_spacing = 8.0;
-                    let total_post_height = post_height_estimate + post_spacing;
-                    let total_content_height = self.posts.len() as f32 * total_post_height;
-                    self.scroll_offset = (total_content_height - self.viewport_height).max(0.0);
-                } else {
-                    // Scroll normal - acumular el delta
-                    self.scroll_offset += delta;
-                    // Asegurar que el offset no sea negativo
-                    self.scroll_offset = self.scroll_offset.max(0.0);
-                }
+            NewsMessage::ScrollOffsetChanged(offset) => {
+                // Iced on_scroll provides the absolute offset
+                self.scroll_offset = offset;
                 Task::none()
             }
             NewsMessage::GetScrollOffset => {
@@ -373,7 +359,6 @@ impl NewsSection {
                             .iter()
                             .enumerate()
                             .map(|(i, post)| {
-                                // Ajustar el índice real para mantener consistencia
                                 let real_index = start_index + i;
                                 self.view_post_with_index(post, real_index, loc, is_disabled, ctx)
                             })
@@ -385,6 +370,7 @@ impl NewsSection {
                 .spacing(0),
             )
             .id(Id::new(NEWS_SCROLL_ID))
+            .on_scroll(|viewport| NewsMessage::ScrollOffsetChanged(viewport.absolute_offset().y))
             .height(Length::Fill)
             .style(move |t: &Theme, s| theme::scrollable_style(&palette, t, s))
             .into(),
@@ -468,21 +454,24 @@ impl NewsSection {
                                 .opacity(ctx.palette.text_primary.a),
                             ctx
                         ),
-                        theme::text_micro(post.format_date(), ctx)
+                        // [OPTIMIZACIÓN] Usar theme::text para la fecha (vibración sí, derretimiento letra a letra no)
+                        theme::text(iced::widget::text(post.format_date()).size(10).color(palette.text_secondary), ctx)
                     ]
                     .spacing(4),
-                    theme::text_body(&post.title, ctx),
+                    // [OPTIMIZACIÓN] Usar theme::text para el título (un solo widget SmoothTranslate)
+                    theme::text(iced::widget::text(&post.title).size(18).color(palette.accent), ctx),
                     
-                    // --- CAMBIO AQUi ---
-                    // Antes usabas theme::text_caption, ahora usamos theme::text_paragraph
-                    // Esto habilita el wrapping multilinea CON el efecto letra por letra
-                    theme::text_paragraph(
-                        post.body_excerpt
-                            .as_deref()
-                            .unwrap_or_else(|| loc.t("news.no_desc")),
+                    // [OPTIMIZACIÓN] Usar theme::text para el excerpt (un solo widget SmoothTranslate)
+                    theme::text(
+                        iced::widget::text(
+                            post.body_excerpt
+                                .as_deref()
+                                .unwrap_or_else(|| loc.t("news.no_desc"))
+                        )
+                        .size(12)
+                        .color(palette.text_secondary),
                         ctx
                     )
-                    // -------------------
                 ]
                 .spacing(2)
                 .width(Length::Fill)

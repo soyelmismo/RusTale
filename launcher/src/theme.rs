@@ -1763,7 +1763,9 @@ pub fn text_lsd_letters<'a, M: 'a>(
     color: Color,
     ctx: UIContext,
 ) -> Element<'a, M, Theme, Renderer> {
-    text_lsd_letters_batched(text_str, size, color, ctx, 1)
+    // [PERFORMANCE] Aumentamos batch_size por defecto a 3.
+    // Letra a letra (1) consume demasiada CPU en listas largas.
+    text_lsd_letters_batched(text_str, size, color, ctx, 3)
 }
 
 // VERSIÓN CON BATCHING: Para uso interno con optimización
