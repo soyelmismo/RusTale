@@ -10,37 +10,6 @@ const STREAM_BUFFER_SIZE: usize = 64 * 1024; // 64KB chunks para streaming efici
 const BG_WIDTH: u32 = 640;   // 360p width
 const BG_HEIGHT: u32 = 360;  // 360p height
 
-/// Intenta cargar la imagen de forma SINCRONA (bloqueante) si existe en cache.
-/// Ideal para el background en el arranque, evitando el retraso de 1 segundo.
-/// Retorna `Some(Handle)` si la imagen esta en cache, `None` si no existe.
-pub fn load_image_sync_if_exists(url: &str) -> Option<iced_image::Handle> {
-    // 1. Calcular hash sincronamente
-    let mut hasher = Sha256::new();
-    hasher.update(url.as_bytes());
-    let hash = hex::encode(hasher.finalize());
-
-    // 2. Resolver ruta de cache (duplicamos logica para evitar async)
-    let base_dir = crate::config::get_app_dir();
-    let file_path = base_dir
-        .join("cache")
-        .join("images")
-        .join(format!("{}.jpg", hash));
-
-    // 3. Si existe, leer con streaming optimizado para reducir picos de memoria
-    if file_path.exists() {
-        match read_image_streaming_sync(&file_path) {
-            Ok(data) => return Some(iced_image::Handle::from_bytes(data)),
-            Err(_) => {
-                // Si falla el streaming, intentar método tradicional como fallback
-                if let Ok(data) = std::fs::read(&file_path) {
-                    return Some(iced_image::Handle::from_bytes(data));
-                }
-            }
-        }
-    }
-    None
-}
-
 /// Carga una imagen desde cache o descarga y guarda en cache usando el cliente compartido
 pub async fn load_image(client: &Client, url: &str) -> Result<iced_image::Handle> {
     let file_path = get_image_path(client, url, "images").await?;
@@ -188,30 +157,6 @@ async fn read_image_streaming(file_path: &Path) -> Result<Vec<u8>> {
     
     loop {
         let bytes_read = file.read(&mut temp_buffer).await
-            .context("Failed to read from image file")?;
-        
-        if bytes_read == 0 {
-            break; // EOF
-        }
-        
-        buffer.extend_from_slice(&temp_buffer[..bytes_read]);
-    }
-    
-    Ok(buffer)
-}
-
-/// Lee una imagen usando streaming síncrono para reducir picos de memoria (fallback)
-fn read_image_streaming_sync(file_path: &Path) -> Result<Vec<u8>> {
-    use std::io::Read;
-    
-    let mut file = std::fs::File::open(file_path)
-        .context("Failed to open image file")?;
-    
-    let mut buffer = Vec::with_capacity(STREAM_BUFFER_SIZE);
-    let mut temp_buffer = [0u8; STREAM_BUFFER_SIZE];
-    
-    loop {
-        let bytes_read = file.read(&mut temp_buffer)
             .context("Failed to read from image file")?;
         
         if bytes_read == 0 {

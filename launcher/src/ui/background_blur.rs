@@ -38,10 +38,6 @@ impl BackgroundBlur {
         }
     }
     
-    pub fn set_blur_amount(&mut self, amount: f32) {
-        self.blur_amount = amount.clamp(0.0, 1.0);
-    }
-
     pub fn update_time(&mut self, time: f32) {
         self.current_time = time;
     }
