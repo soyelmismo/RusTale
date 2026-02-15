@@ -7,7 +7,7 @@ static GLOBAL: MiMalloc = MiMalloc;
 
 use clap::Parser;
 use futures::SinkExt;
-use iced::widget::{Space, column, container, image, mouse_area, row, stack};
+use iced::widget::{Space, column, container, image, mouse_area, row, stack, shader};
 use iced::{
     Alignment, Color, ContentFit, Element, Length, Padding, Point, Size, Subscription, Task, Theme,
     clipboard,
@@ -49,7 +49,7 @@ use crate::lang::Localization;
 use crate::settings::{SettingsMessage, SettingsState};
 use crate::ui::mods_modal::{ModsMessage, ModsState};
 use crate::ui::news_section::{NewsMessage, NewsSection};
-use crate::ui::{control_section, lsd_shader, profile_card}; // Import the struct
+use crate::ui::{control_section, lsd_shader, background_blur, profile_card}; // Importar structs
 
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about = None)]
@@ -350,7 +350,7 @@ pub enum Message {
     RepairFinished(Result<(), String>),
     OpenVersionFolder(u32),
     InstalledVersionsReceived(Vec<(i32, bool)>),
-    BackgroundLoaded(Result<image::Handle, String>),
+    BackgroundLoaded(Result<Vec<u8>, String>),
     ProfileSelected(Profile),
     AddProfile,
     EditProfile(uuid::Uuid),
@@ -420,7 +420,6 @@ struct RusTale {
     eta: Option<String>,
     error: Option<String>,
     running_game: Option<(GameSettings, String, String, Option<i32>, LauncherStatus)>, // (Settings, Name, ID/UUID, TargetVersion)
-    bg_handle: Option<image::Handle>,
     editing_profile: Option<(Option<uuid::Uuid>, String)>, // (ID, Name) - None ID means new profile
     editing_uuid: Option<(uuid::Uuid, String)>,
     profile_dropdown_open: bool,
@@ -474,6 +473,10 @@ struct RusTale {
     shader_click_intensity: f32,           // Intensidad del pulso actual
     shader_click_time: std::time::Instant, // Tiempo del ultimo clic
     lsd_shader_instance: std::cell::RefCell<Option<lsd_shader::LsdShader>>, // Instancia mutable para llamadas dinamicas
+    // ---------------------------------------------
+    
+    // --- CAMPOS PARA BLUR DE BACKGROUND ---
+    background_blur: Option<background_blur::BackgroundBlur>, // Control de blur independiente del LSD
     // ---------------------------------------------
 
     // NUEVOS CAMPOS PARA TRANSICIoN DE SHADERS
@@ -578,25 +581,25 @@ impl RusTale {
             lsd_shader::set_safe_mode_shader();
         }
 
-        // --- BACKGROUND OPTIMIZATION ---
         // Background URL
         let bg_url = "https://hytale.com/static/images/backgrounds/content-upper-new-1920.jpg";
 
-        // 1. Try fast synchronous load from cache (0ms latency)
-        let initial_bg = util::image_cache::load_image_sync_if_exists(bg_url);
+        let initial_bg_bytes = util::image_cache::load_background_optimized_bytes_sync(bg_url);
 
-        // 2. If not in cache, create async download task
+        // 2. If not in optimized cache, create async processing task
         //    (only happens the first time the launcher is opened)
-        let bg_task = if initial_bg.is_some() {
-            Task::none() // Already have the image, no need to download
+        let bg_task = if initial_bg_bytes.is_some() {
+            Task::none() // Already have optimized image, no need to process
         } else {
             Task::perform(
                 async move {
-                    util::image_cache::load_image(&client_for_bg, bg_url)
-                        .await
-                        .map_err(|e| e.to_string())
+                    util::image_cache::process_background_async(&client_for_bg, bg_url)
+                        .await?;
+                    
+                    util::image_cache::load_background_optimized_bytes_sync(bg_url)
+                        .ok_or_else(|| anyhow::anyhow!("Failed to reload processed background"))
                 },
-                Message::BackgroundLoaded,
+                |res| Message::BackgroundLoaded(res.map_err(|e| e.to_string())),
             )
         };
 
@@ -619,7 +622,6 @@ impl RusTale {
                 eta: None,
                 error: None,
                 running_game: None,
-                bg_handle: initial_bg, // Assign the handle immediately (can be Some or None)
                 editing_profile: None,
                 editing_uuid: None,
                 profile_dropdown_open: false,
@@ -687,6 +689,10 @@ impl RusTale {
                 shader_click_intensity: 0.0,
                 shader_click_time: std::time::Instant::now(),
                 lsd_shader_instance: std::cell::RefCell::new(None), // Se inicializara dinamicamente
+                // ---------------------------------------------
+                
+                // --- CAMPOS PARA BLUR DE BACKGROUND ---
+                background_blur: initial_bg_bytes.map(background_blur::BackgroundBlur::new), // Iniciado si ya hay cache
                 // ---------------------------------------------
 
                 // NUEVOS CAMPOS PARA TRANSICIoN DE SHADERS
@@ -1379,8 +1385,8 @@ impl RusTale {
                 Task::none()
             }
             Message::BackgroundLoaded(res) => {
-                if let Ok(handle) = res {
-                    self.bg_handle = Some(handle);
+                if let Ok(bytes) = res {
+                    self.background_blur = Some(background_blur::BackgroundBlur::new(bytes));
                 }
                 Task::none()
             }
@@ -3129,13 +3135,14 @@ impl RusTale {
             }
         };
 
-        // --- LOGICA DE FONDO (STACK COMPUESTO) ---
-        // 1. Capa Base: Imagen Estatica o Color
-        let base_layer: Element<'_, Message> = if let Some(handle) = &self.bg_handle {
-            image(handle.clone())
+        // --- LOGICA DE FONDO CON BLUR ACTIVADO ---
+        // 1. Capa Base: Imagen Estatica 360p optimizada
+        // --- LOGICA DE FONDO CON BLUR NATIVO ---
+        // 1. Obtener capa de fondo (Shader Blur o Dark Container si carga)
+        let bg_layer: Element<'_, Message> = if let Some(blur) = &self.background_blur {
+            shader(blur)
                 .width(Length::Fill)
                 .height(Length::Fill)
-                .content_fit(ContentFit::Cover)
                 .into()
         } else {
             container(Space::new())
@@ -3145,16 +3152,13 @@ impl RusTale {
                 .into()
         };
 
-        // 2. Capa Shader: Se superpone con Alpha variable
-        let bg: Element<'_, Message> = if self.settings.theme.lsd_mode {
-
+        // 2. Calcular shader LSD si está activo
+        let lsd_shader_layer = if self.settings.theme.lsd_mode {
             // Crear o actualizar instancia del shader dinamicamente
             let mut shader_opt = self.lsd_shader_instance.borrow_mut();
 
             // CORRECCIoN: Separar opacidad del shader de la opacidad de la UI
-            // El shader debe responder solo al ramp_alpha (fade-in inicial) y a la proteccion de redimensionamiento
-            // pero ignorar si el usuario esta ocultando los menus con el clic
-            let shader_base_alpha = ramp_alpha; // ramp_alpha va de 0.0 a 1.0 segun theme::LSD_RAMP_UP_SECONDS
+            let shader_base_alpha = ramp_alpha;
             let resize_multiplier = if self.resizing_direction.is_some() {
                 0.0
             } else {
@@ -3162,45 +3166,47 @@ impl RusTale {
             };
 
             let shader_instance = if let Some(ref mut shader) = *shader_opt {
-                // Actualizar posicion del mouse, shader_id y color de acento
                 shader.update_mouse_position(self.cursor_position);
-                // IMPORTANTE: Actualizar shader_id durante transiciones
                 shader.update_shader_id(self.active_shader_idx);
-                // IMPORTANTE: Actualizar estado de transicion
                 shader.update_transition(self.next_shader_idx, self.shader_transition);
-                // IMPORTANTE: Actualizar color de acento en tiempo real
                 shader.update_accent(palette.accent);
-
                 shader.update_alpha(shader_base_alpha * resize_multiplier);
                 shader
             } else {
-                // Crear nueva instancia
                 *shader_opt = Some(lsd_shader::LsdShader::new(
                     self.start_time,
                     self.cursor_position,
                     palette.accent,
                     self.active_shader_idx,
-                    shader_base_alpha, // <--- CORREGIDO: Usar alfa base basado en ramp_alpha
-                    effect_intensity,  // <--- CORREGIDO: Controla violencia matematica del fractal
+                    shader_base_alpha,
+                    effect_intensity,
                 ));
                 let shader = shader_opt.as_mut().unwrap();
                 shader.update_alpha(shader_base_alpha * resize_multiplier);
                 shader
             };
 
-            // Disparar trigger_click si hay un pulso activo
             if click_pulse > 0.01 {
                 shader_instance.trigger_click();
             }
 
-            let shader_layer = iced::widget::shader(shader_instance.clone())
+            Some(iced::widget::shader(shader_instance.clone())
                 .width(Length::Fill)
-                .height(Length::Fill);
-
-            // Apilamos: Imagen estatica abajo, Shader arriba (transicionando transparencia)
-            iced::widget::stack![base_layer, shader_layer].into()
+                .height(Length::Fill)
+                .into())
         } else {
-            base_layer
+            None
+        };
+
+        // 3. Stack Final del Fondo: [Blur Shader] -> [LSD Shader]
+        let bg: Element<'_, Message> = if let Some(lsd) = lsd_shader_layer {
+            stack(vec![
+                bg_layer,
+                lsd
+            ])
+            .into()
+        } else {
+            bg_layer
         };
 
         // --- CONSTRUCCIoN DE LA BARRA DE TiTULO ---
