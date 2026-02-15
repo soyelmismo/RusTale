@@ -7,8 +7,8 @@ use iced::{Alignment, Element, Length};
 
 pub fn view<'a>(
     profiles: &'a ProfilesConfig,
-    editing_profile: &'a Option<(Option<String>, String)>,
-    editing_uuid: &'a Option<(String, String)>,
+    editing_profile: &'a Option<(Option<uuid::Uuid>, String)>,
+    editing_uuid: &'a Option<(uuid::Uuid, String)>,
     dropdown_open: bool,
     localization: &'a crate::lang::Localization,
     ctx: theme::UIContext,
@@ -203,7 +203,7 @@ pub fn view<'a>(
                                         .opacity(ctx.palette.text_primary.a),
                                     ctx
                                 ))
-                                .on_press(Message::EditProfileUUID(profile.id.clone()))
+                                .on_press(Message::EditProfileUUID(profile.id))
                                 .style(move |t, s| theme::icon_button_style(&palette, t, s))
                                 .padding(4)
                                 .into(),
@@ -222,7 +222,7 @@ pub fn view<'a>(
                                     .opacity(ctx.palette.text_primary.a),
                                 ctx
                             ))
-                            .on_press(Message::EditProfile(profile.id.clone()))
+                            .on_press(Message::EditProfile(profile.id))
                             .style(move |t, s| theme::icon_button_style(&palette, t, s))
                             .padding(4)
                             .into(),
@@ -237,7 +237,7 @@ pub fn view<'a>(
                                     .opacity(ctx.palette.text_primary.a),
                                 ctx
                             ))
-                            .on_press(Message::DeleteProfile(profile.id.clone()))
+                            .on_press(Message::DeleteProfile(profile.id))
                             .style(move |t, s| theme::icon_button_style(&palette, t, s))
                             .padding(4)
                             .into(),

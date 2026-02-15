@@ -1,12 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tokio::fs;
+use uuid::Uuid;
 
 // --- DATA STRUCTURES ---
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub struct Profile {
-    pub id: String,
+    pub id: Uuid,
     pub name: String,
 }
 
@@ -22,15 +23,15 @@ impl std::fmt::Display for Profile {
 pub struct ProfilesConfig {
     pub profiles: Vec<Profile>,
     #[serde(rename = "current_profile")]
-    pub current_profile: String,
+    pub current_profile: Uuid,
 }
 
 impl Default for ProfilesConfig {
     fn default() -> Self {
-        let id = uuid::Uuid::new_v4().to_string();
+        let id = Uuid::new_v4();
         Self {
             profiles: vec![Profile {
-                id: id.clone(),
+                id,
                 name: "Player".to_string(),
             }],
             current_profile: id,
@@ -53,43 +54,44 @@ impl ProfilesConfig {
     }
 
     pub fn add_profile(&mut self, name: String) {
+        let new_id = Uuid::new_v4();
         let new_profile = Profile {
-            id: uuid::Uuid::new_v4().to_string(),
+            id: new_id,
             name,
         };
-        self.current_profile = new_profile.id.clone();
+        self.current_profile = new_profile.id;
         self.profiles.push(new_profile);
     }
 
-    pub fn update_profile(&mut self, id: &str, new_name: String) {
-        if let Some(profile) = self.profiles.iter_mut().find(|p| p.id == id) {
+    pub fn update_profile(&mut self, id: &Uuid, new_name: String) {
+        if let Some(profile) = self.profiles.iter_mut().find(|p| p.id == *id) {
             profile.name = new_name;
         }
     }
 
-    pub fn update_profile_uuid(&mut self, old_id: &str, new_uuid: String) {
+    pub fn update_profile_uuid(&mut self, old_id: &Uuid, new_uuid: Uuid) {
         // Verificamos que el ID exista
-        if let Some(pos) = self.profiles.iter().position(|p| p.id == old_id) {
+        if let Some(pos) = self.profiles.iter().position(|p| p.id == *old_id) {
             // Actualizamos el ID en el vector
-            self.profiles[pos].id = new_uuid.clone();
+            self.profiles[pos].id = new_uuid;
 
             // Si el perfil editado era el seleccionado actualmente, actualizamos la referencia
-            if self.current_profile == old_id {
+            if self.current_profile == *old_id {
                 self.current_profile = new_uuid;
             }
         }
     }
 
-    pub fn delete_profile(&mut self, id: &str) {
+    pub fn delete_profile(&mut self, id: &Uuid) {
         if self.profiles.len() <= 1 {
             return;
         }
 
-        self.profiles.retain(|p| p.id != id);
+        self.profiles.retain(|p| p.id != *id);
 
-        if self.current_profile == id {
+        if self.current_profile == *id {
             if let Some(first) = self.profiles.first() {
-                self.current_profile = first.id.clone();
+                self.current_profile = first.id;
             }
         }
     }

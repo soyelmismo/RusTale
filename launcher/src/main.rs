@@ -353,12 +353,12 @@ pub enum Message {
     BackgroundLoaded(Result<image::Handle, String>),
     ProfileSelected(Profile),
     AddProfile,
-    EditProfile(String),
-    DeleteProfile(String),
+    EditProfile(uuid::Uuid),
+    DeleteProfile(uuid::Uuid),
     ProfileNameChanged(String),
     SaveProfileName,
     CancelProfileEdit,
-    EditProfileUUID(String),
+    EditProfileUUID(uuid::Uuid),
     ProfileUUIDChanged(String),
     SaveProfileUUID,
     CancelProfileUUIDEdit,
@@ -421,8 +421,8 @@ struct RusTale {
     error: Option<String>,
     running_game: Option<(GameSettings, String, String, Option<i32>, LauncherStatus)>, // (Settings, Name, ID/UUID, TargetVersion)
     bg_handle: Option<image::Handle>,
-    editing_profile: Option<(Option<String>, String)>, // (ID, Name) - None ID means new profile
-    editing_uuid: Option<(String, String)>,
+    editing_profile: Option<(Option<uuid::Uuid>, String)>, // (ID, Name) - None ID means new profile
+    editing_uuid: Option<(uuid::Uuid, String)>,
     profile_dropdown_open: bool,
     latest_version: Option<i32>,
     available_versions: Vec<i32>, // CAMBIO: Cache persistente de versiones
@@ -960,7 +960,7 @@ impl RusTale {
                 // Primero check si ya corre
                 if !game::server::is_server_alive(port).await {
                     println!("[App] Starting background Auth Server on {}", port);
-                    let _ = game::server::start_server(username, uuid, game_dir, rx, port).await;
+                    let _ = game::server::start_server(username, uuid.to_string(), game_dir, rx, port).await;
                 } else {
                     println!("[App] Auth Server already active on {}. Attached.", port);
                 }
@@ -1532,7 +1532,7 @@ impl RusTale {
                     self.running_game = Some((
                         settings,
                         player_name,
-                        player_uuid,
+                        player_uuid.to_string(),
                         target_ver,
                         trigger_status,
                     ));
@@ -1865,7 +1865,7 @@ impl RusTale {
             Message::EditProfileUUID(id) => {
                 self.editing_profile = None;
                 if let Some(p) = self.profiles.profiles.iter().find(|p| p.id == id) {
-                    self.editing_uuid = Some((p.id.clone(), p.id.clone()));
+                    self.editing_uuid = Some((p.id, p.id.to_string()));
                 }
                 Task::none()
             }
@@ -1879,8 +1879,7 @@ impl RusTale {
                 if let Some((original_id, new_val)) = self.editing_uuid.take() {
                     let cleaned_uuid = new_val.trim().to_string();
                     if let Ok(parsed) = uuid::Uuid::parse_str(&cleaned_uuid) {
-                        let final_uuid = parsed.to_string();
-                        self.profiles.update_profile_uuid(&original_id, final_uuid);
+                        self.profiles.update_profile_uuid(&original_id, parsed);
                         let profiles = self.profiles.clone();
                         Task::perform(
                             async move { config::save_profiles(&profiles).await },
@@ -1901,8 +1900,8 @@ impl RusTale {
             Message::CopyUUID(uuid_str) => clipboard::write(uuid_str),
             Message::GenerateRandomUUID => {
                 if let Some((original_id, _)) = &self.editing_uuid {
-                    let new_uuid = uuid::Uuid::new_v4().to_string();
-                    self.editing_uuid = Some((original_id.clone(), new_uuid));
+                    let new_uuid = uuid::Uuid::new_v4();
+                    self.editing_uuid = Some((*original_id, new_uuid.to_string()));
                 }
                 Task::none()
             }
@@ -2845,7 +2844,7 @@ impl RusTale {
             }
             Message::EditProfile(id) => {
                 if let Some(p) = self.profiles.profiles.iter().find(|p| p.id == id) {
-                    self.editing_profile = Some((Some(p.id.clone()), p.name.clone()));
+                    self.editing_profile = Some((Some(p.id), p.name.clone()));
                 }
                 Task::none()
             }
@@ -2859,7 +2858,7 @@ impl RusTale {
             }
             Message::ProfileNameChanged(name) => {
                 if let Some((id, _)) = &self.editing_profile {
-                    self.editing_profile = Some((id.clone(), name));
+                    self.editing_profile = Some(((*id), name));
                 }
                 Task::none()
             }
@@ -2872,20 +2871,16 @@ impl RusTale {
                             self.profiles.add_profile(name);
                         }
                         let profiles = self.profiles.clone();
-                        Task::perform(
+                        return Task::perform(
                             async move { config::save_profiles(&profiles).await },
                             |_| Message::None,
-                        )
+                        );
                     } else {
                         Task::none()
                     }
                 } else {
                     Task::none()
                 }
-            }
-            Message::CancelProfileEdit => {
-                self.editing_profile = None;
-                Task::none()
             }
             Message::ToggleProfileDropdown => {
                 self.profile_dropdown_open = !self.profile_dropdown_open;
