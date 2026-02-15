@@ -742,6 +742,7 @@ impl RusTale {
         let is_minimized = self.is_minimized;
         let is_visible = self.is_window_visible;
         let is_interactive = is_visible && !is_minimized && is_focused;
+        let is_modal_active = self.settings_state.is_open || self.mods_state.is_open;
         let lsd_active = self.settings.theme.lsd_mode || self.lsd_preview;
 
         let game_runner =
@@ -804,14 +805,14 @@ impl RusTale {
         let tick_sub = {
             let tick_interval = if !is_visible {
                 None 
-            } else if !lsd_active {
+            } else if !lsd_active && !is_modal_active {
                 Some(std::time::Duration::from_millis(1000)) // 1 FPS housekeeping
             } else if !is_focused {
                 None 
             } else if self.resizing_direction.is_some() {
                 None 
             } else {
-                Some(std::time::Duration::from_millis(16)) // 60 FPS normal
+                Some(std::time::Duration::from_millis(16)) // 60 FPS normal (for real LSD or dummy label)
             };
 
             if let Some(d) = tick_interval {
@@ -999,12 +1000,15 @@ impl RusTale {
                     blur.update_time(frame_time);
                 }
                 
+                // Detectamos si hay algun modal abierto para animar el texto "dummy"
+                let is_modal_active = self.settings_state.is_open || self.mods_state.is_open;
+                
                 if let Some(ref mut lsd) = *self.lsd_shader_instance.borrow_mut() {
                     lsd.update_time(frame_time);
                 }
 
-                // Bloqueo de seguridad: si desactivas el LSD pero quedaba un evento en cola.
-                if !self.settings.theme.lsd_mode {
+                // Bloqueo de seguridad: si desactivas el LSD pero no hay modal (no hay texto dummy que animar)
+                if !self.settings.theme.lsd_mode && !is_modal_active {
                     return Task::none();
                 }
 
@@ -3326,7 +3330,7 @@ impl RusTale {
                 .interaction(self.get_cursor_interaction())
                 .on_press(Message::MousePressed);
 
-            // [OPTIMIZATION] Only track mouse move if LSD is active to save 90+ CPU on mouse movement
+            // [OPTIMIZATION] Only track mouse move if LSD is active to save 90+ CPU
             if self.settings.theme.lsd_mode || self.lsd_preview {
                 window_frame_area.on_move(Message::CursorMoved).into()
             } else {
@@ -3445,7 +3449,7 @@ impl RusTale {
                 .interaction(self.get_cursor_interaction())
                 .on_press(Message::MousePressed);
 
-            // [OPTIMIZATION] Only track mouse move if LSD is active to save 90+ CPU on mouse movement
+            // [OPTIMIZATION] Only track mouse move if LSD is active to save 90+ CPU
             if self.settings.theme.lsd_mode || self.lsd_preview {
                 final_mouse_area.on_move(Message::CursorMoved).into()
             } else {

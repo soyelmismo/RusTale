@@ -532,10 +532,6 @@ pub fn lsd_magic_text<'a, M: 'a>(
     label: &'a str,
     ctx: UIContext,
 ) -> Element<'a, M, Theme, Renderer> {
-    if !ctx.lsd_enabled {
-        return iced::widget::text(label).size(14).into();
-    }
-
     let mut row = iced::widget::row![].spacing(0);
 
     for (i, c) in label.chars().enumerate() {
@@ -554,10 +550,10 @@ pub fn lsd_magic_text<'a, M: 'a>(
             SmoothTranslate::new(
                 char_el.into(),
                 (off_x, off_y),
-                ctx.mouse_pos,
+                iced::Point::new(-1000.0, -1000.0), // Dummy mouse pos (no trackeo para efecto "dummy")
                 false, // Que se mueva siempre
                 1.0,   // Fuerza maxima
-                ctx.lsd_enabled,
+                true,  // Forzar siempre activo para ESTE texto (el label "LSD" en settings)
             )
             .resizing(ctx.is_resizing)
             .with_stillness(ctx.mouse_stillness),
