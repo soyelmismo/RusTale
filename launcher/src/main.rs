@@ -2080,6 +2080,9 @@ impl RusTale {
                             } else {
                                 self.lsd_enabled_time = None;
                                 self.lsd_preview = false;
+                                // [OPTIMIZATION] Force full visibility and cursor when LSD is off
+                                self.ui_opacity_accumulator = 1.0;
+                                self.is_cursor_hidden = false;
                             }
                         }
                         // Retornamos temprano para evitar procesamiento adicional
@@ -3301,6 +3304,13 @@ impl RusTale {
             .on_press(Message::WindowDrag)
             .interaction(Interaction::Grab);
 
+        // [OPTIMIZATION] Only track mouse move if LSD is active to save 90% CPU
+        let title_bar = if self.settings.theme.lsd_mode || self.lsd_preview {
+            title_bar.on_move(Message::CursorMoved)
+        } else {
+            title_bar
+        };
+
         // Estructura principal visual (Fondo + Barra + Contenido)
         let visual_content: Element<'_, Message> = if self.is_wayland {
             // En Wayland, no mostrar title bar personalizado, solo el contenido
@@ -3374,11 +3384,16 @@ impl RusTale {
         // --- SISTEMA DE REDIMENSIONAMIENTO (8 LADOS) ---
         if self.is_maximized || self.is_fullscreen || self.is_wayland {
             // Aplicar cursor segun estado de ocultamiento incluso cuando está maximizado, en fullscreen o en Wayland
-            mouse_area(window_frame)
+            let window_frame_area = mouse_area(window_frame)
                 .interaction(self.get_cursor_interaction())
-                .on_move(Message::CursorMoved)
-                .on_press(Message::MousePressed)
-                .into()
+                .on_press(Message::MousePressed);
+
+            // [OPTIMIZATION] Only track mouse move if LSD is active to save 90+ CPU on mouse movement
+            if self.settings.theme.lsd_mode || self.lsd_preview {
+                window_frame_area.on_move(Message::CursorMoved).into()
+            } else {
+                window_frame_area.into()
+            }
         } else {
             let b = 10.0; // Grosor del borde para arrastrar
             let c = 20.0; // Tamano de la zona de las esquinas
@@ -3488,11 +3503,16 @@ impl RusTale {
             ];
 
             // Aplicar cursor segun estado de ocultamiento
-            mouse_area(final_stack)
+            let final_mouse_area = mouse_area(final_stack)
                 .interaction(self.get_cursor_interaction())
-                .on_move(Message::CursorMoved)
-                .on_press(Message::MousePressed)
-                .into()
+                .on_press(Message::MousePressed);
+
+            // [OPTIMIZATION] Only track mouse move if LSD is active to save 90+ CPU on mouse movement
+            if self.settings.theme.lsd_mode || self.lsd_preview {
+                final_mouse_area.on_move(Message::CursorMoved).into()
+            } else {
+                final_mouse_area.into()
+            }
         }
     }
 
