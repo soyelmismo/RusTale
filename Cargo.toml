@@ -17,5 +17,29 @@ lto = "off"          # Apaga LTO explicitamente (Linkeo rapido)
 codegen-units = 256  # CLAVE: Paraleliza la compilacion al maximo
 panic = 'abort'      # Sin unwinding (menor tamano, linkeo mas simple)
 strip = false        # Saltar el paso de stripping ahorra tiempo de build
-debug = false        # Sin info de debug
+debug = 0           # Minima info de debug para builds rapidos
 incremental = true   # Opcional: Habilita compilacion incremental (cache)
+
+# Perfil de desarrollo optimizado para velocidad
+[profile.dev]
+opt-level = 0        # Compilación ultra-rápida
+debug = 0           # Sin símbolos de debug para builds más rápidos
+strip = "debuginfo" # Remover debug info del binario final
+overflow-checks = false # Desactivar checks en desarrollo
+lto = false         # Sin LTO para compilación rápida
+codegen-units = 16  # Máxima paralelización
+incremental = true  # Compilación incremental activada
+panic = "unwind"    # unwind es mejor para desarrollo
+
+# Perfil de testing optimizado
+[profile.test]
+opt-level = 1       # Ligera optimización para tests más rápidos
+debug = 0          # Sin debug info
+strip = "debuginfo"
+codegen-units = 16  # Alta paralelización
+incremental = true
+panic = "unwind"
+
+# Optimización para procedural macros y build scripts
+[profile.dev.build-override]
+opt-level = 3       # Optimizar macros para ejecución rápida

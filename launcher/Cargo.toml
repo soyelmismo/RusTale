@@ -11,7 +11,7 @@ winres = "0.1.12"
 # Optimization for Release: This makes the binary MUCH smaller and faster
 
 [dependencies]
-# UI Framework
+# UI Framework - Características necesarias para el proyecto
 iced = { version = "0.14.0", features = [
     "image",
     "svg",
@@ -25,8 +25,18 @@ iced_renderer = "0.14.0"
 
 mimalloc = { version = "0.1.48", default-features = false }
 
-# Async Runtime
-tokio = { version = "1.49.0", features = ["full"] }
+# Async Runtime - Características específicas necesarias para el proyecto
+tokio = { version = "1.49.0", features = [
+    "rt-multi-thread",
+    "macros",
+    "sync",
+    "time",
+    "fs",
+    "io-util",
+    "net",
+    "process",  # Necesario para tokio::process::Command
+    "signal"    # Necesario para tokio::signal::ctrl_c
+] }
 async-trait = "0.1.89"
 
 # HTTP Client
@@ -55,12 +65,15 @@ hex = "0.4.3"
 # Added 'serde' feature to chrono
 chrono = { version = "0.4.43", features = ["serde"] }
 anyhow = "1.0.100"
-thiserror = "2.0.18"
+# Removed: thiserror (unused)
+# thiserror = "2.0.18"
 base64 = "0.22.1"
 rand = "0.9.2"
-memchr = "2.7.6"
+# Removed: memchr (unused)
+# memchr = "2.7.6"
 warp = { version = "0.4.2", features = ["server"] }
-portpicker = "0.1.1"
+# Removed: portpicker (unused)
+# portpicker = "0.1.1"
 regex = "1.12.2"
 
 
@@ -81,19 +94,23 @@ clap = { version = "4.5.54", features = ["derive"] }
 
 # System Tray
 tray-icon = "0.21.3"
-tao = { version = "0.34.5", default-features = false, features = [
-    "rwh_06",
-    "x11",
-] }
+# Removed: tao (unused)
+# tao = { version = "0.34.5", default-features = false, features = [
+#     "rwh_06",
+#     "x11",
+# ] }
 # To load icons in the tray
 image = "0.25.9"
 ed25519-dalek = { version = "2.2.0", features = ["rand_core"] }
 
-memmap2 = "0.9.9"
+# Removed: memmap2 (unused)
+# memmap2 = "0.9.9"
 
-rayon = "1.11.0"
+# Removed: rayon (unused)
+# rayon = "1.11.0"
 
-md5 = "0.8.0"
+# Removed: md5 (unused)
+# md5 = "0.8.0"
 bytes = "1.11.0"
 
 urlencoding = "2.1.3"
@@ -123,4 +140,5 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_System_ProcessStatus", # <--- CRÍTICO PARA LIMPIAR RAM
 ] }
 
-tokio-stream = { version = "0.1.18", features = ["net"] }
+# Removed: tokio-stream (unused)
+# tokio-stream = { version = "0.1.18", features = ["net"] }

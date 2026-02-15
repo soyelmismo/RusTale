@@ -1,0 +1,72 @@
+# Configuración optimizada para compilación rápida de Rust
+
+# Compilador más rápido para desarrollo
+[build]
+# Usar más cores para paralelización
+jobs = 3  # Ajusta según tu CPU (usualmente número de cores físicos)
+
+# Cache de compilación incremental
+incremental = true
+
+# Optimizaciones para desarrollo
+[target.'cfg(all(debug_assertions, not(target_os = "windows")))']
+rustflags = ["-C", "target-cpu=native"]
+
+[target.'cfg(all(debug_assertions, target_os = "windows"))']
+rustflags = ["-C", "target-cpu=generic"]
+
+# Para compilaciones de release optimizadas
+[target.'cfg(not(debug_assertions))']
+rustflags = [
+    "-C", "target-cpu=native",
+    "-C", "codegen-units=1",
+    "-C", "lto=fat",
+    "-C", "embed-bitcode=no"
+]
+
+# Optimización para procedural macros
+[profile.dev.build-override]
+opt-level = 3
+
+# Perfil de desarrollo ultra-rápido
+[profile.dev]
+# Compilación rápida con runtime aceptable
+opt-level = 0
+debug = 0  # Desactivar debug info para builds más rápidos
+strip = "debuginfo"  # Remover debug info del binario final
+overflow-checks = false  # Desactivar checks en desarrollo para velocidad
+lto = false
+codegen-units = 16  # Máxima paralelización
+incremental = true
+panic = "unwind"
+
+# Perfil de testing optimizado
+[profile.test]
+opt-level = 1  # Ligera optimización para tests más rápidos
+debug = 0
+strip = "debuginfo"
+codegen-units = 16
+incremental = true
+panic = "unwind"
+
+# Perfil de bench optimizado
+[profile.bench]
+opt-level = 3
+debug = false
+strip = "debuginfo"
+lto = true
+codegen-units = 1
+incremental = false
+panic = "abort"
+
+# Configuración para doc builds
+[profile.doc]
+opt-level = 0
+debug = 0
+codegen-units = 16
+incremental = false
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = [
+
+"-C", "link-arg=-fuse-ld=mold"]
