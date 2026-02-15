@@ -28,6 +28,8 @@ pub fn view<'a>(
     total_bytes: u64,
     downloaded_bytes: u64,
     eta: Option<&'a String>,
+    current_step: Option<usize>,
+    total_steps: Option<usize>,
     ctx: theme::UIContext,
 ) -> Element<'a, Message> {
 
@@ -252,7 +254,11 @@ pub fn view<'a>(
                     row![
                         theme::text_micro(localization.t("launcher.status.step"), ctx),
                         Space::new().width(Length::Fill),
-                        theme::text_micro(format!("{:.0}%", sub_progress), ctx)
+                        if let (Some(current), Some(total)) = (current_step, total_steps) {
+                            theme::text_micro(format!("Current step ({}/{})", current, total), ctx)
+                        } else {
+                            theme::text_micro(format!("{:.0}%", sub_progress), ctx)
+                        }
                     ],
                     container(
                         ProgressBar::new(0.0..=100.0, sub_progress)

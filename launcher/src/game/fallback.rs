@@ -124,21 +124,30 @@ pub fn get_jre_url(fallback_data: &FallbackAPI) -> Result<String> {
         .ok_or_else(|| anyhow::anyhow!("JRE not found for {}-{}", os_name, arch_name))
 }
 
+/// Helper function to get platform data for a channel
+fn get_platform_data<'a>(fallback_data: &'a FallbackAPI, channel: &str) -> Result<&'a PlatformData> {
+    match channel {
+        "release" => Ok(&fallback_data.hytale.release),
+        "pre-release" => Ok(&fallback_data.hytale.pre_release),
+        _ => anyhow::bail!("Unsupported channel: {}", channel),
+    }
+}
+
+/// Helper function to get OS files for a platform
+fn get_os_files(platform_data: &PlatformData) -> Result<&std::collections::HashMap<String, String>> {
+    let os_name = std::env::consts::OS;
+    match os_name {
+        "linux" => Ok(&platform_data.linux.files),
+        "windows" => Ok(&platform_data.windows.files),
+        "macos" => Ok(&platform_data.mac.files),
+        _ => anyhow::bail!("Unsupported OS: {}", os_name),
+    }
+}
+
 /// Get latest version number for a channel
 pub fn get_latest_version(fallback_data: &FallbackAPI, channel: &str) -> Result<i32> {
-    let platform_data = match channel {
-        "release" => &fallback_data.hytale.release,
-        "pre-release" => &fallback_data.hytale.pre_release,
-        _ => anyhow::bail!("Unsupported channel: {}", channel),
-    };
-
-    let os_name = std::env::consts::OS;
-    let os_data = match os_name {
-        "linux" => &platform_data.linux.files,
-        "windows" => &platform_data.windows.files,
-        "macos" => &platform_data.mac.files,
-        _ => anyhow::bail!("Unsupported OS: {}", os_name),
-    };
+    let platform_data = get_platform_data(fallback_data, channel)?;
+    let os_data = get_os_files(platform_data)?;
 
     // Extract version numbers from filenames like "v8-linux-amd64.pwr" or "v19~20-linux-amd64.pwr"
     let mut max_version = 0;
@@ -151,50 +160,134 @@ pub fn get_latest_version(fallback_data: &FallbackAPI, channel: &str) -> Result<
     }
 
     if max_version == 0 {
+        let os_name = std::env::consts::OS;
         anyhow::bail!("No versions found for channel {} on {}", channel, os_name);
     }
 
     Ok(max_version)
 }
 
-/// Get download URL for a specific version
-pub fn get_version_url(fallback_data: &FallbackAPI, channel: &str, version: i32) -> Result<String> {
-    let platform_data = match channel {
-        "release" => &fallback_data.hytale.release,
-        "pre-release" => &fallback_data.hytale.pre_release,
-        _ => anyhow::bail!("Unsupported channel: {}", channel),
+/// Get all available versions for a channel from fallback API
+pub fn get_all_available_versions(fallback_data: &FallbackAPI, channel: &str) -> Result<Vec<i32>> {
+    let platform_data = get_platform_data(fallback_data, channel)?;
+    let os_data = get_os_files(platform_data)?;
+
+    let mut complete_versions = std::collections::HashSet::new();
+    let mut incremental_versions = std::collections::HashSet::new();
+    
+    // Always include version 0 as base version
+    complete_versions.insert(0);
+    
+    // Extract version numbers from filenames
+    for filename in os_data.keys() {
+        if let Some((from_ver, to_ver)) = extract_versions_from_filename(filename) {
+            if from_ver == 0 {
+                // Complete version: v6-linux-amd64.pwr (extracted as 0->6)
+                complete_versions.insert(to_ver);
+            } else {
+                // Incremental: v5~6-linux-amd64.pwr
+                incremental_versions.insert(from_ver);
+                incremental_versions.insert(to_ver);
+            }
+        }
+    }
+
+    if complete_versions.is_empty() && incremental_versions.is_empty() {
+        let os_name = std::env::consts::OS;
+        anyhow::bail!("No versions found for channel {} on {}", channel, os_name);
+    }
+
+    // For pre-release channels, we need to include all incremental versions
+    // since there are no complete versions available
+    let mut result: Vec<i32> = if channel == "pre-release" {
+        let mut all_versions = std::collections::HashSet::new();
+        all_versions.extend(&complete_versions);
+        all_versions.extend(&incremental_versions);
+        all_versions.into_iter().collect()
+    } else {
+        complete_versions.into_iter().collect()
     };
+    
+    result.sort();
+    println!("Available versions for {}: {:?}", channel, result);
+    Ok(result)
+}
+
+/// Check if a complete version exists for the target
+pub fn has_complete_version(fallback_data: &FallbackAPI, channel: &str, target_version: i32) -> bool {
+    let platform_data = get_platform_data(fallback_data, channel);
+    let os_data = match platform_data {
+        Ok(data) => get_os_files(data),
+        Err(_) => return false,
+    };
+    
+    let os_name = std::env::consts::OS;
+    let arch_name = get_arch_name();
+    let expected_filename = format!("v{}-{}-{}.pwr", target_version, os_name, arch_name);
+    
+    match os_data {
+        Ok(data) => {
+            let has_complete = data.contains_key(&expected_filename);
+            println!("DEBUG: Looking for complete version file: '{}', found: {}", expected_filename, has_complete);
+            has_complete
+        }
+        Err(_) => false
+    }
+}
+
+/// Get download URL for a specific version patch
+pub fn get_version_url(fallback_data: &FallbackAPI, channel: &str, prev_version: i32, target_version: i32) -> Result<String> {
+    let platform_data = get_platform_data(fallback_data, channel)?;
+    let os_data = get_os_files(platform_data)?;
 
     let os_name = std::env::consts::OS;
     let arch_name = get_arch_name();
-    
-    let os_data = match os_name {
-        "linux" => &platform_data.linux.files,
-        "windows" => &platform_data.windows.files,
-        "macos" => &platform_data.mac.files,
-        _ => anyhow::bail!("Unsupported OS: {}", os_name),
-    };
 
     // Try different filename patterns
-    let possible_filenames = match channel {
-        "release" => vec![format!("v{}-{}-{}.pwr", version, os_name, arch_name)],
-        "pre-release" => {
-            // For pre-release, try patterns like "v19~20-linux-amd64.pwr"
-            vec![
-                format!("v{}~{}-{}-{}.pwr", version - 1, version, os_name, arch_name),
-                format!("v{}~{}-{}-{}.pwr", version, version + 1, os_name, arch_name),
-            ]
-        },
-        _ => vec![],
-    };
+    let possible_filenames = vec![
+        // Complete version: "v8-linux-amd64.pwr"
+        format!("v{}-{}-{}.pwr", target_version, os_name, arch_name),
+        // Incremental: "v7~8-linux-amd64.pwr"
+        format!("v{}~{}-{}-{}.pwr", prev_version, target_version, os_name, arch_name),
+    ];
 
     for filename in possible_filenames {
         if let Some(url) = os_data.get(&filename) {
+            println!("Found fallback URL for {}->{}: {}", prev_version, target_version, filename);
             return Ok(url.clone());
         }
     }
 
-    anyhow::bail!("Version {} not found for channel {} on {}-{}", version, channel, os_name, arch_name)
+    anyhow::bail!("Patch {}->{} not found for channel {} on {}-{}", prev_version, target_version, channel, os_name, arch_name)
+}
+
+fn extract_versions_from_filename(filename: &str) -> Option<(i32, i32)> {
+    // Extract version from patterns like:
+    // - "v8-linux-amd64.pwr" -> (0, 8) (complete version)
+    // - "v19~20-linux-amd64.pwr" -> (19, 20) (incremental)
+    
+    if let Some(start) = filename.find('v') {
+        let version_part = &filename[start + 1..];
+        let version_part = version_part.split('-').next()?;
+        
+        if let Some(tilde_pos) = version_part.find('~') {
+            // Incremental format: "19~20" -> (19, 20)
+            let from_part = &version_part[..tilde_pos];
+            let to_part = &version_part[tilde_pos + 1..];
+            match (from_part.parse::<i32>(), to_part.parse::<i32>()) {
+                (Ok(from), Ok(to)) => Some((from, to)),
+                _ => None,
+            }
+        } else {
+            // Complete format: "8" -> (0, 8)
+            match version_part.parse::<i32>() {
+                Ok(version) => Some((0, version)),
+                _ => None,
+            }
+        }
+    } else {
+        None
+    }
 }
 
 fn extract_version_from_filename(filename: &str) -> Option<i32> {
@@ -202,18 +295,8 @@ fn extract_version_from_filename(filename: &str) -> Option<i32> {
     // - "v8-linux-amd64.pwr" -> 8
     // - "v19~20-linux-amd64.pwr" -> 20 (the higher version)
     
-    if let Some(start) = filename.find('v') {
-        let version_part = &filename[start + 1..];
-        let version_part = version_part.split('-').next()?;
-        
-        if let Some(tilde_pos) = version_part.find('~') {
-            // Pre-release format: "19~20" -> take the higher number (20)
-            let second_part = &version_part[tilde_pos + 1..];
-            second_part.parse().ok()
-        } else {
-            // Release format: "8" -> parse directly
-            version_part.parse().ok()
-        }
+    if let Some((_, to)) = extract_versions_from_filename(filename) {
+        Some(to)
     } else {
         None
     }

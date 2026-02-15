@@ -21,9 +21,7 @@ pub async fn initialize() -> Result<()> {
         base_dir.join("logs"),
         base_dir.join("tools"),
         base_dir.join("tools").join("butler"),
-        base_dir.join("tools").join("jre"),
-        base_dir.join("assets"),                 // <--- NUEVO
-        base_dir.join("assets").join("shaders"), // <--- NUEVO
+        base_dir.join("tools").join("jre")
     ];
 
     for folder in folders {
@@ -49,16 +47,6 @@ async fn cleanup_launcher(base_dir: &PathBuf) {
 
     let jre_cache = base_dir.join("cache").join("jre");
     cleanup_partials(&jre_cache).await;
-
-    // --- NUEVO: Limpiar posibles DLLs inyectados huerfanos (Linux) ---
-    #[cfg(target_os = "linux")]
-    {
-        let natives_dir = base_dir.join("cache").join("natives");
-        let temp_so = natives_dir.join("Aurora.so");
-        if temp_so.exists() {
-            let _ = fs::remove_file(temp_so).await;
-        }
-    }
 
     // Rotacion basica de logs (Placeholder para logica mas compleja)
     let logs_dir = base_dir.join("logs");

@@ -141,7 +141,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
 
     // 1. Tool Validation (JRE e Itch/Butler)
     println!("[1/5] Validating tools...");
-    let callback = |task: &str, pct: f64, msg: &str, total: u64, downloaded: u64, eta: Option<String>| {
+    let callback = |task: &str, pct: f64, msg: &str, total: u64, downloaded: u64, eta: Option<String>, _current_step: Option<usize>| {
         if pct == 0.0 || pct == 100.0 {
             let size_info = if total > 0 {
                 format!(" ({} / {})", 

@@ -4,26 +4,6 @@ use std::sync::{Arc, atomic::AtomicBool};
 pub const AGENT_URL: &str =
     "https://github.com/soyelmismo/hytale-auth-server/releases/latest/download/dualauth-agent.jar";
 
-/// Quick check if agent file exists and has reasonable size (no network requests)
-/// Used during installation to avoid blocking
-pub async fn quick_verify_agent(
-    root_dir: &PathBuf,
-) -> anyhow::Result<bool> {
-    let paths = crate::game::paths::GamePaths::new(root_dir.clone());
-    let agent_path = paths.dualauth_agent();
-    
-    if !agent_path.exists() {
-        return Ok(false);
-    }
-    
-    // Just check if file exists and has reasonable size (> 1MB)
-    if let Ok(meta) = tokio::fs::metadata(&agent_path).await {
-        Ok(meta.len() > 7_000_000) // At least 1MB
-    } else {
-        Ok(false)
-    }
-}
-
 pub async fn ensure_agent(
     client: &reqwest::Client,
     root_dir: &PathBuf,

@@ -203,6 +203,8 @@ impl Recipe for Runner {
 
                 tokio::spawn(async move {
                     let progress_tx = tx.clone();
+                    let progress_tx_for_steps = tx.clone(); // Clone extra para UpdateTotalSteps
+                    let progress_tx_for_error = tx.clone(); // Clone extra para DownloadError
                     let result = crate::game::ensure_installed(
                         &install_client,
                         &install_base,
@@ -213,7 +215,7 @@ impl Recipe for Runner {
                             Some(0)
                         },
                         install_policy,
-                        move |phase, sub_p, msg, total_bytes, downloaded_bytes, eta| {
+                        move |phase, sub_p, msg, total_bytes, downloaded_bytes, eta, current_step| {
                             let sub_p_f32 = sub_p as f32;
                             let general_p = progress_calculator.calculate(phase, sub_p_f32);
                             
@@ -224,14 +226,23 @@ impl Recipe for Runner {
                                 total_bytes,
                                 downloaded_bytes,
                                 eta,
+                                current_step,
                             });
                         },
                         Some(cancel_token),
-                    )
-                    .await;
-
-                    if let Err(e) = &result {
-                        let _ = tx.send(crate::Message::DownloadError(e.to_string())).await;
+                    ).await;
+                    
+                    match result {
+                        Ok((total_steps, ())) => {
+                            // Update UI with step information
+                            let _ = progress_tx_for_steps.try_send(Message::UpdateTotalSteps {
+                                total_steps: Some(total_steps),
+                            });
+                        }
+                        Err(ref e) => {
+                            println!("[Install] Installation failed: {}", e);
+                            let _ = progress_tx_for_error.try_send(Message::DownloadError(e.to_string()));
+                        }
                     }
                     let _ = res_tx.send(result).await;
                 });
@@ -250,6 +261,7 @@ impl Recipe for Runner {
                                 total_bytes: 0,
                                 downloaded_bytes: 0,
                                 eta: None,
+                                current_step: None,
                             })
                             .await;
                     }

@@ -139,39 +139,44 @@ pub async fn ensure_installed(
     channel: &str,
     target_version: Option<i32>,
     policy: InstallPolicy,
-    progress_callback: impl Fn(&str, f64, &str, u64, u64, Option<String>),
+    progress_callback: impl Fn(&str, f64, &str, u64, u64, Option<String>, Option<usize>),
     cancel_token: Option<Arc<AtomicBool>>,
-) -> Result<()> {
-    progress_callback("check", 0.0, "Checking installation...", 0, 0, None);
+) -> Result<(usize, ())> {
+    progress_callback("check", 0.0, "Checking installation...", 0, 0, None, None);
 
     // --- FAST PATH: Offline Verification ---
     if policy == InstallPolicy::OfflineVerify {
+        let paths = crate::game::paths::GamePaths::new(base_dir.clone());
+        
+        // For offline verification, we need to check if all components are available locally
         let ver_str = target_version
             .map(|v| v.to_string())
             .unwrap_or_else(|| "latest".to_string());
         let check_ver = if ver_str == "0" { "latest" } else { &ver_str };
-
-        let paths = crate::game::paths::GamePaths::new(base_dir.clone());
+        
+        // Check if game files exist
         let game_ok = is_game_installed(base_dir, channel, check_ver).await;
-        let jre_ok = tokio::fs::metadata(&paths.java_exec()).await.is_ok();
-        let butler_ok = tokio::fs::metadata(&paths.butler()).await.is_ok();
+        
+        // Check if JRE is available
+        let tools_dir = base_dir.join("tools").join("jre");
+        let jre_ok = crate::java::is_jre_installed_at(&tools_dir.join("latest"));
+        
+        // Check if Butler is available
+        let butler_ok = paths.butler().exists();
+        
+        // If everything is OK, we can run offline
         if game_ok && jre_ok && butler_ok {
-            // Incluso en modo offline, verificamos rápidamente si el agente existe (sin descargar)
-            if let Ok(exists) = crate::game::agent::quick_verify_agent(base_dir).await {
-                if !exists {
-                    println!("[Install] Agent not found, will download after game launch");
-                }
-            }
-            progress_callback("complete", 100.0, "Verified.", 0, 0, None);
-            return Ok(());
+            progress_callback("complete", 100.0, "Verified.", 0, 0, None, None);
+            return Ok((0, ()));
         }
 
+        // If something is missing, fall through to network update
         if !game_ok {
-            progress_callback("check", 0.0, "Files missing, downloading...", 0, 0, None);
+            progress_callback("check", 0.0, "Files missing, downloading...", 0, 0, None, None);
         } else if !jre_ok {
-            progress_callback("check", 0.0, "JRE missing, downloading...", 0, 0, None);
+            progress_callback("check", 0.0, "JRE missing, downloading...", 0, 0, None, None);
         } else if !butler_ok {
-            progress_callback("check", 0.0, "Butler missing, downloading...", 0, 0, None);
+            progress_callback("check", 0.0, "Butler missing, downloading...", 0, 0, None, None);
         }
     }
     // ----------------------------------------
@@ -195,7 +200,7 @@ pub async fn ensure_installed(
     println!("[Install] Skipping agent download during installation - will download after game launch");
 
     // 3. Find latest version or use target
-    progress_callback("version", 0.0, "Checking for game updates...", 0, 0, None);
+    progress_callback("version", 0.0, "Checking for game updates...", 0, 0, None, None);
 
     let requested_version = target_version.unwrap_or(0);
     let mut version_manifest =
@@ -219,8 +224,15 @@ pub async fn ensure_installed(
 
     let files_exist = is_game_installed(base_dir, channel, &install_dir_name).await;
 
+    // 4. Download and install game
+    let start_version = if is_latest && files_exist {
+        version_manifest.current_local
+    } else {
+        0
+    };
+
     if files_exist && version_manifest.current_local == 0 && is_latest {
-        progress_callback("check", 50.0, "Detected manual installation. Adopting...", 0, 0, None);
+        progress_callback("check", 50.0, "Detected manual installation. Adopting...", 0, 0, None, None);
 
         save_local_version(base_dir, channel, remote_version).await?;
 
@@ -230,115 +242,253 @@ pub async fn ensure_installed(
 
     // Verificar si ya esta al dia
     if files_exist && (!is_latest || version_manifest.current_local == remote_version) {
-        progress_callback("complete", 100.0, "Game is up to date", 0, 0, None);
-        return Ok(());
+        progress_callback("complete", 100.0, "Game is up to date", 0, 0, None, None);
+        return Ok((0, ()));
     }
 
-    // 4. Download and install game
-    let start_version = if is_latest && files_exist {
-        version_manifest.current_local
+    // --- OPTIMIZED DOWNLOAD/INSTALL STRATEGY ---
+    // Always find the highest complete version ≤ target for optimal downloads
+    let mut highest_complete_version = 0;
+    
+    // Check for complete versions in fallback data (works for both channels)
+    if version_manifest.available_versions_from_fallback.is_some() {
+        match crate::game::fallback::fetch_fallback_data(client).await {
+            Ok(fallback_data) => {
+                // Find highest complete version ≤ target
+                let available_versions = if let Some(ref fallback_versions) = version_manifest.available_versions_from_fallback {
+                    fallback_versions.clone()
+                } else {
+                    version_manifest.available_versions.clone()
+                };
+                
+                for &version in available_versions.iter().rev() { // Check from highest to lowest
+                    if version <= target_ver_val && version > 0 {
+                        if crate::game::fallback::has_complete_version(&fallback_data, channel, version) {
+                            highest_complete_version = version;
+                            println!("Found complete version {} for target {}", version, target_ver_val);
+                            break;
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                println!("DEBUG: Failed to check complete version: {}", e);
+            }
+        }
+    }
+    
+    let base_start_version = if highest_complete_version > 0 {
+        0  // Always start from 0 when we have a complete version
     } else {
-        0
+        start_version
     };
+    
+    println!("Using base version: {} (highest_complete: {}, start: {})", base_start_version, highest_complete_version, start_version);
 
-    if start_version == 0 {
-        // --- FRESH INSTALL / DIRECT DOWNLOAD (Version 0 -> Target) ---
+    // --- PHASE 1: DOWNLOAD ALL PATCHES ---
+    let mut patch_files = Vec::new();
+    let mut current_download_start = base_start_version;
+    let has_complete_version = highest_complete_version > 0;
+    
+    // If we have a complete version > 0, download it first
+    if highest_complete_version > 0 {
         progress_callback(
             "download",
             0.0,
-            &format!("Installing game version {}...", target_ver_val),
+            &format!("Downloading complete version {} (0 -> {})", highest_complete_version, highest_complete_version),
             0,
             0,
             None,
+            Some(1), // Step 1: complete version
         );
-
-        let pwr_path = crate::game::patcher::download_pwr(
+        
+        match crate::game::patcher::download_pwr(
             client,
             channel,
             0,
-            target_ver_val,
+            highest_complete_version,
             &progress_callback,
             cancel_token.clone(),
-        )
-        .await?;
+        ).await {
+            Ok(pwr_path) => {
+                patch_files.push((pwr_path, highest_complete_version));
+                current_download_start = highest_complete_version;
+            }
+            Err(e) => {
+                println!("Failed to download complete version {}: {}", highest_complete_version, e);
+                // Fall back to incremental from 0
+                current_download_start = 0;
+            }
+        }
+    }
+    
+    // Download incremental patches from current_start to target
+    if current_download_start < target_ver_val {
+        // Get available versions for incremental patches
+        let available_versions = if let Some(ref fallback_versions) = version_manifest.available_versions_from_fallback {
+            println!("Using fallback versions for incremental update: {:?}", fallback_versions);
+            fallback_versions.clone()
+        } else {
+            println!("Using default versions for incremental update: {:?}", version_manifest.available_versions);
+            version_manifest.available_versions.clone()
+        };
+        
+        // Filter versions that are greater than current_download_start and less than or equal to target
+        let mut steps: Vec<i32> = available_versions
+            .iter()
+            .cloned()
+            .filter(|&v| v > current_download_start && v <= target_ver_val)
+            .collect();
+        
+        steps.sort();
+        
+        // If no steps found but we need to update, create direct step from start to target
+        if steps.is_empty() && current_download_start < target_ver_val {
+            println!("No intermediate versions found, will download directly from {} to {}", current_download_start, target_ver_val);
+            steps.push(target_ver_val);
+        }
+        
+        println!("Incremental patches to download: {:?}", steps);
+        
+        // Calculate total steps early for UI progress tracking
+        let total_download_steps = if has_complete_version {
+            // If we have complete version + incrementals
+            (1 + steps.len()) as u64 // 1 for complete + number of incrementals
+        } else {
+            // If only incrementals from 0
+            steps.len() as u64
+        };
+        
+        // Update the complete version download callback with proper steps
+        if has_complete_version {
+            progress_callback(
+                "download",
+                0.0,
+                &format!("Downloading patch 1/{}: 0 -> {}", total_download_steps, highest_complete_version),
+                1,
+                total_download_steps,
+                None,
+                Some(1), // Step 1: complete version
+            );
+        }
+        
+        let mut step_index = 0;
+        while step_index < steps.len() && current_download_start < target_ver_val {
+            let next_ver = steps[step_index];
+            
+            // Skip versions that are already installed
+            if next_ver <= current_download_start {
+                step_index += 1;
+                continue;
+            }
+            
+            let current_step = if has_complete_version {
+                (step_index + 2) as u64 // +2 because: 1 for complete version + step_index+1 for current
+            } else {
+                (step_index + 1) as u64 // step_index+1 because it's 0-based
+            };
+            
+            progress_callback(
+                "download",
+                ((step_index as f32 / steps.len() as f32) * 100.0) as f64,
+                &format!(
+                    "Downloading patch {}/{}: {} -> {}",
+                    current_step,
+                    total_download_steps,
+                    current_download_start,
+                    next_ver
+                ),
+                current_step as u64,
+                total_download_steps,
+                None,
+                Some(current_step as usize), // Pasar el current_step calculado
+            );
+            
+            // Crear un wrapper que capture el current_step para pasarlo a download_pwr
+            let current_step_for_download = current_step;
+            let progress_callback_wrapper = |phase: &str, sub_p: f64, msg: &str, total_bytes: u64, downloaded_bytes: u64, eta: Option<String>, _current_step: Option<usize>| {
+                progress_callback(phase, sub_p, msg, total_bytes, downloaded_bytes, eta, Some(current_step_for_download as usize));
+            };
+            
+            match crate::game::patcher::download_pwr(
+                client,
+                channel,
+                current_download_start,
+                next_ver,
+                &progress_callback_wrapper,
+                cancel_token.clone(),
+            ).await {
+                Ok(pwr_path) => {
+                    patch_files.push((pwr_path, next_ver));
+                    current_download_start = next_ver;
+                    step_index += 1; // Move to next step
+                }
+                Err(e) => {
+                    println!("Failed to download patch {}->{}: {}", current_download_start, next_ver, e);
+                    
+                    // Look for the largest available patch from current_download_start
+                    let mut found_larger_patch = false;
+                    let mut next_step_index = step_index + 1;
+                    
+                    while next_step_index < steps.len() {
+                        let future_ver = steps[next_step_index];
+                        match crate::game::patcher::download_pwr(
+                            client,
+                            channel,
+                            current_download_start,
+                            future_ver,
+                            &progress_callback,
+                            cancel_token.clone(),
+                        ).await {
+                            Ok(pwr_path) => {
+                                println!("Found larger patch: {}->{} (skipping missing intermediates)", current_download_start, future_ver);
+                                patch_files.push((pwr_path, future_ver));
+                                current_download_start = future_ver;
+                                step_index = next_step_index + 1; // Skip all intermediate steps
+                                found_larger_patch = true;
+                                break;
+                            }
+                            Err(_) => {
+                                next_step_index += 1;
+                            }
+                        }
+                    }
+                    
+                    if !found_larger_patch {
+                        println!("No patches available from {} to any later version", current_download_start);
+                        break;
+                    }
+                }
+            }
+        }
+    }
 
-        // Apply patch (install)
-        progress_callback("install", 0.0, "Installing game files...", 0, 0, None);
+    // --- PHASE 2: INSTALL ALL PATCHES ---
+    let mut current_ver = 0;  // Always start from 0 for installation
+    for (idx, (pwr_path, next_ver)) in patch_files.iter().enumerate() {
+        progress_callback(
+            "install",
+            ((idx as f32 / patch_files.len() as f32) * 100.0) as f64,
+            &format!("Applying patch {}/{}: {} -> {}", idx + 1, patch_files.len(), current_ver, next_ver),
+            (idx + 1) as u64,
+            patch_files.len() as u64,
+            None,
+            Some(idx + 1), // Pasar el step actual (idx + 1)
+        );
+
         crate::game::patcher::apply_pwr(
             base_dir,
             channel,
-            &pwr_path,
+            pwr_path,
             &install_dir_name,
             &progress_callback,
         )
         .await?;
-    } else {
-        // --- INCREMENTAL UPDATE (Step-by-Step) ---
-        let mut steps: Vec<i32> = version_manifest
-            .available_versions
-            .iter()
-            .cloned()
-            .filter(|&v| v > start_version && v <= target_ver_val)
-            .collect();
 
-        steps.sort();
+        current_ver = *next_ver;
 
-        if steps.is_empty() && start_version < target_ver_val {
-            steps.push(target_ver_val);
-        }
-
-        let mut current_ver = start_version;
-        let total_steps = steps.len();
-
-        for (idx, next_ver) in steps.iter().enumerate() {
-            progress_callback(
-                "download",
-                0.0,
-                &format!(
-                    "Downloading patch {}/{}: {} -> {}",
-                    idx + 1,
-                    total_steps,
-                    current_ver,
-                    next_ver
-                ),
-                0,
-                0,
-                None,
-            );
-
-            let pwr_path = crate::game::patcher::download_pwr(
-                client,
-                channel,
-                current_ver,
-                *next_ver,
-                &progress_callback,
-                cancel_token.clone(),
-            )
-            .await?;
-
-            progress_callback(
-                "install",
-                0.0,
-                &format!("Applying patch {}/{}...", idx + 1, total_steps),
-                0,
-                0,
-                None,
-            );
-
-            crate::game::patcher::apply_pwr(
-                base_dir,
-                channel,
-                &pwr_path,
-                &install_dir_name,
-                &progress_callback,
-            )
-            .await?;
-
-            current_ver = *next_ver;
-
-            if is_latest {
-                let _ = save_local_version(base_dir, channel, current_ver).await;
-            }
+        if is_latest {
+            let _ = save_local_version(base_dir, channel, current_ver).await;
         }
     }
 
@@ -359,11 +509,21 @@ pub async fn ensure_installed(
         let _ = save_local_version(base_dir, channel, target_ver_val).await;
     }
 
-    progress_callback("complete", 100.0, "Game installed successfully", 0, 0, None);
+    progress_callback("complete", 100.0, "Game installed successfully", 0, 0, None, None);
 
     if start_version != target_ver_val {
         let _ = crate::game::patcher::clean_patches_cache(&progress_callback).await;
     }
 
-    Ok(())
+    // Return the total number of steps for UI display
+    let total_steps = if highest_complete_version > 0 {
+        // If we had a complete version + incrementals
+        let incremental_count = target_ver_val.saturating_sub(highest_complete_version);
+        (1 + incremental_count) as usize // 1 for complete + number of incrementals
+    } else {
+        // If only incrementals from 0
+        target_ver_val as usize
+    };
+    
+    Ok((total_steps, ()))
 }

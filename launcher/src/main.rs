@@ -339,6 +339,10 @@ pub enum Message {
         total_bytes: u64,
         downloaded_bytes: u64,
         eta: Option<String>,
+        current_step: Option<usize>,
+    },
+    UpdateTotalSteps {
+        total_steps: Option<usize>,
     },
     GameLaunched(Result<(), String>),
     GameStopped,
@@ -503,6 +507,8 @@ struct RusTale {
     last_user_interaction: std::time::Instant, // Para resetear con clicks también
     is_fullscreen: bool,    // Estado separado para fullscreen (F11)
     is_wayland: bool,       // Detectar si estamos en Wayland para desactivar redimensionamiento custom
+    current_step: Option<usize>, // Para tracking del paso actual de instalación
+    total_steps: Option<usize>, // Para tracking de pasos de instalación
                             // -----------------------------------------------------
 }
 
@@ -720,6 +726,8 @@ impl RusTale {
                 last_user_interaction: std::time::Instant::now(), // Inicializar con tiempo actual
                 is_fullscreen: false,    // Inicialmente no fullscreen
                 is_wayland,             // Valor detectado para desactivar redimensionamiento custom
+                current_step: None,    // Inicialmente sin paso actual
+                total_steps: None,      // Inicialmente sin pasos de instalación
                                          // -----------------------------------------------------
             },
             Task::batch(vec![
@@ -923,6 +931,12 @@ impl RusTale {
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
+        // Handle UpdateTotalSteps separately (installation-related, not settings)
+        if let Message::UpdateTotalSteps { total_steps } = &message {
+            self.total_steps = *total_steps;
+            return Task::none();
+        }
+
         match message {
             Message::CursorMoved(relative_position) => {
                 // [MOUSE THROTTLING] Solo actualizar si ha pasado suficiente tiempo desde la última actualización
@@ -1172,6 +1186,10 @@ impl RusTale {
 
         match message {
             Message::CursorMoved(_) => Task::none(), // Manejado en el primer match
+            Message::UpdateTotalSteps { total_steps } => {
+                self.total_steps = total_steps;
+                Task::none()
+            }
             Message::Mods(msg) => {
                 let base_dir = config::get_app_dir();
                 let client = self.api_client.clone();
@@ -1524,6 +1542,7 @@ impl RusTale {
                 total_bytes,
                 downloaded_bytes,
                 eta,
+                current_step,
             } => {
                 // Track progress changes for stuck detection using GENERAL progress
                 let progress_changed = (progress - self.last_download_progress).abs() > 0.1;
@@ -1544,6 +1563,7 @@ impl RusTale {
                 self.total_bytes = total_bytes;
                 self.downloaded_bytes = downloaded_bytes;
                 self.eta = eta;
+                self.current_step = current_step; // Actualizar current_step dinámico
 
                 println!(
                     "[Progress] General: {:.1}% | Step: {:.1}% | Status: {}",
@@ -3012,6 +3032,8 @@ impl RusTale {
                 self.total_bytes,
                 self.downloaded_bytes,
                 self.eta.as_ref(),
+                self.current_step,
+                self.total_steps,
                 ctx,
             ),
         ]
