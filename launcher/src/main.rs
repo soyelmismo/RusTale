@@ -441,6 +441,7 @@ struct RusTale {
     palette: theme::Palette,
     lsd_offset: (f32, f32),
     start_time: std::time::Instant,
+    current_time: f32,
     lsd_preview: bool,
     cursor_position: iced::Point, // Rastrear raton para efectos
     last_mouse_move_time: std::time::Instant,
@@ -654,6 +655,7 @@ impl RusTale {
                     (0.0, 0.0)
                 },
                 start_time: std::time::Instant::now(),
+                current_time: 0.0,
                 lsd_preview: false,
                 cursor_position: iced::Point::ORIGIN,
                 last_mouse_move_time: std::time::Instant::now(),
@@ -1040,6 +1042,18 @@ impl RusTale {
             }
 
             Message::Tick(_now) => {
+                let frame_time = self.start_time.elapsed().as_secs_f32();
+                self.current_time = frame_time;
+
+                // Actualizar tiempo de los shaders
+                if let Some(ref mut blur) = self.background_blur {
+                    blur.update_time(frame_time);
+                }
+                
+                if let Some(ref mut lsd) = *self.lsd_shader_instance.borrow_mut() {
+                    lsd.update_time(frame_time);
+                }
+
                 // Bloqueo de seguridad: si desactivas el LSD pero quedaba un evento en cola.
                 if !self.settings.theme.lsd_mode {
                     return Task::none();
@@ -3171,6 +3185,7 @@ impl RusTale {
                 shader.update_transition(self.next_shader_idx, self.shader_transition);
                 shader.update_accent(palette.accent);
                 shader.update_alpha(shader_base_alpha * resize_multiplier);
+                shader.update_time(self.current_time);
                 shader
             } else {
                 *shader_opt = Some(lsd_shader::LsdShader::new(
@@ -3183,6 +3198,7 @@ impl RusTale {
                 ));
                 let shader = shader_opt.as_mut().unwrap();
                 shader.update_alpha(shader_base_alpha * resize_multiplier);
+                shader.update_time(self.current_time);
                 shader
             };
 

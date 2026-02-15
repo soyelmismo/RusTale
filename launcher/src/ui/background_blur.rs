@@ -24,8 +24,8 @@ struct BlurUniforms {
 pub struct BackgroundBlur {
     blur_amount: f32,
     image_data: Arc<Vec<u8>>,
+    current_time: f32,
     last_uploaded: Arc<std::sync::atomic::AtomicBool>,
-    start_time: std::time::Instant,
 }
 
 impl BackgroundBlur {
@@ -34,12 +34,16 @@ impl BackgroundBlur {
             blur_amount: 0.7, // Blur cremoso
             image_data: Arc::new(image_bytes),
             last_uploaded: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            start_time: std::time::Instant::now(),
+            current_time: 0.0,
         }
     }
     
     pub fn set_blur_amount(&mut self, amount: f32) {
         self.blur_amount = amount.clamp(0.0, 1.0);
+    }
+
+    pub fn update_time(&mut self, time: f32) {
+        self.current_time = time;
     }
 }
 
@@ -56,7 +60,7 @@ impl<Message> shader::Program<Message> for BackgroundBlur {
         BlurPrimitive {
             uniforms: BlurUniforms {
                 blur_amount: self.blur_amount,
-                time: self.start_time.elapsed().as_secs_f32(),
+                time: self.current_time,
                 resolution: [bounds.width, bounds.height],
             },
             image_data: self.image_data.clone(),

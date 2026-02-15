@@ -2291,18 +2291,14 @@ pub fn text_paragraph<'a, M: 'a + Clone>(
     let color = ctx.palette.text_secondary;
 
     // [CRITICAL PERFORMANCE FIX]
-    // Durante el redimensionamiento, el calculo de layout de "LsdWrapper" (letra por letra)
-    // es demasiado costoso (O(N) donde N es el numero de caracteres).
-    // Si estamos redimensionando, retornamos un Texto nativo simple.
-    // El motor de texto nativo de Iced es extremadamente rapido recalculando saltos de linea.
-    if ctx.is_resizing {
+    // 1. Si el LSD está desactivado globalmente, NO hacer el wrapping manual.
+    // 2. Durante el redimensionamiento, el calculo de layout de "LsdWrapper" (letra por letra)
+    // es demasiado costoso.
+    if !ctx.lsd_enabled || ctx.is_resizing {
         return iced::widget::text(text_owned)
             .size(size_px)
             .color(color)
             .width(Length::Fill)
-            // Permitimos wrapping nativo
-            // Nota: En Iced 0.14 text se wrappea automaticamente si esta en un container limitado,
-            // o no tiene .wrapping explicito (depende de la version, asumimos default wrapping behavior).
             .into();
     }
 

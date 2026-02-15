@@ -36,7 +36,7 @@ struct Uniforms {
 // ==========================================================
 #[derive(Debug, Clone)]
 pub struct LsdShader {
-    start_time: Instant,
+    current_time: f32,
     mouse_pos: Point,
     accent: Color,
     shader_id: u32,   // ID del shader actual
@@ -50,7 +50,7 @@ pub struct LsdShader {
 
 impl LsdShader {
     pub fn new(
-        start_time: Instant,
+        _start_time: Instant,
         mouse_pos: Point,
         accent: Color,
         _shader_id: u32, // Ignoramos IDs, solo existe Uno.
@@ -67,7 +67,7 @@ impl LsdShader {
         let entropy_seed_2: f32 = rng.random_range(0.0..1000.0);
 
         Self {
-            start_time,
+            current_time: 0.0,
             mouse_pos,
             accent,
             shader_id: 0, 
@@ -105,6 +105,10 @@ impl LsdShader {
     pub fn update_alpha(&mut self, alpha: f32) {
         self.alpha = alpha;
     }
+
+    pub fn update_time(&mut self, time: f32) {
+        self.current_time = time;
+    }
 }
 
 impl<Message> shader::Program<Message> for LsdShader {
@@ -118,7 +122,7 @@ impl<Message> shader::Program<Message> for LsdShader {
         bounds: Rectangle,
     ) -> Self::Primitive {
         // Ralentizamos el tiempo para efectos mas hipnoticos
-        let time = self.start_time.elapsed().as_secs_f32() * 0.5;
+        let time = self.current_time * 0.5;
         // Forzamos el calculo de aspect usando los bounds logicos REALES de la ventana
         // que Iced acaba de calcular en el layout pass.
         let aspect = bounds.width / bounds.height.max(1.0);
