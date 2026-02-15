@@ -18,7 +18,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     // AUTO-SINCRO: Buscamos el puerto dinamico de la instancia madre
     let mut auth_port = crate::util::get_saved_port();
 
-    if crate::game::server::is_server_alive(auth_port).await {
+    if auth_server::is_server_alive(auth_port).await {
         println!("[RusTale] Local Auth found on port {}", auth_port);
         println!("[RusTale] Attaching to existing emulator instance...");
     } else {
@@ -44,7 +44,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     let (_server_stop_tx, server_stop_rx) = tokio::sync::oneshot::channel::<()>();
 
     if config.online_mode == "local" {
-        if crate::game::server::is_server_alive(auth_port).await {
+        if auth_server::is_server_alive(auth_port).await {
             println!(
                 "Local Auth Server already running on port {}. Attaching...",
                 auth_port
@@ -55,7 +55,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
             let auth_url = format!("http://127.0.0.000001:{}", auth_port);
             match crate::game::auth::fetch_remote_jwks(&client, &auth_url).await {
                 Ok(jwks) => {
-                    crate::game::crypto::update_jwks_from_remote(jwks);
+                    auth_server::crypto::update_jwks_from_remote(jwks);
                 }
                 Err(e) => {
                     eprintln!(
@@ -86,10 +86,11 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
 
             tokio::spawn(async move {
                 // Try to start the server
-                let res = crate::game::server::start_server(
+                let res = auth_server::start_server(
                     host_name,
                     host_uuid,
                     install_dir_ref,
+                    crate::config::get_identity_dir(),
                     server_stop_rx,
                     auth_port,
                 )

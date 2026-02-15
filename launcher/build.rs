@@ -78,12 +78,18 @@ fn main() {
     let lib_out_dir = aurora_target_dir.join(&profile);
     let lib_path = lib_out_dir.join(format!("{}.{}", lib_name, ext));
 
-    let out_dir = env::var("OUT_DIR").unwrap();
-    let dest_path = PathBuf::from(out_dir).join("aurora_embed.bin");
+    // Obtener el directorio de construcción del launcher (target/debug o target/release)
+    let launcher_target_dir = root_dir.join("target").join(&profile);
+    
+    // Asegurar que el directorio de construcción del launcher exista
+    if !launcher_target_dir.exists() {
+        fs::create_dir_all(&launcher_target_dir).expect("Failed to create launcher target directory");
+    }
 
     if lib_path.exists() {
-        // Copiar el binario compilado
-        std::fs::copy(&lib_path, &dest_path).expect("Failed to copy compiled aurora lib");
+        // Copiar el binario compilado al directorio de construcción del launcher
+        let dest_path = launcher_target_dir.join(format!("aurora.{}", ext));
+        std::fs::copy(&lib_path, &dest_path).expect("Failed to copy compiled aurora lib to launcher target");
         
         // Calcular SHA-256 del binario Aurora
         let aurora_bytes = fs::read(&lib_path).expect("Failed to read aurora binary for checksum");
@@ -94,6 +100,7 @@ fn main() {
         // Pasar el checksum como variable de entorno al compilador
         println!("cargo:rustc-env=AURORA_CHECKSUM={}", checksum);
         
+        println!("Aurora library copied to: {:?}", dest_path);
         println!("Aurora checksum embedded: {}", checksum);
     } else {
         panic!(

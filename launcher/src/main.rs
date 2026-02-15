@@ -905,9 +905,10 @@ impl RusTale {
             // Spawnear
             tokio::spawn(async move {
                 // Primero check si ya corre
-                if !game::server::is_server_alive(port).await {
+                if !auth_server::is_server_alive(port).await {
                     println!("[App] Starting background Auth Server on {}", port);
-                    let _ = game::server::start_server(username, uuid.to_string(), game_dir, rx, port).await;
+                    let identity_dir = config::get_identity_dir();
+                    let _ = auth_server::start_server(username, uuid.to_string(), game_dir, identity_dir, rx, port).await;
                 } else {
                     println!("[App] Auth Server already active on {}. Attached.", port);
                 }
@@ -1919,7 +1920,7 @@ impl RusTale {
                 if old_settings.online_fix_mode != s.online_fix_mode
                     || old_settings.enable_online_fix != s.enable_online_fix
                 {
-                    crate::game::crypto::clear_remote_jwks();
+                    auth_server::crypto::clear_remote_jwks();
                 }
                 // ------------------------------------------------------------------
 

@@ -1,5 +1,5 @@
 [workspace]
-members = ["launcher", "aurora"]
+members = ["launcher", "aurora", "auth-server"]
 resolver = "2"
 
 [profile.release]

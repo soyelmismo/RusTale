@@ -1,9 +1,9 @@
-use crate::game::crypto;
 use anyhow::{Context, Result};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
+use auth_server::crypto;
 
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -110,9 +110,9 @@ pub fn generate_fake_tokens(player_name: &str, player_uuid: &str, issuer_url: &s
     let header = serde_json::json!({
         "alg": "EdDSA",
         "typ": "JWT",
-        "kid": crate::game::crypto::KEY_ID,
+        "kid": crypto::KEY_ID,
         // CRITICO: Esto debe retornar la KEYPAIR completa (con "d"), no solo la pública ("x")
-        "jwk": crate::game::crypto::get_private_jwk_as_value() 
+        "jwk": crypto::get_private_jwk_as_value() 
     });
 
     let id_payload = serde_json::json!({
@@ -142,10 +142,10 @@ pub fn generate_fake_tokens(player_name: &str, player_uuid: &str, issuer_url: &s
     let header_b64 = to_b64(&header);
 
     let signature_b64_id =
-        crate::game::crypto::sign_message(&format!("{}.{}", header_b64, to_b64(&id_payload)));
+        crypto::sign_message(&format!("{}.{}", header_b64, to_b64(&id_payload)));
 
     let signature_b64_session =
-        crate::game::crypto::sign_message(&format!("{}.{}", header_b64, to_b64(&session_payload)));
+        crypto::sign_message(&format!("{}.{}", header_b64, to_b64(&session_payload)));
 
     let tokens = AuthTokens {
         identity_token: format!(

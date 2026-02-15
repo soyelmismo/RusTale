@@ -29,20 +29,6 @@ impl Drop for FileCleanupGuard {
     }
 }
 
-fn copy_aurora_bin_to_path(target_path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
-    let source_path = crate::config::get_app_dir().join("tools").join("aurora.bin");
-    
-    // Verificar integridad del archivo Aurora
-    if !verify_aurora_checksum(&source_path)? {
-        return Err("Aurora binary checksum verification failed!".into());
-    }
-    
-    println!("Copying Aurora from {:?} to {:?}", source_path, target_path);
-    
-    std::fs::copy(&source_path, target_path)?;
-    Ok(())
-}
-
 fn verify_aurora_checksum(aurora_path: &std::path::Path) -> Result<bool, Box<dyn std::error::Error>> {
     // Checksum embebido como variable de entorno en tiempo de compilación
     const EMBEDDED_CHECKSUM: &str = env!("AURORA_CHECKSUM");
@@ -64,6 +50,78 @@ fn verify_aurora_checksum(aurora_path: &std::path::Path) -> Result<bool, Box<dyn
     }
     
     Ok(is_valid)
+}
+
+fn ensure_aurora_installed() -> Result<(), String> {
+    let tools_dir = crate::config::get_app_dir().join("tools");
+    
+    // Asegurar que el directorio tools exista
+    if !tools_dir.exists() {
+        if let Err(e) = std::fs::create_dir_all(&tools_dir) {
+            return Err(format!("Failed to create tools directory: {}", e));
+        }
+    }
+
+    let aurora_lib = format!("aurora{}", std::env::consts::DLL_SUFFIX);
+    
+    let aurora_path = tools_dir.join(&aurora_lib);
+    
+    // Paso 1: Verificar si Aurora ya existe en tools/ con el checksum correcto
+    if aurora_path.exists() {
+        match verify_aurora_checksum(&aurora_path) {
+            Ok(true) => {
+                println!("[Aurora] Found valid Aurora binary in tools/");
+                return Ok(());
+            }
+            Ok(false) => {
+                println!("[Aurora] Existing Aurora binary in tools/ has invalid checksum");
+            }
+            Err(e) => {
+                return Err(format!("Failed to verify Aurora checksum in tools/: {}", e));
+            }
+        }
+    }
+    
+    // Paso 2: Buscar Aurora junto al ejecutable y copiarlo si es válido
+    let exe_path = match std::env::current_exe() {
+        Ok(path) => path,
+        Err(e) => return Err(format!("Cannot get executable path: {}", e)),
+    };
+    
+    let exe_dir = match exe_path.parent() {
+        Some(dir) => dir,
+        None => return Err("Cannot get executable directory".to_string()),
+    };
+    
+    let source_path = exe_dir.join(&aurora_lib);
+    
+    if source_path.exists() {
+        println!("[Aurora] Found Aurora binary alongside executable, verifying...");
+        match verify_aurora_checksum(&source_path) {
+            Ok(true) => {
+                match std::fs::copy(&source_path, &aurora_path) {
+                    Ok(_) => {
+                        println!("[Aurora] Copied valid Aurora binary to tools/");
+                        return Ok(());
+                    }
+                    Err(e) => return Err(format!("Failed to copy Aurora to tools/: {}", e)),
+                }
+            }
+            Ok(false) => {
+                println!("[Aurora] Aurora binary alongside executable has invalid checksum");
+            }
+            Err(e) => {
+                return Err(format!("Failed to verify Aurora checksum alongside executable: {}", e));
+            }
+        }
+    }
+    
+    // Paso 3: No se encontró Aurora válido en ninguna ubicación
+    Err(format!(
+        "Aurora binary not found or invalid. Expected locations:\n  - {:?}\n  - {:?}",
+        aurora_path,
+        source_path
+    ))
 }
 
 pub fn run(
@@ -263,7 +321,7 @@ impl Recipe for Runner {
                 let mut _cleanup_guard: Option<FileCleanupGuard> = None;
 
                 let mut server_port = crate::util::get_saved_port();
-                if !crate::game::server::is_server_alive(server_port).await {
+                if !auth_server::is_server_alive(server_port).await {
                     server_port = crate::util::find_free_port();
                 }
 
@@ -343,13 +401,15 @@ impl Recipe for Runner {
                         let server_game_dir = game_working_dir.clone();
                         let port_clone = server_port;
 
-                        if !crate::game::server::is_server_alive(port_clone).await {
+                        if !auth_server::is_server_alive(port_clone).await {
                             println!("[Runner] Starting Auth Server on port {}", port_clone);
                             tokio::spawn(async move {
-                                let _ = crate::game::server::start_server(
+                                let identity_dir = crate::config::get_identity_dir();
+                                let _ = auth_server::start_server(
                                     server_username,
                                     server_uuid,
                                     server_game_dir,
+                                    identity_dir,
                                     server_stop_rx,
                                     port_clone,
                                 )
@@ -403,33 +463,48 @@ impl Recipe for Runner {
                 // PHASE 3 END
                 // =========================================================
 
-                // Extract DLL/SO (common for both modes)
+                // --- PHASE 3.5: AURORA INSTALLATION ---
                 if settings.enable_online_fix {
+                    if let Err(e) = ensure_aurora_installed() {
+                        eprintln!("[Runner] Failed to ensure Aurora is installed: {}", e);
+                        let _ = output
+                            .send(Message::GameLaunched(Err(format!("Aurora Error: {}", e))))
+                            .await;
+                        return;
+                    }
+                }
+
+                // Aurora ya está disponible en tools/aurora{DLL_SUFFIX}
+                // En Windows se copia a la carpeta del cliente como Secur32.dll
+                let mut _cleanup_guard: Option<FileCleanupGuard> = None;
+                if settings.enable_online_fix {
+                    let tools_aurora_path = crate::config::get_app_dir().join("tools").join(format!("aurora{}", std::env::consts::DLL_SUFFIX));
+                    
+                    // Verificar que Aurora exista
+                    if !tools_aurora_path.exists() {
+                        eprintln!("[Runner] Aurora binary not found at {:?}", tools_aurora_path);
+                        return;
+                    }
+                    
                     #[cfg(target_os = "windows")]
                     {
                         let dll_path = executable_path.parent()
                             .map(|p| p.join("Secur32.dll"))
                             .unwrap_or_else(|| executable_path.join("Secur32.dll"));
-                        if let Err(e) = copy_aurora_bin_to_path(&dll_path) {
+                        
+                        if let Err(e) = std::fs::copy(&tools_aurora_path, &dll_path) {
                             eprintln!("[Runner] Failed to copy Aurora binary: {}", e);
                             return;
                         }
+                        
                         // Initialize the guard
                         _cleanup_guard = Some(FileCleanupGuard { path: dll_path });
+                        println!("[Runner] Aurora copied to Secur32.dll");
                     }
+                    
                     #[cfg(target_os = "linux")]
                     {
-                        let natives_dir = base_dir.join("cache").join("natives");
-                        if !natives_dir.exists() {
-                            let _ = std::fs::create_dir_all(&natives_dir);
-                        }
-                        let so_path = natives_dir.join("Aurora.so");
-                        if let Err(e) = copy_aurora_bin_to_path(&so_path) {
-                            eprintln!("[Runner] Failed to copy Aurora binary: {}", e);
-                            return;
-                        }
-                        // Initialize the guard
-                        _cleanup_guard = Some(FileCleanupGuard { path: so_path });
+                        println!("[Runner] Using Aurora binary from tools/");
                     }
                 }
 
@@ -442,7 +517,7 @@ impl Recipe for Runner {
                     // --- Sincronizar JWKS Remotos (BLOQUEANTE AQUi PARA EVITAR RACE CONDITIONS) ---
                     match crate::game::auth::fetch_remote_jwks(&client, &auth_url).await {
                         Ok(jwks) => {
-                            crate::game::crypto::update_jwks_from_remote(jwks);
+                            auth_server::crypto::update_jwks_from_remote(jwks);
                         }
                         Err(e) => {
                             eprintln!(
@@ -583,8 +658,7 @@ impl Recipe for Runner {
 
                     #[cfg(target_os = "linux")]
                     {
-                        let natives_dir = base_dir.join("cache").join("natives");
-                        let so_path = natives_dir.join("Aurora.so");
+                        let so_path = crate::config::get_app_dir().join("tools").join("aurora.so");
 
                         // En lugar de sobreescribir LD_PRELOAD, es mejor añadirla.
                         // Algunos sistemas tienen sus propias precargas (fakeroot, steam overlay, etc).

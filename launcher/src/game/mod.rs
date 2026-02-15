@@ -1,6 +1,5 @@
 pub mod agent;
 pub mod auth;
-pub mod crypto;
 pub mod fallback;
 
 pub mod downloader;
@@ -13,7 +12,6 @@ pub mod paths;
 pub mod progress;
 pub mod repair;
 pub mod runner;
-pub mod server;
 pub mod status;
 pub mod zip_mods;
 

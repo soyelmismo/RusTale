@@ -1,0 +1,37 @@
+[package]
+name = "auth-server"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+# Web framework
+axum = { version = "0.8.8", features = ["json", "macros"] }
+
+# Async runtime
+tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "sync", "fs", "net"] }
+
+# Serialization
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+
+# HTTP Client (for health check)
+reqwest = { version = "0.13.1", default-features = false, features = ["rustls"] }
+
+# Utilities
+chrono = { version = "0.4.43", features = ["serde"] }
+uuid = { version = "1.19.0", features = ["v4", "serde"] }
+anyhow = "1.0.100"
+bytes = "1.11.0"
+
+# Crypto
+sha2 = "0.10.9"
+base64 = "0.22.1"
+ed25519-dalek = { version = "2.2.0", features = ["rand_core"] }
+rand = "0.9.2"
+
+# Archive handling (for cosmetics)
+zip = { version = "7.2.0", features = ["deflate"] }
+
+[lib]
+name = "auth_server"
+path = "src/lib.rs"
