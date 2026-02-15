@@ -19,7 +19,8 @@ pub enum NewsMessage {
     ReloadImages, // Nuevo mensaje para recargar imágenes después de liberar memoria
     OpenPost(String),
     OpenAllNews,
-    ScrollOffsetChanged(f32), // Nuevo mensaje para tracking de scroll
+    ScrollOffsetChanged(f32), // Absolute position from Scrollable
+    ScrollDelta(f32),         // Relative change from global listener
     GetScrollOffset, // Nuevo mensaje para solicitar el offset actual
 }
 
@@ -188,8 +189,15 @@ impl NewsSection {
                 |_| Message::None,
             ),
             NewsMessage::ScrollOffsetChanged(offset) => {
-                // Iced on_scroll provides the absolute offset
-                self.scroll_offset = offset;
+                // Throttling: only update if change is at least 1px to reduce redraws
+                if (self.scroll_offset - offset).abs() > 1.0 {
+                    self.scroll_offset = offset;
+                }
+                Task::none()
+            }
+            NewsMessage::ScrollDelta(delta) => {
+                // Additive update for global scroll events
+                self.scroll_offset = (self.scroll_offset - delta).max(0.0);
                 Task::none()
             }
             NewsMessage::GetScrollOffset => {

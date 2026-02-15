@@ -11,7 +11,7 @@ use iced::widget::{Space, column, container, image, mouse_area, row, stack, shad
 use iced::{
     Alignment, Color, ContentFit, Element, Length, Padding, Point, Size, Subscription, Task, Theme,
     clipboard,
-    event::{self, Event},
+    event::Event,
     mouse,
     mouse::Interaction,
     window,
@@ -738,18 +738,19 @@ impl RusTale {
     }
 
     fn subscription(&self) -> Subscription<Message> {
+        let is_focused = self.is_focused;
+        let is_minimized = self.is_minimized;
+        let is_visible = self.is_window_visible;
+        let is_interactive = is_visible && !is_minimized && is_focused;
+        let lsd_active = self.settings.theme.lsd_mode || self.lsd_preview;
+
         let game_runner =
             if let Some((settings, name, uuid, target_ver, trigger_status)) = &self.running_game {
-                // Ahora usamos trigger_status en lugar de self.status
-                // Esto garantiza que si pulsamos "ACTUALIZAR", la politica sea NetworkUpdate
                 let policy = match trigger_status {
                     LauncherStatus::NeedsInstall | LauncherStatus::NeedsUpdate => {
                         InstallPolicy::NetworkUpdate
                     }
-                    _ => {
-                        // Si estaba en Ready o cualquier otro, verificamos rapido (Offline)
-                        InstallPolicy::OfflineVerify
-                    }
+                    _ => InstallPolicy::OfflineVerify,
                 };
 
                 game::runner::run(
@@ -767,51 +768,18 @@ impl RusTale {
 
         let tray_sub = Subscription::run(tray_events);
         let menu_sub = Subscription::run(menu_events);
-
         let window_sub = window::events().map(|(_id, event)| Message::WindowEvent(event));
 
-        // 2. GLOBAL INPUTS (Solo si ventana está visible/activa)
-        let global_mouse = if !self.is_minimized && self.is_window_visible && self.is_focused {
-            event::listen_with(|event, _status, _id| match event {
-                Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                    Some(Message::MousePressed)
-                }
-                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                    // Usamos ResizeReleased que ya maneja both functionalities
-                    Some(Message::ResizeReleased)
-                }
-                _ => None,
-            })
-        } else {
-            Subscription::none()
-        };
-
-        // 3. EVENTOS UI (Settings/Mods/Shaders) - CORTE RADICAL SI NO ES VISIBLE
-        let is_interactive = self.is_window_visible && !self.is_minimized && self.is_focused;
-
-        let lsd_active = self.settings.theme.lsd_mode || self.lsd_preview;
-
-        let mouse_sub = if is_interactive && lsd_active {
-            // [MODO LSD] Capturamos todo para efectos visuales
+        // 2. GLOBAL INPUTS (Consolidated for performance)
+        let mouse_press = if is_interactive {
             iced::event::listen_with(|event, _status, _window_id| {
                 match event {
-                    iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
-                        Some(Message::CursorMoved(position))
-                    }
-                    iced::Event::Mouse(iced::mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                    iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
                         crate::util::register_activity();
-                        Some(Message::ShaderClicked)
+                        Some(Message::MousePressed) 
                     }
-                    _ => None,
-                }
-            })
-        } else if is_interactive {
-            // [MODO NORMAL] Ignoramos movimiento para ahorrar 90% CPU
-            iced::event::listen_with(|event, _status, _window_id| {
-                match event {
-                    iced::Event::Mouse(iced::mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                        crate::util::register_activity();
-                        Some(Message::ShaderClicked)
+                    iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
+                        Some(Message::ResizeReleased)
                     }
                     _ => None,
                 }
@@ -820,31 +788,30 @@ impl RusTale {
             Subscription::none()
         };
 
-        // 4. TICK SYSTEM (El mayor consumidor de recursos) - OPTIMIZACIÓN AVANZADA
+        let mouse_cursor = if is_interactive && lsd_active {
+            iced::event::listen_with(|event, _status, _window_id| {
+                if let iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) = event {
+                    Some(Message::CursorMoved(position))
+                } else {
+                    None
+                }
+            })
+        } else {
+            Subscription::none()
+        };
+
+        // 3. TICK SYSTEM (Variable rate optimization)
         let tick_sub = {
-            let lsd_active = self.settings.theme.lsd_mode || self.lsd_preview;
-
-            // OPTIMIZATION: Variable Rate Ticking
-            // [FIX LSD] En modo LSD, los ticks corren solo con foco y ventana visible
-            // Si no hay foco o está minimizado, se detienen completamente (o bajan a 1 FPS)
-            
-            // Determinar si debemos tener un tick activo
-            let is_visible = self.is_window_visible && !self.is_minimized;
-            
             let tick_interval = if !is_visible {
-                None // Detener completamente si esta minimizado o invisible
+                None 
             } else if !lsd_active {
-                Some(std::time::Duration::from_millis(1000)) // 1 FPS para housekeeping (RAM/Activity)
-            } else if !self.is_focused {
-                None // En modo LSD, si perdemos el foco, pausamos para ahorrar CPU
+                Some(std::time::Duration::from_millis(1000)) // 1 FPS housekeeping
+            } else if !is_focused {
+                None 
             } else if self.resizing_direction.is_some() {
-                None // Pausado durante redimensionamiento
-            } else if self.is_mouse_pressed {
-                Some(std::time::Duration::from_millis(16)) // 60 FPS
-            } else if self.ui_opacity_accumulator < 0.1 {
-                Some(std::time::Duration::from_millis(16)) // 60 FPS para shader fluido
+                None 
             } else {
-                Some(std::time::Duration::from_millis(16)) // FPS normal
+                Some(std::time::Duration::from_millis(16)) // 60 FPS normal
             };
 
             if let Some(d) = tick_interval {
@@ -854,24 +821,18 @@ impl RusTale {
             }
         };
 
-        // Watchdog subscription: Check every 30 seconds for stuck states
-        let watchdog_sub =
-            iced::time::every(std::time::Duration::from_secs(30)).map(|_| Message::WatchdogCheck);
+        let watchdog_sub = iced::time::every(std::time::Duration::from_secs(30)).map(|_| Message::WatchdogCheck);
+        let memory_stats_sub = iced::time::every(std::time::Duration::from_secs(5)).map(|_| Message::MemoryStatsUpdate);
 
-        // Memory stats subscription: Update every 5 seconds for real-time monitoring
-        let memory_stats_sub =
-            iced::time::every(std::time::Duration::from_secs(5)).map(|_| Message::MemoryStatsUpdate);
-
-        // News scroll tracking: Usar eventos de scroll para detectar cambios
-        let news_scroll_sub = if self.is_news_visible && self.settings.theme.lsd_mode {
+        // 4. SPECIALIZED LISTENERS
+        let news_scroll_sub = if self.is_news_visible && lsd_active {
             iced::event::listen_with(|event, _status, _window_id| {
                 if let iced::Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) = event {
-                    // ScrollDelta tiene diferentes campos según la plataforma
-                    let scroll_delta = match delta {
-                        iced::mouse::ScrollDelta::Lines { y, .. } => y * 10.0,
+                    let scroll_change = match delta {
+                        iced::mouse::ScrollDelta::Lines { y, .. } => y * 30.0,
                         iced::mouse::ScrollDelta::Pixels { y, .. } => y,
                     };
-                    Some(Message::News(NewsMessage::ScrollOffsetChanged(scroll_delta)))
+                    Some(Message::News(NewsMessage::ScrollDelta(scroll_change)))
                 } else {
                     None
                 }
@@ -880,48 +841,20 @@ impl RusTale {
             Subscription::none()
         };
 
-        // Keyboard también condicionado a visibilidad y foco
         let keyboard_sub = if is_interactive {
             iced::event::listen_with(|event, _status, _window_id| {
                 if let Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event {
                     match key {
-                        // Flecha derecha para siguiente shader
-                        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowRight) => {
-                            Some(Message::NextShader)
-                        }
-                        // Alternativa: Tecla 'S'
+                        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowRight) => Some(Message::NextShader),
                         iced::keyboard::Key::Character(s) if s.as_str() == "s" => Some(Message::NextShader),
-                        // Flecha izquierda para shader anterior (usar NextShader con lógica inversa)
-                        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowLeft) => {
-                            Some(Message::NextShader) // Se manejará en update
-                        }
-                        // Alternativa: Tecla 'A'
-                        iced::keyboard::Key::Character(a) if a.as_str() == "a" => Some(Message::NextShader), // Se manejará en update
-                        // Flecha arriba - scroll en noticias
-                        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp) => {
-                            Some(Message::News(NewsMessage::ScrollOffsetChanged(-30.0)))
-                        }
-                        // Flecha abajo - scroll en noticias
-                        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown) => {
-                            Some(Message::News(NewsMessage::ScrollOffsetChanged(30.0)))
-                        }
-                        // Page Up - scroll grande en noticias
-                        iced::keyboard::Key::Named(iced::keyboard::key::Named::PageUp) => {
-                            Some(Message::News(NewsMessage::ScrollOffsetChanged(-300.0)))
-                        }
-                        // Page Down - scroll grande en noticias
-                        iced::keyboard::Key::Named(iced::keyboard::key::Named::PageDown) => {
-                            Some(Message::News(NewsMessage::ScrollOffsetChanged(300.0)))
-                        }
-                        // Home - resetear scroll al inicio
-                        iced::keyboard::Key::Named(iced::keyboard::key::Named::Home) => {
-                            Some(Message::News(NewsMessage::ScrollOffsetChanged(f32::MIN)))
-                        }
-                        // End - scroll al final (calculado dinámicamente)
-                        iced::keyboard::Key::Named(iced::keyboard::key::Named::End) => {
-                            // Esto se manejará en el update con un cálculo dinámico
-                            Some(Message::News(NewsMessage::ScrollOffsetChanged(f32::MAX)))
-                        }
+                        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowLeft) => Some(Message::NextShader),
+                        iced::keyboard::Key::Character(a) if a.as_str() == "a" => Some(Message::NextShader),
+                        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp) => Some(Message::News(NewsMessage::ScrollOffsetChanged(-30.0))),
+                        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown) => Some(Message::News(NewsMessage::ScrollOffsetChanged(30.0))),
+                        iced::keyboard::Key::Named(iced::keyboard::key::Named::PageUp) => Some(Message::News(NewsMessage::ScrollOffsetChanged(-300.0))),
+                        iced::keyboard::Key::Named(iced::keyboard::key::Named::PageDown) => Some(Message::News(NewsMessage::ScrollOffsetChanged(300.0))),
+                        iced::keyboard::Key::Named(iced::keyboard::key::Named::Home) => Some(Message::News(NewsMessage::ScrollOffsetChanged(f32::MIN))),
+                        iced::keyboard::Key::Named(iced::keyboard::key::Named::End) => Some(Message::News(NewsMessage::ScrollOffsetChanged(f32::MAX))),
                         _ => None,
                     }
                 } else {
@@ -938,12 +871,12 @@ impl RusTale {
             menu_sub,
             window_sub,
             tick_sub,
-            watchdog_sub, // Agregar watchdog al batch
-            memory_stats_sub, // Agregar monitoreo de memoria
-            mouse_sub,
-            global_mouse,
-            keyboard_sub, // <--- Agregar esto al batch final
-            news_scroll_sub, // <--- Agregar tracking de scroll
+            watchdog_sub,
+            memory_stats_sub,
+            mouse_press,
+            mouse_cursor,
+            keyboard_sub,
+            news_scroll_sub,
         ])
     }
 
@@ -1044,6 +977,11 @@ impl RusTale {
                         self.ui_opacity_accumulator = 1.0;
                     }
                 }
+
+                // [Consolidation] MousePressed also acts as ShaderClicked now
+                self.shader_click_intensity = 2.0;
+                self.shader_click_time = std::time::Instant::now();
+                self.last_mouse_move_time = std::time::Instant::now();
             }
 
             Message::Tick(_now) => {
