@@ -7,6 +7,7 @@ default-run = "rustale"
 [build-dependencies]
 # Usamos std::process::Command para llamar a cargo, no se requieren dependencias externas extras por ahora
 winres = "0.1.12"
+sha2 = "0.10.9"
 
 # Optimization for Release: This makes the binary MUCH smaller and faster
 

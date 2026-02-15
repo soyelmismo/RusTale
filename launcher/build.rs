@@ -2,6 +2,7 @@ use std::env;
 use std::fs;
 use std::path::{PathBuf};
 use std::process::Command;
+use sha2::{Sha256, Digest};
 
 fn main() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -81,7 +82,19 @@ fn main() {
     let dest_path = PathBuf::from(out_dir).join("aurora_embed.bin");
 
     if lib_path.exists() {
+        // Copiar el binario compilado
         std::fs::copy(&lib_path, &dest_path).expect("Failed to copy compiled aurora lib");
+        
+        // Calcular SHA-256 del binario Aurora
+        let aurora_bytes = fs::read(&lib_path).expect("Failed to read aurora binary for checksum");
+        let mut hasher = Sha256::new();
+        hasher.update(&aurora_bytes);
+        let checksum = format!("{:x}", hasher.finalize());
+        
+        // Pasar el checksum como variable de entorno al compilador
+        println!("cargo:rustc-env=AURORA_CHECKSUM={}", checksum);
+        
+        println!("Aurora checksum embedded: {}", checksum);
     } else {
         panic!(
             "Could not find compiled aurora library at {:?}.",

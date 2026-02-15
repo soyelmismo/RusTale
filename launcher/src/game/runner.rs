@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, atomic::AtomicBool};
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
+use sha2::Digest;
 
 /// Security guard to clean up temporary files when exiting the scope via Drop.
 struct FileCleanupGuard {
@@ -28,8 +29,42 @@ impl Drop for FileCleanupGuard {
     }
 }
 
-// Include the binary compiled by build.rs
-const AURORA_BIN: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/aurora_embed.bin"));
+fn copy_aurora_bin_to_path(target_path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+    let source_path = crate::config::get_app_dir().join("tools").join("aurora.bin");
+    
+    // Verificar integridad del archivo Aurora
+    if !verify_aurora_checksum(&source_path)? {
+        return Err("Aurora binary checksum verification failed!".into());
+    }
+    
+    println!("Copying Aurora from {:?} to {:?}", source_path, target_path);
+    
+    std::fs::copy(&source_path, target_path)?;
+    Ok(())
+}
+
+fn verify_aurora_checksum(aurora_path: &std::path::Path) -> Result<bool, Box<dyn std::error::Error>> {
+    // Checksum embebido como variable de entorno en tiempo de compilación
+    const EMBEDDED_CHECKSUM: &str = env!("AURORA_CHECKSUM");
+    
+    // Calcular checksum del archivo actual
+    let aurora_bytes = std::fs::read(aurora_path)?;
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(&aurora_bytes);
+    let current_checksum = format!("{:x}", hasher.finalize());
+    
+    let is_valid = EMBEDDED_CHECKSUM == current_checksum;
+    
+    if !is_valid {
+        eprintln!("[Security] Aurora checksum mismatch!");
+        eprintln!("[Security] Expected: {}", EMBEDDED_CHECKSUM);
+        eprintln!("[Security] Current:  {}", current_checksum);
+    } else {
+        println!("[Security] Aurora checksum verified: {}", current_checksum);
+    }
+    
+    Ok(is_valid)
+}
 
 pub fn run(
     settings: GameSettings,
@@ -375,8 +410,9 @@ impl Recipe for Runner {
                         let dll_path = executable_path.parent()
                             .map(|p| p.join("Secur32.dll"))
                             .unwrap_or_else(|| executable_path.join("Secur32.dll"));
-                        if let Ok(mut file) = std::fs::File::create(&dll_path) {
-                            let _ = file.write_all(AURORA_BIN);
+                        if let Err(e) = copy_aurora_bin_to_path(&dll_path) {
+                            eprintln!("[Runner] Failed to copy Aurora binary: {}", e);
+                            return;
                         }
                         // Initialize the guard
                         _cleanup_guard = Some(FileCleanupGuard { path: dll_path });
@@ -388,8 +424,9 @@ impl Recipe for Runner {
                             let _ = std::fs::create_dir_all(&natives_dir);
                         }
                         let so_path = natives_dir.join("Aurora.so");
-                        if let Ok(mut file) = std::fs::File::create(&so_path) {
-                            let _ = file.write_all(AURORA_BIN);
+                        if let Err(e) = copy_aurora_bin_to_path(&so_path) {
+                            eprintln!("[Runner] Failed to copy Aurora binary: {}", e);
+                            return;
                         }
                         // Initialize the guard
                         _cleanup_guard = Some(FileCleanupGuard { path: so_path });
