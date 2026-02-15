@@ -789,17 +789,31 @@ impl RusTale {
         // 3. EVENTOS UI (Settings/Mods/Shaders) - CORTE RADICAL SI NO ES VISIBLE
         let is_interactive = self.is_window_visible && !self.is_minimized && self.is_focused;
 
-        let mouse_sub = if is_interactive {
+        let lsd_active = self.settings.theme.lsd_mode || self.lsd_preview;
+
+        let mouse_sub = if is_interactive && lsd_active {
+            // [MODO LSD] Capturamos todo para efectos visuales
             iced::event::listen_with(|event, _status, _window_id| {
-                if let iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) = event {
-                    Some(Message::CursorMoved(position))
-                } else if let iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
-                    mouse::Button::Left,
-                )) = event
-                {
-                    Some(Message::ShaderClicked) // Detectar clic izquierdo
-                } else {
-                    None
+                match event {
+                    iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+                        Some(Message::CursorMoved(position))
+                    }
+                    iced::Event::Mouse(iced::mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                        crate::util::register_activity();
+                        Some(Message::ShaderClicked)
+                    }
+                    _ => None,
+                }
+            })
+        } else if is_interactive {
+            // [MODO NORMAL] Ignoramos movimiento para ahorrar 90% CPU
+            iced::event::listen_with(|event, _status, _window_id| {
+                match event {
+                    iced::Event::Mouse(iced::mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                        crate::util::register_activity();
+                        Some(Message::ShaderClicked)
+                    }
+                    _ => None,
                 }
             })
         } else {
@@ -808,42 +822,33 @@ impl RusTale {
 
         // 4. TICK SYSTEM (El mayor consumidor de recursos) - OPTIMIZACIÓN AVANZADA
         let tick_sub = {
+            let lsd_active = self.settings.theme.lsd_mode || self.lsd_preview;
+
             // OPTIMIZATION: Variable Rate Ticking
             // [FIX LSD] En modo LSD, los ticks corren solo con foco y ventana visible
-            // Si no hay foco o está minimizado, se detienen completamente
-            let should_tick = self.settings.theme.lsd_mode 
-                && !self.is_minimized 
-                && self.is_window_visible
-                && self.is_focused; // <-- Solo con foco
-
-            // Dynamic framerate - usar FPS del monitor cuando está activo
-            let tick_interval = if self.resizing_direction.is_some() {
-                // Paused during resize for smoothness
-                None 
+            // Si no hay foco o está minimizado, se detienen completamente (o bajan a 1 FPS)
+            
+            // Determinar si debemos tener un tick activo
+            let is_visible = self.is_window_visible && !self.is_minimized;
+            
+            let tick_interval = if !is_visible {
+                None // Detener completamente si esta minimizado o invisible
+            } else if !lsd_active {
+                Some(std::time::Duration::from_millis(1000)) // 1 FPS para housekeeping (RAM/Activity)
+            } else if !self.is_focused {
+                None // En modo LSD, si perdemos el foco, pausamos para ahorrar CPU
+            } else if self.resizing_direction.is_some() {
+                None // Pausado durante redimensionamiento
             } else if self.is_mouse_pressed {
-                // High refresh on interaction - usar 60 FPS como máximo
                 Some(std::time::Duration::from_millis(16)) // 60 FPS
             } else if self.ui_opacity_accumulator < 0.1 {
-                // [FIX LSD] UI invisible - usar framerate normal del monitor
                 Some(std::time::Duration::from_millis(16)) // 60 FPS para shader fluido
             } else {
-                // Normal refresh rate del monitor
-                Some(std::time::Duration::from_millis(16)) // 60 FPS
+                Some(std::time::Duration::from_millis(16)) // FPS normal
             };
 
-            // [DEBUG LSD] Log cuando se detienen los ticks
-            if !should_tick && self.settings.theme.lsd_mode {
-                if self.is_minimized {
-                    println!("[LSD] Ticks detenidos - Ventana minimizada");
-                } else if !self.is_focused {
-                    println!("[LSD] Ticks detenidos - Sin foco");
-                } else if !self.is_window_visible {
-                    println!("[LSD] Ticks detenidos - Ventana invisible");
-                }
-            }
-
-            if should_tick && tick_interval.is_some() {
-                iced::time::every(tick_interval.unwrap()).map(Message::Tick)
+            if let Some(d) = tick_interval {
+                iced::time::every(d).map(Message::Tick).into()
             } else {
                 Subscription::none()
             }
@@ -1044,6 +1049,12 @@ impl RusTale {
             Message::Tick(_now) => {
                 let frame_time = self.start_time.elapsed().as_secs_f32();
                 self.current_time = frame_time;
+
+                // [GIRO PREDICTIVO] Si el LSD esta apagado, el raton no manda mensajes.
+                // Usamos el Tick para mantener la actividad viva si la ventana tiene foco.
+                if self.is_focused && !self.is_minimized {
+                    crate::util::register_activity();
+                }
 
                 // Actualizar tiempo de los shaders
                 if let Some(ref mut blur) = self.background_blur {
