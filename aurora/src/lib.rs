@@ -68,32 +68,64 @@ macro_rules! log {
 // ==================== ESTRUCTURAS DE DATOS ====================
 
 
+// Constante para el tamaño máximo de patrones (basado en el análisis de strings más largos)
+const MAX_PATTERN_SIZE: usize = 64;
+
+#[derive(Clone)]
 struct SwapDefinition {
-    pattern_bytes: Vec<u8>,
-    replacement_bytes: Vec<u8>,
+    pattern_bytes: [u8; MAX_PATTERN_SIZE],
+    pattern_len: usize,
+    replacement_bytes: [u8; MAX_PATTERN_SIZE],
+    replacement_len: usize,
 }
 
 impl SwapDefinition {
     fn new(original: &str, replacement: &str) -> Self {
+        let pattern = encode_cs_string_bytes_fixed(original);
+        let replacement = encode_cs_string_bytes_fixed(replacement);
+        
+        let mut pattern_array = [0u8; MAX_PATTERN_SIZE];
+        let mut replacement_array = [0u8; MAX_PATTERN_SIZE];
+        
+        pattern_array[..pattern.len()].copy_from_slice(&pattern);
+        replacement_array[..replacement.len()].copy_from_slice(&replacement);
+        
         Self {
-            pattern_bytes: encode_cs_string_bytes(original),
-            replacement_bytes: encode_cs_string_bytes(replacement),
+            pattern_bytes: pattern_array,
+            pattern_len: pattern.len(),
+            replacement_bytes: replacement_array,
+            replacement_len: replacement.len(),
         }
+    }
+    
+    fn pattern_slice(&self) -> &[u8] {
+        &self.pattern_bytes[..self.pattern_len]
+    }
+    
+    fn replacement_slice(&self) -> &[u8] {
+        &self.replacement_bytes[..self.replacement_len]
     }
 }
 
 // Codifica un str a formato binario [Length: u32][Data: utf16... no null term]
-fn encode_cs_string_bytes(s: &str) -> Vec<u8> {
+// Versión optimizada que retorna un array con tamaño máximo conocido
+fn encode_cs_string_bytes_fixed(s: &str) -> Vec<u8> {
     let utf16: Vec<u16> = s.encode_utf16().collect();
     let size = utf16.len() as u32;
     
-    let mut bytes = Vec::new();
+    // Pre-calcular tamaño exacto para evitar reallocations
+    let total_size = 4 + (utf16.len() * 2);
+    let mut bytes = Vec::with_capacity(total_size);
+    
     bytes.extend_from_slice(&size.to_le_bytes()); // Header
+    
+    // Optimización: escribir directamente como bytes para evitar conversiones intermedias
     for c in utf16 {
         bytes.extend_from_slice(&c.to_le_bytes()); // Data
     }
     bytes
 }
+
 
 // ==================== LISTA DE PARCHES ====================
 
@@ -327,7 +359,7 @@ unsafe fn apply_swaps(region: &MemoryRegion, swaps: &[SwapDefinition], first_byt
         if slice[i+1] == 0 && slice[i+2] == 0 && slice[i+3] == 0 {
             // FASE 3: SEARCH ESPECULATIVO
             for swap in swaps {
-                let pattern = &swap.pattern_bytes;
+                let pattern = swap.pattern_slice();
                 if len_byte == pattern[0] && i + pattern.len() <= region.size {
                     // Magic Trick: Comparamos el contenido (saltando el header ya validado)
                     // Hytale strings: [Len u32] [Data u16...]
@@ -353,7 +385,8 @@ unsafe fn apply_swaps(region: &MemoryRegion, swaps: &[SwapDefinition], first_byt
                         let _guard = unsafe { ScopedProtect::new(region.addr.add(i), pattern.len()) };
                         
                         let writable_mem = unsafe { slice::from_raw_parts_mut(region.addr, region.size) };
-                        writable_mem[i..i+compare_len].copy_from_slice(&swap.replacement_bytes[0..compare_len]);
+                        let replacement = swap.replacement_slice();
+                        writable_mem[i..i+compare_len].copy_from_slice(&replacement[0..compare_len]);
                         
                         replacements_applied += 1;
                         i += pattern.len(); // SALTO EXPONENCIAL: Saltamos todo el string ya procesado
@@ -391,7 +424,8 @@ unsafe fn scan_and_patch() {
     // Filtro de primer byte para apply_swaps
     let mut filter = [false; 256];
     for s in &swaps {
-        filter[s.pattern_bytes[0] as usize] = true;
+        let pattern = s.pattern_slice();
+        filter[pattern[0] as usize] = true;
     }
 
     // Obtener path del exe actual para filtrar regiones
@@ -456,7 +490,8 @@ unsafe fn scan_and_patch() {
     
     let mut filter = [false; 256];
     for s in &swaps {
-        filter[s.pattern_bytes[0] as usize] = true;
+        let pattern = s.pattern_slice();
+        filter[pattern[0] as usize] = true;
     }
 
     let h_mod = unsafe { GetModuleHandleA(std::ptr::null()) };
