@@ -58,7 +58,7 @@ pub async fn fetch_fallback_data(client: &reqwest::Client) -> Result<FallbackAPI
     }
 
     let response_text = response.text().await.context("Failed to read response body")?;
-    println!("[Fallback] Raw response: {}", response_text);
+    // println!("[Fallback] Raw response: {}", response_text);
     
     let data: FallbackAPI = serde_json::from_str(&response_text)
         .map_err(|e| {

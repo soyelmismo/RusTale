@@ -1522,7 +1522,7 @@ impl ModsState {
             }
             
             // Solo renderizar mods visibles
-            for (i, m) in self.installed_mods.iter().enumerate().skip(start_idx).take(end_idx - start_idx) {
+            for (_, m) in self.installed_mods.iter().enumerate().skip(start_idx).take(end_idx - start_idx) {
                 let has_update = if let Some(meta) = &m.metadata {
                     self.mods_with_updates.contains(&meta.mod_id)
                 } else {

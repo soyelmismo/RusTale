@@ -453,7 +453,6 @@ struct RusTale {
     last_status_change: std::time::Instant, // Track state changes for timeout detection
     last_download_progress: f32,            // Track last download progress for stuck detection
     is_news_visible: bool, // Track if news section is currently visible
-    is_mods_visible: bool, // Track if mods modal is currently visible
 
     // --- MOUSE THROTTLING FOR LSD PERFORMANCE ---
     last_mouse_update_time: std::time::Instant, // Para throttling de actualizaciones del mouse
@@ -668,7 +667,6 @@ impl RusTale {
                 last_status_change: std::time::Instant::now(), // Track state changes for timeout detection
                 last_download_progress: 0.0, // Track last download progress for stuck detection
                 is_news_visible: true, // Initially visible (news section is shown by default)
-                is_mods_visible: false, // Initially hidden (mods modal is closed by default)
 
                 // --- MOUSE THROTTLING FOR LSD PERFORMANCE ---
                 last_mouse_update_time: std::time::Instant::now(),
