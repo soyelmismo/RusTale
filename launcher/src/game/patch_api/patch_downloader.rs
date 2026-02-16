@@ -6,6 +6,7 @@ use super::PatchApiManager;
 use crate::game::paths::GamePaths;
 
 /// Downloader for game patches using the new patch API system
+#[derive(Clone)]
 pub struct PatchDownloader {
     api_manager: Arc<PatchApiManager>,
 }

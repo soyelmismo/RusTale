@@ -6,6 +6,7 @@ use super::{PatchApiManager, ButlerInstaller, JreInstaller, VersionManager, Patc
 
 /// Frontend integration for the new patch API system
 /// This provides a high-level interface that replaces the old functions
+#[derive(Clone)]
 pub struct PatchApiFrontend {
     api_manager: Arc<PatchApiManager>,
     butler_installer: ButlerInstaller,
@@ -141,7 +142,7 @@ impl PatchApiFrontend {
 
             // Apply patch
             progress_callback("install", 0.0, "Installing game files...", 0, 0, None, Some(6));
-            crate::game::install::apply_patch(
+            crate::game::patcher::apply_pwr(
                 base_dir,
                 channel,
                 &install_dir_name,

@@ -474,9 +474,10 @@ pub async fn ensure_installed(
         crate::game::patcher::apply_pwr(
             base_dir,
             channel,
-            pwr_path,
             &install_dir_name,
+            pwr_path,
             &progress_callback,
+            cancel_token.clone(),
         )
         .await?;
 

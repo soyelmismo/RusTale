@@ -1,10 +1,12 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use super::PatchApiManager;
 use crate::game::patcher::GameVersionInfo;
 
 /// Manager for game version operations using the new patch API system
+#[derive(Clone)]
 pub struct VersionManager {
     api_manager: Arc<PatchApiManager>,
 }

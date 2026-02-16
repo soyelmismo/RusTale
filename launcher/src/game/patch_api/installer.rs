@@ -8,6 +8,7 @@ use crate::game::paths::GamePaths;
 use crate::util::make_executable;
 
 /// Installer for Butler using the new patch API system
+#[derive(Clone)]
 pub struct ButlerInstaller {
     api_manager: Arc<PatchApiManager>,
 }
@@ -103,6 +104,7 @@ impl ButlerInstaller {
 }
 
 /// Installer for JRE using the new patch API system
+#[derive(Clone)]
 pub struct JreInstaller {
     api_manager: Arc<PatchApiManager>,
 }

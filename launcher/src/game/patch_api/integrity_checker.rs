@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::fs::File;
 use std::io::Read;
 
@@ -7,6 +8,7 @@ use super::PatchApiManager;
 use sha2::{Sha256, Digest};
 
 /// Integrity checker for patches and downloads using the new patch API system
+#[derive(Clone)]
 pub struct IntegrityChecker {
     api_manager: Arc<PatchApiManager>,
 }
@@ -41,7 +43,7 @@ impl IntegrityChecker {
 
     /// Verifies patch signature using Ed25519
     pub async fn verify_patch_signature(&self, patch_path: &PathBuf, signature_path: &PathBuf) -> Result<bool> {
-        use ed25519_dalek::{Verifier, PublicKey, Signature};
+        use ed25519_dalek::{Verifier, VerifyingKey, Signature};
         
         if !signature_path.exists() {
             return Ok(false);
@@ -64,7 +66,8 @@ impl IntegrityChecker {
             return Ok(false);
         }
         
-        let signature = Signature::from_bytes(&signature_bytes);
+        let signature_array: [u8; 64] = signature_bytes.clone().try_into().unwrap();
+        let signature = Signature::from_bytes(&signature_array);
         
         // Load public key from trusted source
         let public_key = self.load_trusted_public_key().await?;
@@ -77,8 +80,8 @@ impl IntegrityChecker {
     }
 
     /// Loads trusted public key for signature verification
-    async fn load_trusted_public_key(&self) -> Result<PublicKey> {
-        use ed25519_dalek::PublicKey;
+    async fn load_trusted_public_key(&self) -> Result<VerifyingKey> {
+        use ed25519_dalek::VerifyingKey;
         
         // Try to load from config directory first
         if let Some(config_dir) = crate::config::get_app_dir().to_str() {
@@ -89,7 +92,9 @@ impl IntegrityChecker {
                     .context("Failed to read trusted public key")?;
                 
                 if pubkey_bytes.len() == 32 {
-                    return Ok(PublicKey::from_bytes(&pubkey_bytes));
+                    if let Ok(key) = VerifyingKey::from_bytes(&pubkey_bytes.try_into().unwrap()) {
+                         return Ok(key);
+                    }
                 }
             }
         }

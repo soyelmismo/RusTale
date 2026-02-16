@@ -39,6 +39,10 @@ mod theme;
 mod ui;
 mod updater;
 mod util;
+mod services;
+mod messages;
+mod logic_handlers;
+mod profile_handlers;
 
 use crate::config::{GameSettings, Profile, ProfilesConfig};
 use crate::game::install::InstallPolicy;
@@ -431,8 +435,8 @@ struct RusTale {
     latest_version: Option<i32>,
     available_versions: Vec<i32>, // CAMBIO: Cache persistente de versiones
     paths: GamePaths,             // Centralized path management
-    api_client: reqwest::Client,  // For news, auth, version check
-    download_client: reqwest::Client, // For JRE, PWR, Assets
+
+    services: crate::services::Services, // Centralized services
     localization: Localization,
     is_quickplay_mode: bool,
     is_window_visible: bool,
@@ -611,6 +615,9 @@ impl RusTale {
             )
         };
 
+        // Create services
+        let services = crate::services::Services::new(api_client.clone(), download_client.clone());
+
         // --- TRAY SYSTEM ---
         // Create initial tray icon with "Start Game" option
         let tray_icon = Self::create_tray_icon(false);
@@ -636,8 +643,7 @@ impl RusTale {
                 latest_version: None,
                 available_versions: Vec::new(), // Initialize empty
                 paths,
-                api_client,
-                download_client,
+                services,
                 localization: Localization::new(),
                 is_quickplay_mode: quickplay,
                 is_window_visible: !quickplay,
@@ -767,7 +773,7 @@ impl RusTale {
                     settings.clone(),
                     name.clone(),
                     uuid.clone(),
-                    self.download_client.clone(),
+                    self.services.download_client.clone(),
                     *target_ver,
                     policy,
                     self.cancellation_token.clone(),
@@ -931,13 +937,7 @@ impl RusTale {
         }
     }
 
-    fn update(&mut self, message: Message) -> Task<Message> {
-        // Handle UpdateTotalSteps separately (installation-related, not settings)
-        if let Message::UpdateTotalSteps { total_steps } = &message {
-            self.total_steps = *total_steps;
-            return Task::none();
-        }
-
+    fn handle_ui_message(&mut self, message: &Message) -> Option<Task<Message>> {
         match message {
             Message::CursorMoved(relative_position) => {
                 // [MOUSE THROTTLING] Solo actualizar si ha pasado suficiente tiempo desde la última actualización
@@ -946,7 +946,7 @@ impl RusTale {
                 
                 if time_since_last_update >= self.mouse_update_interval {
                     // Actualizar posición y tiempos
-                    self.cursor_position = relative_position;
+                    self.cursor_position = *relative_position;
                     self.last_mouse_move_time = now;
                     self.last_user_interaction = now; // Reset interacción
                     self.last_mouse_update_time = now; // Actualizar tiempo del último update
@@ -958,13 +958,11 @@ impl RusTale {
                     if self.settings.theme.lsd_mode && !self.settings_state.is_open && !self.mods_state.is_open {
                         // Restaurar opacidad inmediatamente si está baja
                         if self.ui_opacity_accumulator < 0.9 {
-                            println!("[LSD] Mouse movido - Restaurando opacidad: {:.2} → 1.0", self.ui_opacity_accumulator);
                             self.ui_opacity_accumulator = 1.0;
                             
                             // Mostrar cursor si estaba oculto
                             if self.is_cursor_hidden {
                                 self.is_cursor_hidden = false;
-                                println!("[LSD] Cursor restaurado");
                             }
                         }
                     }
@@ -972,10 +970,9 @@ impl RusTale {
                     // Si el cursor estaba oculto y el usuario mueve el mouse, lo mostramos inmediatamente
                     if self.is_cursor_hidden {
                         self.is_cursor_hidden = false;
-                        // No podemos cambiar el ícono directamente en Iced, pero podemos actualizar el estado
                     }
                 }
-                // Si no ha pasado suficiente tiempo, ignoramos este evento para mejorar rendimiento
+                Some(Task::none())
             }
 
             Message::MousePressed => {
@@ -990,7 +987,6 @@ impl RusTale {
                 if self.settings.theme.lsd_mode && !self.settings_state.is_open && !self.mods_state.is_open {
                     // Restaurar opacidad inmediatamente si está baja
                     if self.ui_opacity_accumulator < 0.9 {
-                        println!("[LSD] Mouse clic - Restaurando opacidad: {:.2} → 1.0", self.ui_opacity_accumulator);
                         self.ui_opacity_accumulator = 1.0;
                     }
                 }
@@ -999,34 +995,34 @@ impl RusTale {
                 self.shader_click_intensity = 2.0;
                 self.shader_click_time = std::time::Instant::now();
                 self.last_mouse_move_time = std::time::Instant::now();
+                Some(Task::none())
+            }
+
+            Message::MouseReleased => {
+                self.is_mouse_pressed = false; // Resetear estado al soltar
+                self.last_mouse_release_time = std::time::Instant::now(); // Registrar cuando se solto
+                Some(Task::none())
             }
 
             Message::Tick(_now) => {
                 let frame_time = self.start_time.elapsed().as_secs_f32();
                 self.current_time = frame_time;
 
-                // [GIRO PREDICTIVO] Si el LSD esta apagado, el raton no manda mensajes.
-                // Usamos el Tick para mantener la actividad viva si la ventana tiene foco.
                 if self.is_focused && !self.is_minimized {
                     crate::util::register_activity();
                 }
 
-                // Actualizar tiempo de los shaders
-                // Blur ya no necesita actualización de tiempo (estático sin wave)
-                
-                // Detectamos si hay algun modal abierto para animar el texto "dummy"
                 let is_modal_active = self.settings_state.is_open || self.mods_state.is_open;
                 
                 if let Some(ref mut lsd) = *self.lsd_shader_instance.borrow_mut() {
                     lsd.update_time(frame_time);
                 }
 
-                // Bloqueo de seguridad: si desactivas el LSD pero no hay modal (no hay texto dummy que animar)
                 if !self.settings.theme.lsd_mode && !is_modal_active {
-                    return Task::none();
+                    return Some(Task::none());
                 }
 
-                // [DEBUG LSD] Mostrar estado actual del framerate
+                // [DEBUG LSD]
                 if self.ui_opacity_accumulator < 0.1 {
                     use std::sync::LazyLock;
                     static LAST_LOW_FPS_LOG: LazyLock<std::sync::Mutex<std::time::Instant>> = 
@@ -1034,118 +1030,333 @@ impl RusTale {
                     
                     if let Ok(mut last_log) = LAST_LOW_FPS_LOG.lock() {
                         if last_log.elapsed().as_secs() > 5 {
-                            println!("[LSD] Shader fluyendo a 60 FPS (UI invisible, con foco)");
                             *last_log = std::time::Instant::now();
                         }
                     }
                 }
 
-                // Si estamos redimensionando la ventana, pausamos los calculos matematicos del shader/texto.
-                // Esto libera recursos para que el motor de layout (Iced/WGPU) recalcule la geometria sin lag.
                 if self.resizing_direction.is_some() {
-                    return Task::none();
+                    return Some(Task::none());
                 }
 
-                // --- LoGICA DE OPACIDAD SUAVE ---
-                // [FIX LSD] dt fijo a 60 FPS para animaciones fluidas
-                let dt = 0.016; // 16ms = 60 FPS constante
-                let fade_speed = 1.5; // Velocidad para desaparecer (mayor = mas rapido)
-                let reveal_speed = 2.5; // Velocidad para aparecer (el ojo humano prefiere UI que aparece rapido)
-                let hold_threshold = 0.25; // SEGUNDOS DE ESPERA para considerar que se esta "manteniendo"
-
-                // Constante de inactividad solicitada
-                let inactivity_threshold = 10.0; // 10 segundos
+                let dt = 0.016; 
+                let fade_speed = 1.5; 
+                let reveal_speed = 2.5; 
+                let hold_threshold = 0.25; 
+                let inactivity_threshold = 10.0; 
 
                 let elapsed_since_click = self.shader_click_time.elapsed().as_secs_f32();
                 let elapsed_idle = self.last_mouse_move_time.elapsed().as_secs_f32();
 
-                // Detectamos si hay algun modal abierto
                 let is_modal_active = self.settings_state.is_open || self.mods_state.is_open;
 
                 let tasks = Vec::new();
 
-                // --- LoGICA DE PRIORIDAD DE INTERFAZ ---
                 if is_modal_active {
-                    // SIEMPRE FORZAR VISIBILIDAD si estamos en ajustes o mods (ignoramos inactividad)
                     self.ui_opacity_accumulator =
                         (self.ui_opacity_accumulator + dt * reveal_speed).min(1.0);
 
-                    // Asegurar que el cursor vuelva si la UI es visible de nuevo
                     if self.ui_opacity_accumulator > 0.1 && self.is_cursor_hidden {
                         self.is_cursor_hidden = false;
-                        // No podemos cambiar el ícono directamente en Iced
                     }
                 } else {
-                    // Condiciones para desvanecer:
-                    // 1. Mouse presionado por un tiempo (Hold click)
-                    // 2. Mouse inactivo por 10 segundos (Idle)
-                    // [FIX] Añadir umbral pequeño para evitar falsos positivos
                     let should_fade_out = (self.is_mouse_pressed
                         && elapsed_since_click > hold_threshold)
-                        || elapsed_idle > inactivity_threshold + 0.5; // +0.5s de margen
+                        || elapsed_idle > inactivity_threshold + 0.5;
 
                     if should_fade_out {
-                        // Disminuir opacidad gradualmente hacia 0.0
                         self.ui_opacity_accumulator =
                             (self.ui_opacity_accumulator - dt * fade_speed).max(0.0);
 
-                        // Ocultar cursor si la UI ya es casi invisible
                         if self.ui_opacity_accumulator < 0.05 && !self.is_cursor_hidden {
                             self.is_cursor_hidden = true;
-                            // No podemos cambiar el ícono directamente en Iced, pero actualizamos el estado
                         }
                     } else {
-                        // Aumentar opacidad gradualmente hacia 1.0 (Movimiento o Click reciente)
                         self.ui_opacity_accumulator =
                             (self.ui_opacity_accumulator + dt * reveal_speed).min(1.0);
 
-                        // Asegurar que el cursor vuelva si la UI es visible de nuevo
                         if self.ui_opacity_accumulator > 0.1 && self.is_cursor_hidden {
                             self.is_cursor_hidden = false;
-                            // No podemos cambiar el ícono directamente en Iced
                         }
                     }
                 }
 
                 let t = self.start_time.elapsed().as_secs_f32();
-                // Mezclamos multiples frecuencias para crear un movimiento caotico y organico
-                // pero que se mantiene dentro de un rango razonable [-2, 2].
                 let ox = (t * 1.3).sin() * 1.0 + (t * 2.8).cos() * 0.5 + (t * 0.7).sin() * 0.3;
                 let oy = (t * 0.9).cos() * 1.0 + (t * 3.5).sin() * 0.5 + (t * 1.1).cos() * 0.3;
                 self.lsd_offset = (ox, oy);
 
-                // CAMBIO AUTOMaTICO DE SHADER CADA 30 SEGUNDOS
                 if self.shader_transition > 0.0 {
-                    // Avanzar transicion (ajustar velocidad 0.01 -> mas lento, 0.05 -> rapido)
                     self.shader_transition += 0.02;
 
                     if self.shader_transition >= 1.0 {
-                        // Transicion completada
                         self.active_shader_idx = self.next_shader_idx;
                         self.shader_transition = 0.0;
                     }
                 } else {
-                    // Esperar tiempo para cambiar
-                    self.shader_change_timer += dt; // Usar dt dinámico
+                    self.shader_change_timer += dt; 
                     if self.shader_change_timer > 30.0 {
-                        // Cambiar cada 30 segundos
                         self.shader_change_timer = 0.0;
-                        // Siguiente shader ciclico
                         self.next_shader_idx =
                             (self.active_shader_idx + 1) % self.total_shaders_available;
-                        self.shader_transition = 0.01; // Iniciar transicion
+                        self.shader_transition = 0.01; 
                     }
                 }
 
-                return if tasks.is_empty() {
-                    Task::none()
+                if tasks.is_empty() {
+                    Some(Task::none())
                 } else {
-                    Task::batch(tasks)
-                };
+                    Some(Task::batch(tasks))
+                }
             }
 
-            _ => {}
+            Message::ShaderClicked => {
+                self.shader_click_intensity = 2.0; 
+                self.shader_click_time = std::time::Instant::now();
+                self.last_mouse_move_time = std::time::Instant::now();
+                Some(Task::none())
+            }
+
+            Message::ResizePressed(dir) => {
+                if self.is_wayland {
+                    return Some(Task::none());
+                }
+                
+                self.resizing_direction = Some(*dir);
+
+                self.drag_start_window_pos = self.current_window_pos;
+                self.drag_start_window_size = self.current_window_size;
+
+                self.drag_start_mouse_screen_pos = Point::new(
+                    self.current_window_pos.x + self.cursor_position.x,
+                    self.current_window_pos.y + self.cursor_position.y,
+                );
+
+                Some(Task::none())
+            }
+
+            Message::ResizeReleased => {
+                if self.is_wayland {
+                    return Some(Task::none());
+                }
+                
+                self.resizing_direction = None;
+                self.is_mouse_pressed = false; 
+                self.last_mouse_release_time = std::time::Instant::now(); 
+                Some(Task::none())
+            }
+
+            Message::NextShader => {
+                if self.settings.theme.lsd_mode && self.shader_transition <= 0.0 {
+                    self.next_shader_idx =
+                        (self.active_shader_idx + 1) % self.total_shaders_available;
+                    self.shader_transition = 0.01;
+                    self.shader_change_timer = 0.0;
+                }
+                Some(Task::none())
+            }
+            
+            Message::WindowResized(size) => {
+                self.current_window_size = *size;
+                self.window_size = *size;
+                self.news_section.update_viewport_height(size.height);
+                self.settings.width = size.width as u32;
+                self.settings.height = size.height as u32;
+
+                if self.resizing_direction.is_none() {
+                    let size_captured = *size;
+                     Some(window::oldest().and_then(move |id| {
+                        Task::batch(vec![
+                            window::gain_focus(id),
+                            window::is_maximized(id)
+                                .map(move |max| Message::WindowResizedWithMaximized(size_captured, max)),
+                        ])
+                    }))
+                } else {
+                    Some(Task::none())
+                }
+            }
+
+            Message::WindowResizedWithMaximized(size, is_maximized) => {
+                self.window_size = *size;
+                self.is_maximized = *is_maximized;
+                self.settings.width = size.width as u32;
+                self.settings.height = size.height as u32;
+                self.settings_state.temp_settings.width = size.width as u32;
+                self.settings_state.temp_settings.height = size.height as u32;
+                Some(Task::none())
+            }
+            
+             Message::WindowDrag => {
+                if self.is_wayland {
+                    return Some(Task::none());
+                }
+                
+                let now = std::time::Instant::now();
+                let duration = now.duration_since(self.last_title_click);
+                self.last_title_click = now;
+
+                if duration < std::time::Duration::from_millis(300) {
+                    self.is_maximized = !self.is_maximized;
+                    Some(window::oldest().and_then(|id| window::toggle_maximize(id)))
+                } else {
+                    Some(window::oldest().and_then(|id| window::drag(id)))
+                }
+            }
+            
+            Message::MinimizeWindow => {
+                if self.is_wayland {
+                    return Some(Task::none());
+                }
+                self.is_minimized = true;
+                self.news_section.images.clear(); 
+                Some(window::oldest().and_then(|id| {
+                    Task::batch(vec![
+                        window::minimize(id, true),
+                        Task::perform(async {}, |_| {
+                            crate::util::trim_memory_with_level(crate::util::TrimLevel::Aggressive);
+                            Message::None
+                        }),
+                    ])
+                }))
+            }
+            
+            Message::MaximizeWindow => {
+                self.is_maximized = !self.is_maximized;
+                if self.is_minimized {
+                    self.is_minimized = false;
+                    let mut tasks = vec![window::oldest().and_then(|id| window::toggle_maximize(id))];
+                    if self.settings.enable_news {
+                        tasks.push(Task::done(Message::News(NewsMessage::ReloadImages)));
+                    }
+                    Some(Task::batch(tasks))
+                } else {
+                    Some(window::oldest().and_then(|id| window::toggle_maximize(id)))
+                }
+            }
+
+            Message::ToggleFullscreen => {
+                let entering_fullscreen = !self.is_fullscreen;
+                self.is_fullscreen = entering_fullscreen;
+                if entering_fullscreen {
+                    self.is_maximized = false;
+                }
+                Some(window::oldest().and_then(move |id| {
+                    if entering_fullscreen {
+                        Task::batch(vec![
+                            window::set_mode(id, window::Mode::Windowed),
+                            window::set_mode(id, window::Mode::Fullscreen),
+                        ])
+                    } else {
+                        window::set_mode(id, window::Mode::Windowed)
+                    }
+                }))
+            }
+            
+            Message::WindowEvent(event) => {
+                match event {
+                    window::Event::Resized(size) => {
+                        let delta_w = (size.width - self.current_window_size.width).abs();
+                        let delta_h = (size.height - self.current_window_size.height).abs();
+
+                        if self.resizing_direction.is_some() && delta_w < 5.0 && delta_h < 5.0 {
+                            return Some(Task::none());
+                        }
+
+                        self.current_window_size = *size;
+                        self.window_size = *size;
+
+                        self.settings.width = size.width as u32;
+                        self.settings.height = size.height as u32;
+                        self.settings_state.temp_settings.width = size.width as u32;
+                        self.settings_state.temp_settings.height = size.height as u32;
+
+                        let size_clone = *size;
+                        Some(window::oldest().and_then(move |id| {
+                            Task::batch(vec![window::is_maximized(id).map(move |is_maximized| {
+                                Message::WindowResizedWithMaximized(size_clone, is_maximized)
+                            })])
+                        }))
+                    }
+                    window::Event::Moved(point) => {
+                        self.current_window_pos = *point;
+                        Some(Task::none())
+                    }
+                    window::Event::CloseRequested => {
+                        Some(Task::done(Message::CloseRequested))
+                    }
+                    window::Event::Focused => {
+                        self.is_focused = true;
+                        if self.settings.enable_news && !self.news_section.posts.is_empty() && self.news_section.images.is_empty() {
+                            return Some(Task::done(Message::News(NewsMessage::ReloadImages)));
+                        }
+                        Some(Task::none())
+                    }
+                    window::Event::Unfocused => {
+                        self.is_focused = false;
+                        Some(Task::none())
+                    }
+                    _ => Some(Task::none())
+                }
+            }
+            
+            Message::CloseRequested => {
+                if self.settings.minimize_to_tray {
+                    // Si el icono existe...
+                    if self.tray_icon.is_some() {
+                        // [LINUX FIX] En Linux/Wayland, 'Hidden' congela la ventana.
+                        // Usamos 'Minimize' que es seguro. La ventana se queda en barra de tareas
+                        // pero no se congela y el icono del tray sigue funcionando.
+                        #[cfg(target_os = "linux")]
+                        {
+                            self.is_window_visible = true; // Mantener logica de visible para que Iced siga dibujando
+                            Some(window::oldest().and_then(|id| window::minimize(id, true)))
+                        }
+                        // [WINDOWS] En Windows 'Hidden' funciona perfecto para Tray real.
+                        #[cfg(not(target_os = "linux"))]
+                        {
+                            self.is_window_visible = false;
+                            Some(window::oldest().and_then(|id| window::set_mode(id, window::Mode::Hidden)))
+                        }
+                    } else {
+                        // Si no hay icono, salimos para no atrapar al usuario
+                        Some(self.save_and_exit())
+                    }
+                } else {
+                    Some(self.save_and_exit())
+                }
+            }
+            
+            Message::ToggleWindowVisibility => {
+                 self.is_window_visible = !self.is_window_visible;
+                 let visible = self.is_window_visible;
+                 Some(window::oldest().and_then(move |id| {
+                        if visible {
+                            window::set_mode(id, window::Mode::Windowed)
+                        } else {
+                            window::set_mode(id, window::Mode::Hidden)
+                        }
+                 }))
+            }
+
+            Message::ToggleProfileDropdown => {
+                 Some(self.handle_profile_message(Message::ToggleProfileDropdown))
+            }
+            
+            _ => None
         }
+    }
+
+    fn update(&mut self, message: Message) -> Task<Message> {
+        if let Some(task) = self.handle_ui_message(&message) {
+            return task;
+        }
+        // Handle UpdateTotalSteps separately (installation-related, not settings)
+        if let Message::UpdateTotalSteps { total_steps } = &message {
+            self.total_steps = *total_steps;
+            return Task::none();
+        }
+
 
         if self.settings_state.is_open {
             match &message {
@@ -1184,14 +1395,34 @@ impl RusTale {
         }
 
         match message {
-            Message::CursorMoved(_) => Task::none(), // Manejado en el primer match
+            // These messages are handled by handle_ui_message, so we ignore them here
+            Message::CursorMoved(_)
+            | Message::MousePressed
+            | Message::MouseReleased
+            | Message::Tick(_)
+            | Message::ShaderClicked
+            | Message::ResizePressed(_)
+            | Message::ResizeReleased
+            | Message::NextShader
+            | Message::WindowResized(_)
+            | Message::WindowResizedWithMaximized(_, _)
+            | Message::WindowDrag
+            | Message::MinimizeWindow
+            | Message::MaximizeWindow
+            | Message::ToggleFullscreen
+            | Message::WindowEvent(_)
+            | Message::CloseRequested
+            | Message::ToggleWindowVisibility
+            | Message::ToggleProfileDropdown
+            | Message::AppExit => Task::none(),
+
             Message::UpdateTotalSteps { total_steps } => {
                 self.total_steps = total_steps;
                 Task::none()
             }
             Message::Mods(msg) => {
                 let base_dir = config::get_app_dir();
-                let client = self.api_client.clone();
+                let client = self.services.api_client.clone();
                 let settings = self.settings.clone();
 
                 self.mods_state
@@ -1233,17 +1464,6 @@ impl RusTale {
                 Task::none()
             }
 
-            Message::ShaderClicked => {
-                // Disparar pulso de onda de choque en el shader
-                self.shader_click_intensity = 2.0; // Pico fuerte para la onda
-                self.shader_click_time = std::time::Instant::now();
-
-                // --- NUEVO: Resetear inactividad al hacer click ---
-                self.last_mouse_move_time = std::time::Instant::now();
-                // -------------------------------------------------
-
-                Task::none()
-            }
 
             Message::Initialize => Task::perform(
                 async {
@@ -1305,7 +1525,7 @@ impl RusTale {
 
                 // --- UPDATER LOGIC ---
                 let update_task = if self.settings.enable_auto_update {
-                    let client = self.api_client.clone();
+                    let client = self.services.api_client.clone();
                     Task::perform(
                         async move {
                             match updater::check_for_updates(&client).await {
@@ -1409,7 +1629,7 @@ impl RusTale {
                 let settings = self.settings.clone();
                 let settings_for_closure = settings.clone();
                 let paths = self.paths.clone();
-                let client = self.api_client.clone();
+                let client = self.services.api_client.clone();
 
                 // CAMBIO: Pasamos el latest_version que ya tenemos en memoria (si existe)
                 let cached_version = self.latest_version;
@@ -1748,11 +1968,11 @@ impl RusTale {
                 if !self.settings.enable_news {
                     return Task::none();
                 }
-                self.news_section.update(msg, self.api_client.clone())
+                self.news_section.update(msg, self.services.api_client.clone())
             }
             Message::LauncherUpdate(sub_msg) => match sub_msg {
                 updater::UpdaterMessage::CheckForUpdates => {
-                    let client = self.api_client.clone();
+                    let client = self.services.api_client.clone();
                     let is_settings_open = self.settings_state.is_open;
 
                     Task::perform(
@@ -1822,7 +2042,7 @@ impl RusTale {
                     self.status = LauncherStatus::Busy;
                     self.status_text = "Updating Launcher...".to_string();
 
-                    let client = self.download_client.clone();
+                    let client = self.services.download_client.clone();
                     Task::perform(
                         async move {
                             updater::perform_update(client, url)
@@ -2239,7 +2459,7 @@ impl RusTale {
                 Task::none()
             }
             Message::RequestVersionCheck(chan) => {
-                let client = self.api_client.clone();
+                let client = self.services.api_client.clone();
                 // Clear state while loading to avoid showing old branch data
                 self.settings_state.available_versions = Vec::new();
                 self.settings_state.is_loading_versions = true;
@@ -2423,8 +2643,8 @@ impl RusTale {
             | Message::ProfileNameChanged(_)
             | Message::SaveProfileName
             | Message::CancelProfileEdit
-            | Message::ToggleProfileDropdown => self.handle_profile_message(message),
-            Message::Tick(_) => Task::none(),
+            | Message::CancelProfileEdit => self.handle_profile_message(message),
+
             Message::TrayEvent(evt) => {
                 if let tray_icon::TrayIconEvent::Click {
                     button: tray_icon::MouseButton::Left,
@@ -2490,332 +2710,8 @@ impl RusTale {
                 }
                 _ => Task::none(),
             },
-            Message::ToggleWindowVisibility => {
-                self.is_window_visible = !self.is_window_visible;
-                let is_visible = self.is_window_visible;
 
-                window::oldest().and_then(move |id| {
-                    if is_visible {
-                        Task::batch(vec![
-                            window::set_mode(id, window::Mode::Windowed),
-                            window::gain_focus(id),
-                        ])
-                    } else {
-                        window::set_mode(id, window::Mode::Hidden)
-                    }
-                })
-            }
-            Message::CloseRequested => {
-                if self.settings.minimize_to_tray {
-                    // Si el icono existe...
-                    if self.tray_icon.is_some() {
-                        // [LINUX FIX] En Linux/Wayland, 'Hidden' congela la ventana.
-                        // Usamos 'Minimize' que es seguro. La ventana se queda en barra de tareas
-                        // pero no se congela y el icono del tray sigue funcionando.
-                        #[cfg(target_os = "linux")]
-                        {
-                            self.is_window_visible = true; // Mantener logica de visible para que Iced siga dibujando
-                            window::oldest().and_then(|id| window::minimize(id, true))
-                        }
 
-                        // [WINDOWS] En Windows 'Hidden' funciona perfecto para Tray real.
-                        #[cfg(not(target_os = "linux"))]
-                        {
-                            self.is_window_visible = false;
-                            window::oldest()
-                                .and_then(|id| window::set_mode(id, window::Mode::Hidden))
-                        }
-                    } else {
-                        // Si no hay icono, salimos para no atrapar al usuario
-                        self.save_and_exit()
-                    }
-                } else {
-                    self.save_and_exit()
-                }
-            }
-
-            Message::WindowResized(size) => {
-                self.current_window_size = size;
-                self.window_size = size;
-
-                // Actualizar viewport height de la sección de noticias
-                self.news_section.update_viewport_height(size.height);
-
-                // Forzamos actualizacion manual de los settings para que la logica de Iced
-                // detecte el cambio de ancho (Modo compacto vs Full) instantaneamente.
-                self.settings.width = size.width as u32;
-                self.settings.height = size.height as u32;
-
-                // EL FIX: En Linux, redimensionar necesita una señal de redibujado limpia.
-                // Usamos window::request_user_attention o simplemente devolvemos la tarea de is_maximized.
-                if self.resizing_direction.is_none() {
-                    return window::oldest().and_then(move |id| {
-                        // Task::batch para asegurar que el viewport se limpie
-                        Task::batch(vec![
-                            window::gain_focus(id),
-                            window::is_maximized(id)
-                                .map(move |max| Message::WindowResizedWithMaximized(size, max)),
-                        ])
-                    });
-                }
-                Task::none()
-            }
-            Message::WindowResizedWithMaximized(size, is_maximized) => {
-                self.window_size = size;
-                self.is_maximized = is_maximized;
-
-                // Actualizamos los settings en memoria
-                self.settings.width = size.width as u32;
-                self.settings.height = size.height as u32;
-
-                // Sincronizamos tambien el estado temporal para que, si el modal esta abierto,
-                // no se sobrescriba con la resolucion vieja al pulsar "Save".
-                self.settings_state.temp_settings.width = size.width as u32;
-                self.settings_state.temp_settings.height = size.height as u32;
-
-                Task::none()
-            }
-            Message::AppExit => self.save_and_exit(),
-            Message::WindowDrag => {
-                // Desactivar drag personalizado en Wayland
-                if self.is_wayland {
-                    return Task::none();
-                }
-                
-                let now = std::time::Instant::now();
-                let duration = now.duration_since(self.last_title_click);
-                self.last_title_click = now;
-
-                if duration < std::time::Duration::from_millis(300) {
-                    // Es un doble clic -> Maximizar/Restaurar
-                    self.is_maximized = !self.is_maximized;
-                    return window::oldest().and_then(|id| window::toggle_maximize(id));
-                } else {
-                    // Es un clic simple -> Iniciar arrastre nativo
-                    return window::oldest().and_then(|id| window::drag(id));
-                }
-            }
-            Message::MinimizeWindow => {
-                // Desactivar minimizar personalizado en Wayland
-                if self.is_wayland {
-                    return Task::none();
-                }
-                
-                self.is_minimized = true;
-                println!("[Window] Window minimized - Enabling aggressive RAM saving");
-
-                // Limpiar caché de UI y Shader para liberar structs
-                self.news_section.images.clear(); // Soltar imágenes de noticias
-
-                window::oldest().and_then(|id| {
-                    Task::batch(vec![
-                        window::minimize(id, true),
-                        // Ejecutar recorte de memoria después de minimizar
-                        Task::perform(async {}, |_| {
-                            crate::util::trim_memory_with_level(crate::util::TrimLevel::Aggressive);
-                            Message::None
-                        }),
-                    ])
-                })
-            }
-            Message::MaximizeWindow => {
-                // Botón de maximizar normal (solo maximiza, no fullscreen)
-                self.is_maximized = !self.is_maximized;
-                if self.is_minimized {
-                    self.is_minimized = false;
-                    println!("[Window] Window restored from minimized - Enabling ticks");
-                    
-                    // Recargar imágenes de noticias después de restaurar ventana (si está habilitado)
-                    let mut tasks = vec![window::oldest().and_then(|id| window::toggle_maximize(id))];
-                    if self.settings.enable_news {
-                        tasks.push(Task::done(Message::News(NewsMessage::ReloadImages)));
-                    }
-                    Task::batch(tasks)
-                } else {
-                    window::oldest().and_then(|id| window::toggle_maximize(id))
-                }
-            }
-            Message::ToggleFullscreen => {
-                // Alternamos el estado interno de fullscreen
-                let entering_fullscreen = !self.is_fullscreen;
-                self.is_fullscreen = entering_fullscreen;
-
-                // Si entramos a fullscreen, YA NO estamos maximizados.
-                // Actualizamos esto para que la UI (bordes redondeados, etc) sepa que cambió el estado.
-                if entering_fullscreen {
-                    self.is_maximized = false;
-                }
-
-                return window::oldest().and_then(move |id| {
-                    if entering_fullscreen {
-                        // TRUCO: Para evitar el glitch visual cuando está maximizada,
-                        // enviamos una secuencia: Primero restaurar a ventana normal, luego Fullscreen.
-                        // El batch asegura que Iced intente procesarlo en orden.
-                        Task::batch(vec![
-                            window::set_mode(id, window::Mode::Windowed),
-                            window::set_mode(id, window::Mode::Fullscreen),
-                        ])
-                    } else {
-                        // Al salir, volvemos a modo ventana normal
-                        window::set_mode(id, window::Mode::Windowed)
-                    }
-                });
-            }
-
-            // --- NUEVA LoGICA DE REDIMENSIONAMIENTO MANUAL ---
-            Message::WindowEvent(event) => {
-                match event {
-                    window::Event::Resized(size) => {
-                        // En Wayland/Linux, a veces el SO nos "corrige" (ej. snapping a bordes).
-                        // Solo aceptamos la correccion del SO si NO estamos nosotros forzando un tamaño manualmente en este mismo frame,
-                        // O si la discrepancia es grande (significa que el drag termino o hubo snap).
-
-                        let delta_w = (size.width - self.current_window_size.width).abs();
-                        let delta_h = (size.height - self.current_window_size.height).abs();
-
-                        // Si la diferencia es pequeña y estamos redimensionando,
-                        // confiamos en nuestra matematica local (Predictiva) para evitar jitter.
-                        if self.resizing_direction.is_some() && delta_w < 5.0 && delta_h < 5.0 {
-                            return Task::none();
-                        }
-
-                        // Si no estamos redimensionando, o el salto fue grande (Snap de ventana),
-                        // entonces obedecemos al SO como autoridad final.
-                        self.current_window_size = size;
-                        self.window_size = size;
-
-                        // Actualizar configuraciones temporales para evitar regresiones en modals
-                        self.settings.width = size.width as u32;
-                        self.settings.height = size.height as u32;
-                        self.settings_state.temp_settings.width = size.width as u32;
-                        self.settings_state.temp_settings.height = size.height as u32;
-
-                        // En Wayland sin decoracion, debemos pedirle explicitamente a Iced
-                        // que verifique el estado del sistema para evitar el "Hitbox desync"
-                        let size_clone = size;
-                        return window::oldest().and_then(move |id| {
-                            // Task::batch para asegurar que el viewport se limpie
-                            Task::batch(vec![window::is_maximized(id).map(move |is_maximized| {
-                                Message::WindowResizedWithMaximized(size_clone, is_maximized)
-                            })])
-                        });
-                    }
-                    window::Event::Moved(point) => {
-                        self.current_window_pos = point;
-                    }
-                    window::Event::CloseRequested => {
-                        return Task::done(Message::CloseRequested);
-                    }
-                    // --- NUEVOS EVENTOS PARA OPTIMIZACIoN ---
-                    window::Event::Focused => {
-                        self.is_focused = true;
-                        println!("[Window] Window gained focus - Enabling ticks");
-                        
-                        // Recargar imágenes de noticias si están vacías y la sección está habilitada
-                        if self.settings.enable_news && !self.news_section.posts.is_empty() && self.news_section.images.is_empty() {
-                            return Task::done(Message::News(NewsMessage::ReloadImages));
-                        }
-                    }
-                    window::Event::Unfocused => {
-                        self.is_focused = false;
-                        println!("[Window] Window lost focus - Disabling ticks");
-                    }
-                    // ----------------------------------------
-                    _ => {}
-                }
-                Task::none()
-            }
-
-            Message::ResizePressed(dir) => {
-                // Desactivar redimensionamiento personalizado en Wayland
-                if self.is_wayland {
-                    return Task::none();
-                }
-                
-                self.resizing_direction = Some(dir);
-
-                // Guardamos el estado inicial exacto
-                self.drag_start_window_pos = self.current_window_pos;
-                self.drag_start_window_size = self.current_window_size;
-
-                // Calculamos Mouse Absoluto: Posicion Ventana + Posicion Mouse Relativa
-                // (Usamos self.cursor_position que ya se actualiza en CursorMoved)
-                self.drag_start_mouse_screen_pos = Point::new(
-                    self.current_window_pos.x + self.cursor_position.x,
-                    self.current_window_pos.y + self.cursor_position.y,
-                );
-
-                Task::none()
-            }
-
-            Message::MouseReleased => {
-                self.is_mouse_pressed = false; // Resetear estado al soltar
-                self.last_mouse_release_time = std::time::Instant::now(); // Registrar cuando se solto
-                Task::none()
-            }
-
-            Message::ResizeReleased => {
-                // Desactivar redimensionamiento personalizado en Wayland
-                if self.is_wayland {
-                    return Task::none();
-                }
-                
-                self.resizing_direction = None;
-                self.is_mouse_pressed = false; // Tambien liberar el estado del mouse
-                self.last_mouse_release_time = std::time::Instant::now(); // Registrar cuando se solto
-                Task::none()
-            }
-
-            Message::MousePressed => {
-                self.is_mouse_pressed = true;
-                self.last_user_interaction = std::time::Instant::now(); // Reset interacción al hacer click
-                self.shader_click_time = std::time::Instant::now();
-                
-                // [GIRO PREDICTIVO] Registrar actividad del usuario
-                crate::util::register_activity();
-                
-                // [FIX LSD] Restauración inmediata de opacidad al hacer clic
-                if self.settings.theme.lsd_mode && !self.settings_state.is_open && !self.mods_state.is_open {
-                    // Restaurar opacidad inmediatamente si está baja
-                    if self.ui_opacity_accumulator < 0.9 {
-                        self.ui_opacity_accumulator = 1.0;
-                        
-                        // Mostrar cursor si estaba oculto
-                        if self.is_cursor_hidden {
-                            self.is_cursor_hidden = false;
-                        }
-                    }
-                }
-
-                // --- Resetear inactividad al presionar ---
-                self.last_mouse_move_time = std::time::Instant::now();
-                // ------------------------------------------------
-
-                Task::none()
-            }
-
-            Message::NextShader => {
-                // Solo cambiar si el modo LSD esta activo Y NO estamos ya en transicion
-                if self.settings.theme.lsd_mode && self.shader_transition <= 0.0 {
-                    // 1. Calcular indice siguiente (Ciclo circular)
-                    self.next_shader_idx =
-                        (self.active_shader_idx + 1) % self.total_shaders_available;
-
-                    // 2. Iniciar la transicion visual
-                    // Establecer en un valor pequeno pero > 0.0 arranca el fade-in en view()
-                    self.shader_transition = 0.01;
-
-                    // 3. Resetear el temporizador automatico
-                    // Para que no vuelva a cambiar automaticamente a los 2 segundos de que tu lo cambiaste
-                    self.shader_change_timer = 0.0;
-
-                    println!(
-                        "Manual Switch: {} -> {}",
-                        self.active_shader_idx, self.next_shader_idx
-                    );
-                }
-                Task::none()
-            }
             // ---------------------------------------------
             Message::CancelAction => {
                 self.cancellation_token.store(true, Ordering::Relaxed);

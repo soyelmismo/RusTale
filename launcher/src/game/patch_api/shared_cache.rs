@@ -69,9 +69,11 @@ impl SharedCacheManager {
         }
 
         let mut cleaned = 0;
+        let mut entries = tokio::fs::read_dir(&cache_dir).await
+            .context("Failed to read cache directory")?;
         let mut entries_vec = Vec::new();
 
-        while let Some(entry) = entries.next_entry().await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
             entries_vec.push(entry);
         }
 
@@ -122,7 +124,7 @@ impl SharedCacheManager {
         let mut entries = tokio::fs::read_dir(&cache_dir).await
             .context("Failed to read cache directory")?;
 
-        while let Some(entry) = entries.next_entry().await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
             file_count += 1;
             
             if let Ok(metadata) = entry.metadata() {
@@ -163,7 +165,7 @@ impl CacheStats {
 
 /// Global shared cache instance
 static mut SHARED_CACHE: Option<SharedCacheManager> = None;
-static INIT: std::sync::Once = std::sync::Once;
+static INIT: std::sync::Once = std::sync::Once::new();
 
 /// Initialize the shared cache system
 pub fn init_shared_cache(api_manager: Arc<PatchApiManager>) {
