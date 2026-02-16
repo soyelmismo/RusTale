@@ -1,5 +1,5 @@
 use crate::config::GameSettings;
-use crate::game::LauncherStatus;
+use crate::game::{LauncherStatus, progress::ProgressPayload};
 use crate::{Message, theme, util};
 use iced::widget::{ProgressBar, Space, button, column, container, row, svg};
 use iced::{Alignment, Element, Length};
@@ -18,18 +18,11 @@ pub fn view<'a>(
     status: &'a LauncherStatus,
     settings: &'a GameSettings,
     resolved_version: Option<i32>,
-    download_progress: f32,
-    sub_progress: f32,
-    status_text: &'a str,
+    progress_data: &'a Option<ProgressPayload>,
     localization: &'a crate::lang::Localization,
     is_disabled: bool,
     server_patch_progress: f32,
     show_server_patch_progress: bool,
-    total_bytes: u64,
-    downloaded_bytes: u64,
-    eta: Option<&'a String>,
-    current_step: Option<usize>,
-    total_steps: Option<usize>,
     ctx: theme::UIContext,
 ) -> Element<'a, Message> {
 
@@ -198,96 +191,132 @@ pub fn view<'a>(
     .spacing(10)
     .height(90);
 
-    // Aplicar LSD al status text
-    let status_text_widget = theme::text_body(status_text, ctx);
+    // Progress bars container using ProgressPayload
+    let progress_bars_container = if matches!(status, LauncherStatus::Downloading | LauncherStatus::Migrating | LauncherStatus::Busy | LauncherStatus::Checking) {
+        if let Some(data) = progress_data {
+            // Translate status text dynamically using message_key with arguments
+            let status_msg = if !data.message_args.is_empty() {
+                let args: Vec<&str> = data.message_args.iter().map(|s| s.as_str()).collect();
+                localization.ta(&data.message_key, &args)
+            } else {
+                localization.t(&data.message_key).to_string()
+            };
+            
+            // Extract download stats if available
+            let (total_bytes, downloaded_bytes, speed_str, eta_str) = if let Some(stats) = &data.stats {
+                (stats.total_bytes, stats.downloaded_bytes, stats.speed_str.clone(), stats.eta_str.clone())
+            } else {
+                (0, 0, String::new(), None)
+            };
+            
+            column![
+                // Status and progress info row
+                row![
+                    theme::text_micro(status_msg, ctx),
+                    Space::new().width(Length::Fill),
+                    theme::text_micro(format!("{:.0}%", data.global_progress * 100.0), ctx)
+                ],
+                
+                // Primary progress bar (Global Progress)
+                container(
+                    ProgressBar::new(0.0..=1.0, data.global_progress)
+                        .style(move |t| theme::accent_bar_style(&palette, t))
+                ).height(6).width(Length::Fill),
+                
+                // Secondary progress bar (Step Progress) - only show if significantly different
+                if (data.step_progress - data.global_progress).abs() > 0.05 {
+                    Element::from(
+                        container(
+                            ProgressBar::new(0.0..=1.0, data.step_progress)
+                                .style(move |t| theme::sub_bar_style(&palette, t))
+                        ).height(2).width(Length::Fill)
+                    )
+                } else {
+                    Element::from(Space::new().height(2))
+                },
+                
+                // Download statistics row
+                if total_bytes > 0 {
+                    row![
+                        theme::text_micro(format!("{}/{}", 
+                            format_bytes(downloaded_bytes), 
+                            format_bytes(total_bytes)
+                        ), ctx),
+                        Space::new().width(Length::Fill),
+                        if !speed_str.is_empty() {
+                            theme::text_micro(&speed_str, ctx)
+                        } else {
+                            theme::text_micro("", ctx)
+                        },
+                        if let Some(eta) = &eta_str {
+                            theme::text_micro(format!("ETA: {}", eta), ctx)
+                        } else {
+                            theme::text_micro("", ctx)
+                        }
+                    ]
+                } else if !speed_str.is_empty() {
+                    row![
+                        theme::text_micro(&speed_str, ctx),
+                        Space::new().width(Length::Fill),
+                        theme::text_micro("", ctx)
+                    ]
+                } else {
+                    row![]
+                }
+            ].spacing(5)
+        } else {
+            // Indeterminate state (initializing)
+            column![
+               theme::text_micro(localization.t("launcher.status.initializing"), ctx),
+               container(
+                   ProgressBar::new(0.0..=1.0, 0.0)
+                       .style(move |t| theme::accent_bar_style(&palette, t))
+               ).height(4).width(Length::Fill)
+            ].spacing(5)
+        }
+    } else {
+        column![] // Empty when idle/ready
+    };
+
+    // Status text widget (using translated message from payload or fallback)
+    let status_text_widget = if let Some(data) = progress_data {
+        let status_msg = if !data.message_args.is_empty() {
+            let args: Vec<&str> = data.message_args.iter().map(|s| s.as_str()).collect();
+            localization.ta(&data.message_key, &args)
+        } else {
+            localization.t(&data.message_key).to_string()
+        };
+        theme::text_body(status_msg, ctx)
+    } else {
+        theme::text_body(localization.t("launcher.status.ready"), ctx)
+    };
+
+    // Server patch progress (separate system)
+    let server_patch_container = if show_server_patch_progress {
+        column![
+            row![
+                theme::text_micro("Patching Server...", ctx),
+                Space::new().width(Length::Fill),
+                theme::text_micro(format!("{:.0}%", server_patch_progress), ctx)
+            ],
+            container(
+                ProgressBar::new(0.0..=1.0, server_patch_progress / 100.0)
+                    .style(move |t| theme::accent_bar_style(&palette, t))
+            )
+            .height(4)
+            .width(Length::Fill)
+            .style(move |t| theme::container_style_transparent(&palette, t))
+        ]
+        .spacing(5)
+    } else {
+        column![]
+    };
 
     container(
         column![
             info_section,
-            if *status == LauncherStatus::Downloading || *status == LauncherStatus::Migrating {
-                column![
-                    row![
-                        theme::text_micro(localization.t("launcher.status.step"), ctx),
-                        Space::new().width(Length::Fill),
-                        theme::text_micro(format!("{:.0}%", download_progress), ctx)
-                    ],
-                    container(
-                        ProgressBar::new(0.0..=100.0, download_progress)
-                            .style(move |t| theme::accent_bar_style(&palette, t))
-                    )
-                    .height(4)
-                    .width(Length::Fill)
-                    .style(move |t| theme::container_style_transparent(&palette, t)),
-                    if total_bytes > 0 {
-                        column![
-                            row![
-                                theme::text_micro(format!("{}/{}", 
-                                    format_bytes(downloaded_bytes), 
-                                    format_bytes(total_bytes)
-                                ), ctx),
-                                Space::new().width(Length::Fill),
-                                if let Some(eta_str) = eta {
-                                    theme::text_micro(format!("ETA: {}", eta_str), ctx)
-                                } else {
-                                    theme::text_micro("", ctx)
-                                }
-                            ]
-                        ]
-                        .spacing(2)
-                    } else {
-                        column![
-                            row![
-                                theme::text_micro(format_bytes(downloaded_bytes), ctx),
-                                Space::new().width(Length::Fill),
-                                theme::text_micro(status_text, ctx)
-                            ]
-                        ]
-                        .spacing(2)
-                    }
-                ]
-                .spacing(5)
-            } else {
-                column![]
-            },
-            if *status == LauncherStatus::Downloading || *status == LauncherStatus::Migrating {
-                column![
-                    row![
-                        theme::text_micro(localization.t("launcher.status.step"), ctx),
-                        Space::new().width(Length::Fill),
-                        if let (Some(current), Some(total)) = (current_step, total_steps) {
-                            theme::text_micro(format!("Current step ({}/{})", current, total), ctx)
-                        } else {
-                            theme::text_micro(format!("{:.0}%", sub_progress), ctx)
-                        }
-                    ],
-                    container(
-                        ProgressBar::new(0.0..=100.0, sub_progress)
-                            .style(move |t| theme::sub_bar_style(&palette, t))
-                    )
-                    .height(3)
-                    .width(Length::Fill)
-                    .style(move |t| theme::container_style_transparent(&palette, t))
-                ]
-                .spacing(2)
-            } else if show_server_patch_progress {
-                column![
-                    row![
-                        theme::text_micro("Patching Server...", ctx),
-                        Space::new().width(Length::Fill),
-                        theme::text_micro(format!("{:.0}%", server_patch_progress), ctx)
-                    ],
-                    container(
-                        ProgressBar::new(0.0..=100.0, server_patch_progress)
-                            .style(move |t| theme::accent_bar_style(&palette, t))
-                    )
-                    .height(4)
-                    .width(Length::Fill)
-                    .style(move |t| theme::container_style_transparent(&palette, t))
-                ]
-                .spacing(5)
-            } else {
-                column![]
-            },
+            progress_bars_container,
+            server_patch_container,
             status_text_widget,
             actions
         ]

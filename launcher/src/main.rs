@@ -336,15 +336,7 @@ pub enum Message {
     CheckStatus,
     DryRunFinished(GameSettings, LauncherStatus, Option<i32>),
     StartGame,
-    DownloadProgress {
-        progress: f32,
-        sub_progress: f32,
-        speed: String,
-        total_bytes: u64,
-        downloaded_bytes: u64,
-        eta: Option<String>,
-        current_step: Option<usize>,
-    },
+    ProgressUpdate(crate::game::progress::ProgressPayload),
     UpdateTotalSteps {
         total_steps: Option<usize>,
     },
@@ -415,106 +407,133 @@ pub enum Message {
     WatchdogCheck, // Nuevo mensaje para watchdog de estados
 }
 
-struct RusTale {
+// View state organization
+#[derive(Debug, Clone)]
+pub struct AppViews {
+    pub settings: SettingsState,
+    pub mods: ModsState,
+    pub news: NewsSection,
+    pub is_settings_open: bool,
+    pub is_mods_open: bool,
+    pub is_news_visible: bool,
+}
+
+impl AppViews {
+    pub fn new(settings: &GameSettings) -> Self {
+        Self {
+            settings: SettingsState::new(settings),
+            mods: ModsState::new(),
+            news: NewsSection::new(),
+            is_settings_open: false,
+            is_mods_open: false,
+            is_news_visible: true,
+        }
+    }
+}
+
+pub struct RusTale {
+    // === INFRASTRUCTURE ===
+    // Core services and configuration
     profiles: ProfilesConfig,
     settings: GameSettings,
     status: LauncherStatus,
-    news_section: NewsSection,
-    settings_state: SettingsState,
+    paths: GamePaths,
+    services: crate::services::Services,
+    localization: Localization,
+    
+    // === VIEW LOGIC STATE ===
+    // Organized view components
+    views: AppViews,
+    
+    // Download and game state
     download_progress: f32,
     sub_progress: f32,
     status_text: String,
     total_bytes: u64,
     downloaded_bytes: u64,
     eta: Option<String>,
+    current_progress_payload: Option<crate::game::progress::ProgressPayload>,
     error: Option<String>,
-    running_game: Option<(GameSettings, String, String, Option<i32>, LauncherStatus)>, // (Settings, Name, ID/UUID, TargetVersion)
-    editing_profile: Option<(Option<uuid::Uuid>, String)>, // (ID, Name) - None ID means new profile
-    editing_uuid: Option<(uuid::Uuid, String)>,
-    profile_dropdown_open: bool,
+    running_game: Option<(GameSettings, String, String, Option<i32>, LauncherStatus)>,
     latest_version: Option<i32>,
-    available_versions: Vec<i32>, // CAMBIO: Cache persistente de versiones
-    paths: GamePaths,             // Centralized path management
-
-    services: crate::services::Services, // Centralized services
-    localization: Localization,
-    is_quickplay_mode: bool,
-    is_window_visible: bool,
+    available_versions: Vec<i32>,
     server_patch_progress: f32,
     show_server_patch_progress: bool,
+    current_step: Option<usize>,
+    total_steps: Option<usize>,
+    
+    // Profile management state
+    editing_profile: Option<(Option<uuid::Uuid>, String)>,
+    editing_uuid: Option<(uuid::Uuid, String)>,
+    profile_dropdown_open: bool,
+    
+    // === VISUAL STATE ===
+    // Window and display state
     window_size: Size,
-    tray_icon: Option<tray_icon::TrayIcon>, // Store tray icon to rebuild menu dynamically
-    mods_state: ModsState,                  // Modal state
-    local_server_stop_tx: Option<tokio::sync::oneshot::Sender<()>>,
-    cancellation_token: Arc<AtomicBool>,
+    current_window_size: Size,
+    current_window_pos: Point,
+    is_window_visible: bool,
+    is_maximized: bool,
+    is_minimized: bool,
+    is_focused: bool,
+    is_fullscreen: bool,
+    is_wayland: bool,
+    is_cursor_hidden: bool,
+    
+    // Mouse and interaction tracking
+    cursor_position: iced::Point,
+    last_mouse_move_time: std::time::Instant,
+    last_user_interaction: std::time::Instant,
+    last_mouse_update_time: std::time::Instant,
+    mouse_update_interval: std::time::Duration,
+    is_mouse_pressed: bool,
+    last_mouse_release_time: std::time::Instant,
+    
+    // Resize and drag state
+    resizing_direction: Option<ResizeDirection>,
+    drag_start_window_pos: Point,
+    drag_start_window_size: Size,
+    drag_start_mouse_screen_pos: Point,
+    
+    // === VISUAL EFFECTS STATE ===
+    // Theme and styling
     palette: theme::Palette,
+    
+    // LSD and shader effects
     lsd_offset: (f32, f32),
     start_time: std::time::Instant,
     current_time: f32,
     lsd_preview: bool,
-    cursor_position: iced::Point, // Rastrear raton para efectos
-    last_mouse_move_time: std::time::Instant,
-    lsd_enabled_time: Option<std::time::Instant>, // Para activacion progresiva
-    is_mouse_pressed: bool, // Para esconder contenedores al mantener click (solo LSD mode)
-    last_mouse_release_time: std::time::Instant, // Para transicion suave al soltar
-    is_maximized: bool,
-    last_title_click: std::time::Instant,
-    last_status_change: std::time::Instant, // Track state changes for timeout detection
-    last_download_progress: f32,            // Track last download progress for stuck detection
-    is_news_visible: bool, // Track if news section is currently visible
-
-    // --- MOUSE THROTTLING FOR LSD PERFORMANCE ---
-    last_mouse_update_time: std::time::Instant, // Para throttling de actualizaciones del mouse
-    mouse_update_interval: std::time::Duration, // Intervalo mínimo entre actualizaciones del mouse
-
-    // ...
-    // --- NUEVOS CAMPOS PARA REDIMENSIoN ---
-    resizing_direction: Option<ResizeDirection>,
-    current_window_size: Size,
-    current_window_pos: Point,
-
-    // Guardamos el estado AL MOMENTO DE HACER CLICK
-    drag_start_window_pos: Point,
-    drag_start_window_size: Size,
-    drag_start_mouse_screen_pos: Point, // Mouse absoluto (WindowPos + MousePos)
-    // -------------------------------------
-
-    // --- CAMPOS PARA EFECTOS TaCTILES DEL SHADER ---
-    shader_click_intensity: f32,           // Intensidad del pulso actual
-    shader_click_time: std::time::Instant, // Tiempo del ultimo clic
-    lsd_shader_instance: std::cell::RefCell<Option<lsd_shader::LsdShader>>, // Instancia mutable para llamadas dinamicas
-    // ---------------------------------------------
+    lsd_enabled_time: Option<std::time::Instant>,
+    lsd_shader_instance: std::cell::RefCell<Option<lsd_shader::LsdShader>>,
     
-    // --- CAMPOS PARA BLUR DE BACKGROUND ---
-    background_blur: Option<background_blur::BackgroundBlur>, // Control de blur independiente del LSD
-    // ---------------------------------------------
-
-    // NUEVOS CAMPOS PARA TRANSICIoN DE SHADERS
+    // Shader transition state
     active_shader_idx: u32,
     next_shader_idx: u32,
-    shader_transition: f32, // 0.0 a 1.0
+    shader_transition: f32,
     total_shaders_available: u32,
-    shader_change_timer: f32,    // Acumulador para cambio automatico
-    ui_opacity_accumulator: f32, // Nuevo campo: valor real de 0.0 a 1.0
-    // ------------------------------------- // Anadir esto
-
-    // --- CAMPOS PARA OPTIMIZACIoN DE TICKING ---
-    is_minimized: bool, // Estado de minimizacion de la ventana
-    is_focused: bool,   // Estado de foco de la ventana
-    // -------------------------------------
+    shader_change_timer: f32,
+    ui_opacity_accumulator: f32,
+    shader_click_intensity: f32,
+    shader_click_time: std::time::Instant,
     
-    // --- CAMPOS PARA MONITOREO DE MEMORIA ---
-    memory_stats: crate::util::MemoryStats, // Estadísticas actuales de memoria
-    // -------------------------------------
-
-    // --- CAMPOS PARA OCULTAMIENTO DE CURSOR POR INACTIVIDAD ---
-    is_cursor_hidden: bool, // Para trackear estado del puntero
-    last_user_interaction: std::time::Instant, // Para resetear con clicks también
-    is_fullscreen: bool,    // Estado separado para fullscreen (F11)
-    is_wayland: bool,       // Detectar si estamos en Wayland para desactivar redimensionamiento custom
-    current_step: Option<usize>, // Para tracking del paso actual de instalación
-    total_steps: Option<usize>, // Para tracking de pasos de instalación
-                            // -----------------------------------------------------
+    // Background effects
+    background_blur: Option<background_blur::BackgroundBlur>,
+    
+    // === SYSTEM STATE ===
+    // Timing and monitoring
+    last_title_click: std::time::Instant,
+    last_status_change: std::time::Instant,
+    last_download_progress: f32,
+    memory_stats: crate::util::MemoryStats,
+    
+    // System integration
+    tray_icon: Option<tray_icon::TrayIcon>,
+    local_server_stop_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    cancellation_token: Arc<AtomicBool>,
+    
+    // Application mode
+    is_quickplay_mode: bool,
 }
 
 impl RusTale {
@@ -624,39 +643,71 @@ impl RusTale {
 
         (
             Self {
+                // === INFRASTRUCTURE ===
                 profiles: ProfilesConfig::default(),
                 settings: initial_settings.clone(),
                 status: LauncherStatus::Checking,
-                news_section: NewsSection::new(),
-                settings_state: SettingsState::new(&initial_settings),
+                paths,
+                services,
+                localization: Localization::new(),
+                
+                // === VIEW LOGIC STATE ===
+                views: AppViews::new(&initial_settings),
+                
+                // Download and game state
                 download_progress: 0.0,
                 sub_progress: 0.0,
                 status_text: "Initializing...".to_string(),
                 total_bytes: 0,
                 downloaded_bytes: 0,
                 eta: None,
+                current_progress_payload: None,
                 error: None,
                 running_game: None,
+                latest_version: None,
+                available_versions: Vec::new(),
+                server_patch_progress: 0.0,
+                show_server_patch_progress: false,
+                current_step: None,
+                total_steps: None,
+                
+                // Profile management state
                 editing_profile: None,
                 editing_uuid: None,
                 profile_dropdown_open: false,
-                latest_version: None,
-                available_versions: Vec::new(), // Initialize empty
-                paths,
-                services,
-                localization: Localization::new(),
-                is_quickplay_mode: quickplay,
-                is_window_visible: !quickplay,
+                
+                // === VISUAL STATE ===
                 window_size: Size::new(width, height),
-                tray_icon,
-                mods_state: ModsState::new(),
-                local_server_stop_tx: None,
-                cancellation_token: Arc::new(AtomicBool::new(false)),
-                server_patch_progress: 0.0,
-                show_server_patch_progress: false,
+                current_window_size: Size::new(width, height),
+                current_window_pos: Point::ORIGIN,
+                is_window_visible: !quickplay,
+                is_maximized: false,
+                is_minimized: false,
+                is_focused: true,
+                is_fullscreen: false,
+                is_wayland,
+                is_cursor_hidden: false,
+                
+                // Mouse and interaction tracking
+                cursor_position: iced::Point::ORIGIN,
+                last_mouse_move_time: std::time::Instant::now(),
+                last_user_interaction: std::time::Instant::now(),
+                last_mouse_update_time: std::time::Instant::now(),
+                mouse_update_interval: std::time::Duration::from_millis(30),
+                is_mouse_pressed: false,
+                last_mouse_release_time: std::time::Instant::now(),
+                
+                // Resize and drag state
+                resizing_direction: None,
+                drag_start_window_pos: Point::ORIGIN,
+                drag_start_window_size: Size::new(width, height),
+                drag_start_mouse_screen_pos: Point::ORIGIN,
+                
+                // === VISUAL EFFECTS STATE ===
                 palette: theme::generate_palette(&initial_settings.theme),
+                
+                // LSD and shader effects
                 lsd_offset: if initial_settings.theme.lsd_mode {
-                    // Valores iniciales aleatorios para que el efecto LSD se aplique inmediatamente
                     let t = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap()
@@ -670,72 +721,39 @@ impl RusTale {
                 start_time: std::time::Instant::now(),
                 current_time: 0.0,
                 lsd_preview: false,
-                cursor_position: iced::Point::ORIGIN,
-                last_mouse_move_time: std::time::Instant::now(),
                 lsd_enabled_time: if initial_settings.theme.lsd_mode {
                     Some(std::time::Instant::now())
                 } else {
                     None
                 },
-                is_mouse_pressed: false, // Inicialmente no presionado
-                last_mouse_release_time: std::time::Instant::now(), // Para transicion suave
-                is_maximized: false,
-                last_title_click: std::time::Instant::now(),
-                last_status_change: std::time::Instant::now(), // Track state changes for timeout detection
-                last_download_progress: 0.0, // Track last download progress for stuck detection
-                is_news_visible: true, // Initially visible (news section is shown by default)
-
-                // --- MOUSE THROTTLING FOR LSD PERFORMANCE ---
-                last_mouse_update_time: std::time::Instant::now(),
-                mouse_update_interval: std::time::Duration::from_millis(30), // 33 FPS para actualizaciones del mouse (mejor rendimiento)
-
-                // --- NUEVOS CAMPOS PARA REDIMENSIoN ---
-                resizing_direction: None,
-                current_window_size: Size::new(width, height),
-                current_window_pos: Point::ORIGIN,
-
-                // Guardamos el estado AL MOMENTO DE HACER CLICK
-                drag_start_window_pos: Point::ORIGIN,
-                drag_start_window_size: Size::new(width, height),
-                drag_start_mouse_screen_pos: Point::ORIGIN,
-                // -------------------------------------
-
-                // --- CAMPOS PARA EFECTOS TaCTILES DEL SHADER ---
-                shader_click_intensity: 0.0,
-                shader_click_time: std::time::Instant::now(),
-                lsd_shader_instance: std::cell::RefCell::new(None), // Se inicializara dinamicamente
-                // ---------------------------------------------
+                lsd_shader_instance: std::cell::RefCell::new(None),
                 
-                // --- CAMPOS PARA BLUR DE BACKGROUND ---
-                background_blur: initial_bg_bytes.map(background_blur::BackgroundBlur::new), // Iniciado si ya hay cache
-                // ---------------------------------------------
-
-                // NUEVOS CAMPOS PARA TRANSICIoN DE SHADERS
+                // Shader transition state
                 active_shader_idx: 0,
                 next_shader_idx: 0,
                 shader_transition: 0.0,
-                total_shaders_available: total_shaders as u32, // Usar el valor calculado
+                total_shaders_available: total_shaders as u32,
                 shader_change_timer: 0.0,
-                ui_opacity_accumulator: 1.0, // Inicializar con opacidad total
-                // -------------------------------------
-
-                // --- CAMPOS PARA OPTIMIZACIoN DE TICKING ---
-                is_minimized: false, // Inicialmente no minimizado
-                is_focused: true,    // Inicialmente con foco (ventana principal)
-                // -------------------------------------
+                ui_opacity_accumulator: 1.0,
+                shader_click_intensity: 0.0,
+                shader_click_time: std::time::Instant::now(),
                 
-                // --- CAMPOS PARA MONITOREO DE MEMORIA ---
-                memory_stats: crate::util::get_memory_stats(), // Obtener estadísticas iniciales
-                // -------------------------------------
-
-                // --- CAMPOS PARA OCULTAMIENTO DE CURSOR POR INACTIVIDAD ---
-                is_cursor_hidden: false, // Inicialmente visible
-                last_user_interaction: std::time::Instant::now(), // Inicializar con tiempo actual
-                is_fullscreen: false,    // Inicialmente no fullscreen
-                is_wayland,             // Valor detectado para desactivar redimensionamiento custom
-                current_step: None,    // Inicialmente sin paso actual
-                total_steps: None,      // Inicialmente sin pasos de instalación
-                                         // -----------------------------------------------------
+                // Background effects
+                background_blur: initial_bg_bytes.map(background_blur::BackgroundBlur::new),
+                
+                // === SYSTEM STATE ===
+                last_title_click: std::time::Instant::now(),
+                last_status_change: std::time::Instant::now(),
+                last_download_progress: 0.0,
+                memory_stats: crate::util::get_memory_stats(),
+                
+                // System integration
+                tray_icon,
+                local_server_stop_tx: None,
+                cancellation_token: Arc::new(AtomicBool::new(false)),
+                
+                // Application mode
+                is_quickplay_mode: quickplay,
             },
             Task::batch(vec![
                 Task::done(Message::Initialize),
@@ -757,7 +775,7 @@ impl RusTale {
         let is_minimized = self.is_minimized;
         let is_visible = self.is_window_visible;
         let is_interactive = is_visible && !is_minimized && is_focused;
-        let is_modal_active = self.settings_state.is_open || self.mods_state.is_open;
+        let is_modal_active = self.views.settings.is_open || self.views.mods.is_open;
         let lsd_active = self.settings.theme.lsd_mode || self.lsd_preview;
 
         let game_runner =
@@ -841,7 +859,7 @@ impl RusTale {
         let memory_stats_sub = iced::time::every(std::time::Duration::from_secs(5)).map(|_| Message::MemoryStatsUpdate);
 
         // 4. SPECIALIZED LISTENERS
-        let news_scroll_sub = if self.is_news_visible && lsd_active {
+        let news_scroll_sub = if self.views.is_news_visible && lsd_active {
             iced::event::listen_with(|event, _status, _window_id| {
                 if let iced::Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) = event {
                     let scroll_change = match delta {
@@ -955,7 +973,7 @@ impl RusTale {
                     crate::util::register_activity();
                     
                     // [FIX LSD] Restauración inmediata de opacidad al mover mouse
-                    if self.settings.theme.lsd_mode && !self.settings_state.is_open && !self.mods_state.is_open {
+                    if self.settings.theme.lsd_mode && !self.views.settings.is_open && !self.views.mods.is_open {
                         // Restaurar opacidad inmediatamente si está baja
                         if self.ui_opacity_accumulator < 0.9 {
                             self.ui_opacity_accumulator = 1.0;
@@ -984,7 +1002,7 @@ impl RusTale {
                 crate::util::register_activity();
                 
                 // [FIX LSD] Restauración inmediata de opacidad al hacer clic
-                if self.settings.theme.lsd_mode && !self.settings_state.is_open && !self.mods_state.is_open {
+                if self.settings.theme.lsd_mode && !self.views.settings.is_open && !self.views.mods.is_open {
                     // Restaurar opacidad inmediatamente si está baja
                     if self.ui_opacity_accumulator < 0.9 {
                         self.ui_opacity_accumulator = 1.0;
@@ -1012,7 +1030,7 @@ impl RusTale {
                     crate::util::register_activity();
                 }
 
-                let is_modal_active = self.settings_state.is_open || self.mods_state.is_open;
+                let is_modal_active = self.views.settings.is_open || self.views.mods.is_open;
                 
                 if let Some(ref mut lsd) = *self.lsd_shader_instance.borrow_mut() {
                     lsd.update_time(frame_time);
@@ -1048,7 +1066,7 @@ impl RusTale {
                 let elapsed_since_click = self.shader_click_time.elapsed().as_secs_f32();
                 let elapsed_idle = self.last_mouse_move_time.elapsed().as_secs_f32();
 
-                let is_modal_active = self.settings_state.is_open || self.mods_state.is_open;
+                let is_modal_active = self.views.settings.is_open || self.views.mods.is_open;
 
                 let tasks = Vec::new();
 
@@ -1159,7 +1177,7 @@ impl RusTale {
             Message::WindowResized(size) => {
                 self.current_window_size = *size;
                 self.window_size = *size;
-                self.news_section.update_viewport_height(size.height);
+                self.views.news.update_viewport_height(size.height);
                 self.settings.width = size.width as u32;
                 self.settings.height = size.height as u32;
 
@@ -1182,8 +1200,8 @@ impl RusTale {
                 self.is_maximized = *is_maximized;
                 self.settings.width = size.width as u32;
                 self.settings.height = size.height as u32;
-                self.settings_state.temp_settings.width = size.width as u32;
-                self.settings_state.temp_settings.height = size.height as u32;
+                self.views.settings.temp_settings.width = size.width as u32;
+                self.views.settings.temp_settings.height = size.height as u32;
                 Some(Task::none())
             }
             
@@ -1209,7 +1227,7 @@ impl RusTale {
                     return Some(Task::none());
                 }
                 self.is_minimized = true;
-                self.news_section.images.clear(); 
+                self.views.news.images.clear(); 
                 Some(window::oldest().and_then(|id| {
                     Task::batch(vec![
                         window::minimize(id, true),
@@ -1268,8 +1286,8 @@ impl RusTale {
 
                         self.settings.width = size.width as u32;
                         self.settings.height = size.height as u32;
-                        self.settings_state.temp_settings.width = size.width as u32;
-                        self.settings_state.temp_settings.height = size.height as u32;
+                        self.views.settings.temp_settings.width = size.width as u32;
+                        self.views.settings.temp_settings.height = size.height as u32;
 
                         let size_clone = *size;
                         Some(window::oldest().and_then(move |id| {
@@ -1287,7 +1305,7 @@ impl RusTale {
                     }
                     window::Event::Focused => {
                         self.is_focused = true;
-                        if self.settings.enable_news && !self.news_section.posts.is_empty() && self.news_section.images.is_empty() {
+                        if self.settings.enable_news && !self.views.news.posts.is_empty() && self.views.news.images.is_empty() {
                             return Some(Task::done(Message::News(NewsMessage::ReloadImages)));
                         }
                         Some(Task::none())
@@ -1340,7 +1358,7 @@ impl RusTale {
             }
 
             Message::ToggleProfileDropdown => {
-                 Some(self.handle_profile_message(Message::ToggleProfileDropdown))
+                 Some(self.handle_profile_message_ext(Message::ToggleProfileDropdown))
             }
             
             _ => None
@@ -1358,7 +1376,7 @@ impl RusTale {
         }
 
 
-        if self.settings_state.is_open {
+        if self.views.settings.is_open {
             match &message {
                 Message::Settings(_)
                 | Message::LanguageChangedInSettings(_)
@@ -1425,7 +1443,7 @@ impl RusTale {
                 let client = self.services.api_client.clone();
                 let settings = self.settings.clone();
 
-                self.mods_state
+                self.views.mods
                     .update(msg, client, base_dir, settings)
                     .map(Message::Mods)
             }
@@ -1491,7 +1509,7 @@ impl RusTale {
                 self.settings = s.clone();
                 self.palette = theme::generate_palette(&self.settings.theme);
 
-                self.settings_state.temp_settings = s;
+                self.views.settings.temp_settings = s;
 
                 if self.settings.theme.lsd_mode {
                     self.lsd_enabled_time = Some(std::time::Instant::now());
@@ -1517,7 +1535,7 @@ impl RusTale {
                 }
 
                 // LAZY LOADING DE NOTICIAS: Solo cargar si está habilitado Y no ha cargado antes
-                let news_task = if self.settings.enable_news && self.news_section.should_load() {
+                let news_task = if self.settings.enable_news && self.views.news.should_load() {
                     Task::done(Message::News(NewsMessage::LoadNews))
                 } else {
                     Task::none()
@@ -1558,29 +1576,13 @@ impl RusTale {
 
                 Task::batch(tasks)
             }
-            Message::LoadJavaInfo => {
-                let base_dir = config::get_app_dir();
-                Task::perform(
-                    async move {
-                        match java_detection::ensure_java_available(&base_dir).await {
-                            Ok(java_info) => Message::Settings(
-                                SettingsMessage::JavaVersionUpdated(java_info.version),
-                            ),
-                            Err(e) => {
-                                eprintln!("Java detection/download failed: {}", e);
-                                Message::Settings(SettingsMessage::JavaInfoLoaded)
-                            }
-                        }
-                    },
-                    |msg| msg,
-                )
-            }
+            Message::LoadJavaInfo => RusTale::logic_load_java_info(),
             Message::JavaInfoLoaded => {
                 Task::done(Message::Settings(SettingsMessage::JavaInfoLoaded))
             }
             Message::LanguageChangedInSettings(lang_id) => {
                 // 1. Update the temporary settings state (for when saving)
-                self.settings_state.temp_settings.language = lang_id.clone();
+                self.views.settings.temp_settings.language = lang_id.clone();
 
                 // 2. Load the new language instantly
                 // This replaces the previous JSON in RAM
@@ -1595,54 +1597,7 @@ impl RusTale {
                 }
                 Task::none()
             }
-            Message::CheckStatus => {
-                // Enhanced safety check: Allow status re-check if potentially stuck
-                let is_potentially_stuck = match self.status {
-                    LauncherStatus::Playing => {
-                        // If "playing" but no running_game, we're in inconsistent state
-                        self.running_game.is_none()
-                    }
-                    LauncherStatus::Busy => {
-                        // If "busy" for more than 30 seconds, allow re-check
-                        self.running_game.is_none()
-                            && self.last_status_change.elapsed().as_secs() > 30
-                    }
-                    _ => false,
-                };
-
-                if (self.status == LauncherStatus::Playing || self.running_game.is_some())
-                    && !is_potentially_stuck
-                {
-                    println!(
-                        "[Status] Check skipped: status={:?}, running_game={:?}",
-                        self.status,
-                        self.running_game.is_some()
-                    );
-                    return Task::none();
-                }
-
-                println!("[Status] Starting status check...");
-                self.last_status_change = std::time::Instant::now();
-                self.status = LauncherStatus::Checking;
-                self.status_text = self.localization.t("launcher.status.checking").to_string();
-
-                let settings = self.settings.clone();
-                let settings_for_closure = settings.clone();
-                let paths = self.paths.clone();
-                let client = self.services.api_client.clone();
-
-                // CAMBIO: Pasamos el latest_version que ya tenemos en memoria (si existe)
-                let cached_version = self.latest_version;
-
-                Task::perform(
-                    async move {
-                        game::calculate_status(&client, &settings, &paths, cached_version).await
-                    },
-                    move |(status, latest)| {
-                        Message::DryRunFinished(settings_for_closure, status, latest)
-                    },
-                )
-            }
+            Message::CheckStatus => self.logic_check_status(),
             Message::DryRunFinished(settings, status, latest) => {
                 self.settings = settings;
                 self.status = status;
@@ -1696,97 +1651,48 @@ impl RusTale {
 
                 Task::none()
             }
-            Message::StartGame => {
-                let mut tasks = Vec::new();
+            Message::StartGame => self.logic_start_game(),
 
-                println!(
-                    "[Game] StartGame requested - Current status: {:?}",
-                    self.status
-                );
-
-                // Enhanced state validation
-                if self.status == LauncherStatus::Playing {
-                    println!("[Game] Already playing, stopping current game...");
-                    self.running_game = None;
-                    self.status = LauncherStatus::Ready;
-                    self.status_text = self.localization.t("launcher.status.ready").to_string();
-                    self.last_status_change = std::time::Instant::now();
-                } else {
-                    // Reset cancellation token for new launch
-                    self.cancellation_token.store(false, Ordering::Relaxed);
-                    self.error = None; // Clear any previous errors
-
-                    let player_name = self.profiles.get_current_profile_name();
-                    let player_uuid = self.profiles.current_profile.clone();
-                    let settings = self.settings.clone();
-                    let target_ver = self.latest_version;
-
-                    let trigger_status = self.status.clone();
-
-                    println!("[Game] Launching with profile: {}", player_name);
-
-                    self.status_text = self
-                        .localization
-                        .t("launcher.status.initializing")
-                        .to_string();
-                    self.last_status_change = std::time::Instant::now();
-
-                    if self.is_quickplay_mode {
-                        self.is_window_visible = false;
-                        tasks.push(
-                            window::oldest()
-                                .and_then(|id| window::set_mode(id, window::Mode::Hidden)),
-                        );
-                    }
-
-                    // Store launch attempt with timestamp for timeout detection
-                    self.running_game = Some((
-                        settings,
-                        player_name,
-                        player_uuid.to_string(),
-                        target_ver,
-                        trigger_status,
-                    ));
-                    self.status = LauncherStatus::Busy;
-
-                    println!("[Game] Game launch initiated successfully");
-                }
-                Task::batch(tasks)
-            }
-
-            Message::DownloadProgress {
-                progress,
-                sub_progress,
-                speed,
-                total_bytes,
-                downloaded_bytes,
-                eta,
-                current_step,
-            } => {
-                // Track progress changes for stuck detection using GENERAL progress
-                let progress_changed = (progress - self.last_download_progress).abs() > 0.1;
+            Message::ProgressUpdate(payload) => {
+                // Track progress changes for stuck detection using GLOBAL progress
+                let progress_changed = (payload.global_progress * 100.0 - self.last_download_progress).abs() > 0.1;
                 if progress_changed {
-                    self.last_download_progress = progress;
+                    self.last_download_progress = payload.global_progress * 100.0;
                     self.last_status_change = std::time::Instant::now(); // Reset timeout on progress
                 }
 
-                if progress >= 100.0 || speed.contains("verified") {
+                if payload.global_progress >= 1.0 || payload.message_key.contains("verified") {
                     self.status = LauncherStatus::Busy;
                 } else {
                     self.status = LauncherStatus::Downloading;
                 }
 
-                self.download_progress = progress;
-                self.sub_progress = sub_progress;
-                self.status_text = speed.clone();
-                self.total_bytes = total_bytes;
-                self.downloaded_bytes = downloaded_bytes;
-                self.eta = eta;
-                self.current_step = current_step; // Actualizar current_step dinámico
+                // Store the current progress payload for UI rendering
+                self.current_progress_payload = Some(payload.clone());
+                
+                // Update legacy fields for backward compatibility
+                self.download_progress = payload.global_progress * 100.0;
+                self.sub_progress = payload.step_progress * 100.0;
+                
+                // Use proper localization with arguments if available
+                self.status_text = if !payload.message_args.is_empty() {
+                    let args: Vec<&str> = payload.message_args.iter().map(|s| s.as_str()).collect();
+                    self.localization.ta(&payload.message_key, &args)
+                } else {
+                    self.localization.t(&payload.message_key).to_string()
+                };
+                
+                if let Some(stats) = &payload.stats {
+                    self.total_bytes = stats.total_bytes;
+                    self.downloaded_bytes = stats.downloaded_bytes;
+                    self.eta = stats.eta_str.clone();
+                }
 
                 println!(
-                    "[Progress] General: {:.1}% | Step: {:.1}% | Status: {}",
-                    progress, sub_progress, speed
+                    "[Progress] Global: {:.1}% | Step: {:.1}% | Status: {}",
+                    payload.global_progress * 100.0, 
+                    payload.step_progress * 100.0, 
+                    payload.message_key
                 );
                 Task::none()
             }
@@ -1803,8 +1709,8 @@ impl RusTale {
                         println!("[Game] Game launched successfully");
 
                         // [OPTIMIZACIÓN] Liberar recursos pesados ahora que jugamos
-                        self.news_section.images.clear(); // Adiós imágenes
-                        self.mods_state.thumbnails.clear(); // Adiós miniaturas mods
+                        self.views.news.images.clear(); // Adiós imágenes
+                        self.views.mods.thumbnails.clear(); // Adiós miniaturas mods
 
                         // Ejecutar limpieza profunda del SO
                         crate::util::trim_memory_with_level(crate::util::TrimLevel::Aggressive);
@@ -1968,12 +1874,12 @@ impl RusTale {
                 if !self.settings.enable_news {
                     return Task::none();
                 }
-                self.news_section.update(msg, self.services.api_client.clone())
+                self.views.news.update(msg, self.services.api_client.clone())
             }
             Message::LauncherUpdate(sub_msg) => match sub_msg {
                 updater::UpdaterMessage::CheckForUpdates => {
                     let client = self.services.api_client.clone();
-                    let is_settings_open = self.settings_state.is_open;
+                    let is_settings_open = self.views.settings.is_open;
 
                     Task::perform(
                         async move {
@@ -2123,16 +2029,16 @@ impl RusTale {
                 self.is_mouse_pressed = false;
                 self.ui_opacity_accumulator = 1.0;
 
-                self.settings_state.open(self.settings.clone());
+                self.views.settings.open(self.settings.clone());
 
-                self.settings_state.is_loading_versions = true;
-                self.settings_state.available_versions.clear();
+                self.views.settings.is_loading_versions = true;
+                self.views.settings.available_versions.clear();
 
                 let channel = self.settings.channel.clone();
                 Task::done(Message::RequestVersionCheck(channel))
             }
             Message::CloseSettings => {
-                self.settings_state.is_open = false;
+                self.views.settings.is_open = false;
 
                 // Recortar memoria después de cerrar settings
                 crate::util::trim_memory();
@@ -2170,12 +2076,12 @@ impl RusTale {
                 if channel_changed {
                     // Si el modal ya cargó las versiones del nuevo canal, las promovemos
                     // para evitar el doble check de red al guardar.
-                    if !self.settings_state.available_versions.is_empty() {
+                    if !self.views.settings.available_versions.is_empty() {
                         println!(
                             "[Settings] Promoting version cache from modal for branch: {}",
                             self.settings.channel
                         );
-                        self.available_versions = self.settings_state.available_versions.clone();
+                        self.available_versions = self.views.settings.available_versions.clone();
                         self.latest_version = self.available_versions.first().cloned();
                     } else {
                         // Si no están listas (ej. el usuario guardó muy rápido),
@@ -2255,7 +2161,7 @@ impl RusTale {
                         // GUARDIA: Solo actuar si el valor es diferente al actual
                         if self.settings.theme.lsd_mode != *val {
                             self.settings.theme.lsd_mode = *val;
-                            self.settings_state.temp_settings.theme.lsd_mode = *val;
+                            self.views.settings.temp_settings.theme.lsd_mode = *val;
 
                             if *val {
                                 self.lsd_enabled_time = Some(std::time::Instant::now());
@@ -2281,13 +2187,13 @@ impl RusTale {
                     _ => {}
                 }
 
-                if let Some(m) = self.settings_state.update(msg) {
+                if let Some(m) = self.views.settings.update(msg) {
                     self.palette =
-                        crate::theme::generate_palette(&self.settings_state.temp_settings.theme);
+                        crate::theme::generate_palette(&self.views.settings.temp_settings.theme);
                     Task::done(m)
                 } else {
                     self.palette =
-                        crate::theme::generate_palette(&self.settings_state.temp_settings.theme);
+                        crate::theme::generate_palette(&self.views.settings.temp_settings.theme);
                     Task::none()
                 }
             }
@@ -2331,7 +2237,7 @@ impl RusTale {
 
                         // Recargar configuracion desde la nueva ubicacion
                         self.settings = config::load_settings_sync();
-                        self.settings_state.temp_settings = self.settings.clone();
+                        self.views.settings.temp_settings = self.settings.clone();
 
                         Task::none()
                     }
@@ -2361,63 +2267,13 @@ impl RusTale {
                 self.download_progress = 0.0;
 
                 // Bloquear interaccion cerrando modales si estan abiertos
-                self.settings_state.is_open = false;
+                self.views.settings.is_open = false;
 
                 Task::perform(async move { (current_path, new_path) }, |(curr, dest)| {
                     Message::StartMigrationActual(curr, dest)
                 })
             }
-            Message::StartMigrationActual(curr, dest) => {
-                use iced::stream;
-
-                Task::run(
-                    stream::channel(
-                        100,
-                        move |mut output: iced::futures::channel::mpsc::Sender<Message>| {
-                            let curr_clone = curr.clone();
-                            let dest_clone = dest.clone();
-                            async move {
-                                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-                                let tx_clone = tx.clone();
-
-                                tokio::spawn(async move {
-                                    let res = crate::util::move_dir_with_progress(
-                                        curr_clone,
-                                        dest_clone,
-                                        move |pct| {
-                                            let _ = tx_clone.send(pct);
-                                        },
-                                    )
-                                    .await;
-
-                                    let _ = tx.send(if res.is_ok() { 200.0 } else { -1.0 });
-                                    if let Err(e) = res {
-                                        eprintln!("Migration error: {}", e);
-                                    }
-                                });
-
-                                loop {
-                                    tokio::select! {
-                                       Some(pct) = rx.recv() => {
-                                           if pct == 200.0 {
-                                               let _ = crate::config::save_bootstrap_path(&dest);
-                                               let _ = output.send(Message::DataMoveFinished(Ok(dest.clone()))).await;
-                                               break;
-                                           } else if pct == -1.0 {
-                                               let _ = output.send(Message::DataMoveFinished(Err("Migration error".into()))).await;
-                                               break;
-                                           } else {
-                                               let _ = output.send(Message::MigrationProgress(pct)).await;
-                                           }
-                                       }
-                                    }
-                                }
-                            }
-                        },
-                    ),
-                    |m| m,
-                )
-            }
+            Message::StartMigrationActual(curr, dest) => self.logic_start_migration(curr, dest),
             Message::MigrationProgress(pct) => {
                 self.status = LauncherStatus::Migrating;
                 self.download_progress = pct;
@@ -2458,42 +2314,16 @@ impl RusTale {
                 self.status = LauncherStatus::Busy;
                 Task::none()
             }
-            Message::RequestVersionCheck(chan) => {
-                let client = self.services.api_client.clone();
-                // Clear state while loading to avoid showing old branch data
-                self.settings_state.available_versions = Vec::new();
-                self.settings_state.is_loading_versions = true;
-
-                Task::perform(
-                    async move {
-                        let v = game::patch_api::compat::find_latest_version_with_client(&client, &chan, None)
-                            .await
-                            .unwrap_or(0);
-                        let base_dir = config::get_app_dir();
-                        let installed =
-                            game::install::get_installed_versions(&base_dir, &chan).await;
-                        (v, installed)
-                    },
-                    |(v, _installed)| {
-                        let mut versions = Vec::new();
-                        if v > 0 {
-                            for i in (1..=v).rev().take(50) {
-                                versions.push(i);
-                            }
-                        }
-                        Message::VersionsReceived(versions)
-                    },
-                )
-            }
+            Message::RequestVersionCheck(chan) => self.logic_request_version_check(chan),
             Message::VersionsReceived(v) => {
                 // Actualizamos el estado del modal (lo que ve el usuario ahora)
-                self.settings_state.available_versions = v.clone();
+                self.views.settings.available_versions = v.clone();
 
                 // LOGICA IMPORTANTE:
                 // Si el canal que estamos viendo en el modal (temp_settings) es igual
                 // al canal guardado globalmente (settings), actualizamos la cache global.
                 // Esto arregla el bug de que al volver a abrir se vean versiones viejas.
-                if self.settings_state.temp_settings.channel == self.settings.channel {
+                if self.views.settings.temp_settings.channel == self.settings.channel {
                     self.available_versions = v;
 
                     // Si tenemos una version mas reciente detectada, actualizamos latest_version
@@ -2502,10 +2332,10 @@ impl RusTale {
                     }
                 }
 
-                self.settings_state.is_loading_versions = false;
+                self.views.settings.is_loading_versions = false;
 
                 // Actualizar lista de instalados (logica visual)
-                let channel = self.settings_state.temp_settings.channel.clone();
+                let channel = self.views.settings.temp_settings.channel.clone();
                 Task::perform(
                     async move {
                         let base_dir = config::get_app_dir();
@@ -2515,76 +2345,11 @@ impl RusTale {
                 )
             }
             Message::InstalledVersionsReceived(v) => {
-                self.settings_state.installed_versions = v;
+                self.views.settings.installed_versions = v;
                 Task::none()
             }
-            Message::RequestDeleteVersion(v) => {
-                let channel = self.settings_state.temp_settings.channel.clone();
-                Task::perform(
-                    async move {
-                        let base_dir = config::get_app_dir();
-                        let _ = game::install::delete_version(&base_dir, &channel, v as i32).await;
-                        game::install::get_installed_versions(&base_dir, &channel).await
-                    },
-                    Message::InstalledVersionsReceived,
-                )
-            }
-            Message::RequestRepairVersion(v) => {
-                let mut tasks = Vec::new();
-
-                // 1. Check if game is running
-                if self.status == LauncherStatus::Playing || self.running_game.is_some() {
-                    self.running_game = None;
-                    self.status = LauncherStatus::Ready;
-                    self.rebuild_tray_menu();
-
-                    if !self.is_window_visible {
-                        self.is_window_visible = true;
-                        tasks.push(
-                            window::oldest()
-                                .and_then(|id: window::Id| {
-                                    Task::batch(vec![
-                                        window::set_mode(id, window::Mode::Windowed),
-                                        window::gain_focus(id),
-                                    ])
-                                })
-                                .then(|_: ()| Task::done(Message::None)),
-                        );
-                    }
-                }
-
-                self.status = LauncherStatus::Busy;
-                self.status_text = "Repairing installation...".to_string();
-
-                let base_dir = config::get_app_dir();
-                let channel = self.settings.channel.clone();
-
-                let version_str = if v == 0 {
-                    "latest".to_string()
-                } else {
-                    v.to_string()
-                };
-
-                tasks.push(Task::perform(
-                    async move {
-                        crate::game::repair::repair_installation(
-                            base_dir,
-                            channel,
-                            version_str,
-                            |_, msg| {
-                                println!("[Repair] {}", msg);
-                            },
-                        )
-                        .await
-                    },
-                    |res| match res {
-                        Ok(_) => Message::RepairFinished(Ok(())),
-                        Err(e) => Message::RepairFinished(Err(e.to_string())),
-                    },
-                ));
-
-                Task::batch(tasks)
-            }
+            Message::RequestDeleteVersion(v) => self.logic_request_delete_version(v),
+            Message::RequestRepairVersion(v) => self.logic_request_repair_version(v),
 
             Message::RepairFinished(res) => {
                 match res {
@@ -2594,7 +2359,7 @@ impl RusTale {
 
                         let channel = self.settings.channel.clone();
 
-                        if self.settings_state.is_open {
+                        if self.views.settings.is_open {
                             return Task::perform(
                                 async move {
                                     let base_dir = config::get_app_dir();
@@ -2603,7 +2368,7 @@ impl RusTale {
                                 Message::InstalledVersionsReceived,
                             );
                         }
-                        if self.mods_state.is_open {
+                        if self.views.mods.is_open {
                             return Task::done(Message::Mods(ModsMessage::RefreshLocal));
                         }
                     }
@@ -2643,7 +2408,7 @@ impl RusTale {
             | Message::ProfileNameChanged(_)
             | Message::SaveProfileName
             | Message::CancelProfileEdit
-            | Message::CancelProfileEdit => self.handle_profile_message(message),
+            | Message::CancelProfileEdit => self.handle_profile_message_ext(message),
 
             Message::TrayEvent(evt) => {
                 if let tray_icon::TrayIconEvent::Click {
@@ -2719,97 +2484,13 @@ impl RusTale {
                 self.status_text = self.localization.t("launcher.status.ready").to_string();
                 self.running_game = None;
                 self.download_progress = 0.0;
+                self.current_progress_payload = None;
                 Task::none()
             }
             Message::None => Task::none(),
         }
     }
 
-    fn handle_profile_message(&mut self, message: Message) -> Task<Message> {
-        match message {
-            Message::ProfileSelected(profile) => {
-                self.profiles.current_profile = profile.id;
-                self.profile_dropdown_open = false;
-                let profiles = self.profiles.clone();
-                Task::perform(
-                    async move { config::save_profiles(&profiles).await },
-                    |_| Message::None,
-                )
-            }
-            Message::AddProfile => {
-                self.editing_profile = Some((None, "".to_string()));
-                Task::none()
-            }
-            Message::EditProfile(id) => {
-                if let Some(p) = self.profiles.profiles.iter().find(|p| p.id == id) {
-                    self.editing_profile = Some((Some(p.id), p.name.clone()));
-                }
-                Task::none()
-            }
-            Message::DeleteProfile(id) => {
-                self.profiles.delete_profile(&id);
-                let profiles = self.profiles.clone();
-                Task::perform(
-                    async move { config::save_profiles(&profiles).await },
-                    |_| Message::None,
-                )
-            }
-            Message::ProfileNameChanged(name) => {
-                if let Some((id, _)) = &self.editing_profile {
-                    self.editing_profile = Some(((*id), name));
-                }
-                Task::none()
-            }
-            Message::SaveProfileName => {
-                if let Some((id, name)) = self.editing_profile.take() {
-                    if !name.trim().is_empty() {
-                        if let Some(profile_id) = id {
-                            self.profiles.update_profile(&profile_id, name);
-                        } else {
-                            self.profiles.add_profile(name);
-                        }
-                        let profiles = self.profiles.clone();
-                        return Task::perform(
-                            async move { config::save_profiles(&profiles).await },
-                            |_| Message::None,
-                        );
-                    } else {
-                        Task::none()
-                    }
-                } else {
-                    Task::none()
-                }
-            }
-            Message::ToggleProfileDropdown => {
-                self.profile_dropdown_open = !self.profile_dropdown_open;
-                Task::none()
-            }
-            Message::LoadJavaInfo => {
-                let base_dir = config::get_app_dir();
-                Task::perform(
-                    async move {
-                        // Usar logica existente del launcher para detectar Java
-                        match java_detection::ensure_java_available(&base_dir).await {
-                            Ok(java_info) => Message::Settings(
-                                SettingsMessage::JavaVersionUpdated(java_info.version),
-                            ),
-                            Err(e) => {
-                                eprintln!("Java detection/download failed: {}", e);
-                                Message::Settings(SettingsMessage::JavaInfoLoaded)
-                            }
-                        }
-                    },
-                    |msg| msg,
-                )
-            }
-            Message::JavaInfoLoaded => {
-                // Notificar a settings que la carga completo
-                Task::done(Message::Settings(SettingsMessage::JavaInfoLoaded))
-            }
-            Message::Tick(_) => Task::none(),
-            _ => Task::none(),
-        }
-    }
 
     fn view(&self) -> Element<'_, Message> {
         let palette = &self.palette;
@@ -2853,7 +2534,7 @@ impl RusTale {
         .min(3.0);
 
         // Si hay modal, forzamos ui_alpha a 1.0 sin importar el acumulador
-        let is_modal_active = self.settings_state.is_open || self.mods_state.is_open;
+        let is_modal_active = self.views.settings.is_open || self.views.mods.is_open;
         let ui_alpha = if is_modal_active {
             1.0
         } else {
@@ -2907,7 +2588,7 @@ impl RusTale {
                 ..Default::default()
             });
 
-        let is_interaction_disabled = self.settings_state.is_open || self.mods_state.is_open;
+        let is_interaction_disabled = self.views.settings.is_open || self.views.mods.is_open;
 
         let left_column_content = column![
             profile_card::view(
@@ -2923,18 +2604,11 @@ impl RusTale {
                 &self.status,
                 &self.settings,
                 self.latest_version,
-                self.download_progress,
-                self.sub_progress,
-                &self.status_text,
+                &self.current_progress_payload,
                 &self.localization,
                 is_interaction_disabled,
                 self.server_patch_progress,
                 self.show_server_patch_progress,
-                self.total_bytes,
-                self.downloaded_bytes,
-                self.eta.as_ref(),
-                self.current_step,
-                self.total_steps,
                 ctx,
             ),
         ]
@@ -2955,7 +2629,7 @@ impl RusTale {
 
             let right_column = theme::magic_container(
                 container(
-                    self.news_section
+                    self.views.news
                         .view(&self.localization, is_interaction_disabled, ctx)
                         .map(Message::News),
                 )
@@ -3196,10 +2870,10 @@ impl RusTale {
         let final_view = stack![bg, tint_overlay, visual_content];
 
         // Contenido principal del modal (El cuadro gris con botones)
-        let modal_layer = if self.settings_state.is_open {
+        let modal_layer = if self.views.settings.is_open {
             Some(
                 container(
-                    self.settings_state
+                    self.views.settings
                         .view(&self.localization, self.window_size, ctx)
                         .map(Message::Settings),
                 )
@@ -3210,10 +2884,10 @@ impl RusTale {
                 .center_y(Length::Fill)
                 .style(|_| crate::theme::overlay_container(&iced::Theme::Dark)),
             )
-        } else if self.mods_state.is_open {
+        } else if self.views.mods.is_open {
             Some(
                 container(
-                    self.mods_state
+                    self.views.mods
                         .view(&self.localization, self.window_size, ctx)
                         .map(Message::Mods),
                 )
@@ -3429,7 +3103,7 @@ impl RusTale {
 
     fn save_and_exit(&mut self) -> Task<Message> {
         println!("Guardando settings...");
-        self.settings = self.settings_state.temp_settings.clone();
+        self.settings = self.views.settings.temp_settings.clone();
 
         // Guardamos antes de matar el proceso
         let _ = config::save_settings_sync(&self.settings);

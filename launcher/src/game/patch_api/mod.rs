@@ -8,9 +8,7 @@ pub mod version_manager;
 pub mod patch_downloader;
 pub mod integrity_checker;
 pub mod frontend;
-pub mod compat;
 pub mod shared_cache;
-pub mod example;
 
 pub use traits::{PatchProvider, VersionInfo, PatchInfo, DownloadInfo};
 pub use estrogen::EstrogenProvider;
@@ -22,7 +20,6 @@ pub use version_manager::VersionManager;
 pub use patch_downloader::PatchDownloader;
 pub use integrity_checker::{IntegrityChecker, IntegrityResult, FormatValidationResult};
 pub use frontend::PatchApiFrontend;
-pub use compat::*;
 pub use shared_cache::{SharedCacheManager, init_shared_cache, get_shared_cache, CacheStats};
 
 use anyhow::Result;
@@ -51,6 +48,7 @@ impl PatchApiManager {
     pub async fn get_latest_version(&self, channel: &str, os: &str, arch: &str) -> Result<i32> {
         for provider in &self.providers {
             if let Ok(version) = provider.get_latest_version(channel, os, arch).await {
+                println!("✅ Successfully got latest version {} from provider: {}", version, provider.name());
                 return Ok(version);
             }
         }
@@ -61,6 +59,7 @@ impl PatchApiManager {
     pub async fn get_available_versions(&self, channel: &str, os: &str, arch: &str) -> Result<Vec<i32>> {
         for provider in &self.providers {
             if let Ok(versions) = provider.get_available_versions(channel, os, arch).await {
+                println!("✅ Successfully got {} versions from provider: {}", versions.len(), provider.name());
                 return Ok(versions);
             }
         }
@@ -71,6 +70,7 @@ impl PatchApiManager {
     pub async fn get_patch_url(&self, channel: &str, os: &str, arch: &str, from_version: i32, to_version: i32) -> Result<String> {
         for provider in &self.providers {
             if let Ok(url) = provider.get_patch_url(channel, os, arch, from_version, to_version).await {
+                println!("✅ Successfully got patch URL from provider: {}", provider.name());
                 return Ok(url);
             }
         }
@@ -81,6 +81,7 @@ impl PatchApiManager {
     pub async fn get_patch_signature_url(&self, channel: &str, os: &str, arch: &str, from_version: i32, to_version: i32) -> Result<String> {
         for provider in &self.providers {
             if let Ok(url) = provider.get_patch_signature_url(channel, os, arch, from_version, to_version).await {
+                println!("✅ Successfully got patch signature URL from provider: {}", provider.name());
                 return Ok(url);
             }
         }

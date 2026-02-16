@@ -23,7 +23,7 @@ pub async fn ensure_java_available(base_dir: &std::path::Path) -> anyhow::Result
 
     // 2. Si no esta disponible, descargar usando el nuevo patch API
     let client = reqwest::Client::new();
-    crate::game::patch_api::download_jre(
+    crate::game::patch_api::PatchApiFrontend::get_instance().download_jre(
         &client,
         &base_dir.to_path_buf(),
         |component, progress, status, _total, _downloaded, _eta| {

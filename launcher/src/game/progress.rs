@@ -1,67 +1,103 @@
-// src/game/progress.rs
+use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Mutex};
 
-#[derive(Clone, Debug)]
-pub struct ProgressStep {
-    pub id: &'static str,
+/// Information about a specific file transfer
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DownloadStats {
+    pub total_bytes: u64,
+    pub downloaded_bytes: u64,
+    pub speed_str: String,
+    pub eta_str: Option<String>,
+}
+
+/// The standard payload that traverses Backend -> Frontend
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ProgressPayload {
+    /// 0.0 to 1.0 Global Operation Progress
+    pub global_progress: f32,
+    /// 0.0 to 1.0 Current Step Progress
+    pub step_progress: f32,
+    /// Translation Key (e.g. "status.downloading")
+    pub message_key: String,
+    /// Optional arguments for the translation key (e.g. filename)
+    pub message_args: Vec<String>,
+    /// Download statistics (if downloading)
+    pub stats: Option<DownloadStats>,
+}
+
+/// A specific phase in the task list
+#[derive(Clone)]
+pub struct OperationPhase {
+    pub id: String,
     pub weight: f32,
 }
 
-#[derive(Clone, Debug)]
-pub struct ProgressTracker {
-    steps: Vec<ProgressStep>,
+/// Internal tracker to calculate weighted averages
+pub struct WeightedProgressTracker {
+    // Use Box<dyn> inside Mutex to allow thread-safe mutable access or simple updates
+    reporter: Arc<Box<dyn Fn(ProgressPayload) + Send + Sync>>,
+    phases: Vec<OperationPhase>,
+    current_phase_index: usize,
     total_weight: f32,
+    accumulated_weight: f32,
 }
 
-impl ProgressTracker {
-    pub fn new() -> Self {
-        Self {
-            steps: Vec::new(),
-            total_weight: 0.0,
-        }
+impl WeightedProgressTracker {
+    pub fn new(
+        reporter: impl Fn(ProgressPayload) + Send + Sync + 'static,
+        phases: Vec<OperationPhase>,
+    ) -> Arc<Mutex<Self>> {
+        let total_weight: f32 = phases.iter().map(|p| p.weight).sum();
+        Arc::new(Mutex::new(Self {
+            reporter: Arc::new(Box::new(reporter)),
+            phases,
+            current_phase_index: 0,
+            total_weight: total_weight.max(1.0),
+            accumulated_weight: 0.0,
+        }))
     }
 
-    pub fn add_step(mut self, id: &'static str, weight: f32) -> Self {
-        self.steps.push(ProgressStep { id, weight });
-        self.total_weight += weight;
-        self
-    }
-
-    /// Calcula el porcentaje global (0.0 a 100.0) basado en la fase actual y su sub-progreso.
-    pub fn calculate(&self, current_phase: &str, sub_progress: f32) -> f32 {
-        if current_phase == "complete" {
-            return 100.0;
-        }
-
-        let mut accumulated_weight = 0.0;
-        let mut current_step_weight = 0.0;
-        let mut found = false;
-
-        // 1. Sumar el peso de todos los pasos ANTERIORES al actual
-        for step in &self.steps {
-            if step.id == current_phase {
-                current_step_weight = step.weight;
-                found = true;
-                break; // Encontramos la fase actual, dejamos de sumar anteriores
+    /// Set current active phase by ID
+    pub fn set_phase(tracker: &Arc<Mutex<Self>>, phase_id: &str) {
+        if let Ok(mut t) = tracker.lock() {
+            if let Some(pos) = t.phases.iter().position(|p| p.id == phase_id) {
+                t.current_phase_index = pos;
+                // Sum weights of all previous phases
+                t.accumulated_weight = t.phases.iter()
+                    .take(pos)
+                    .map(|p| p.weight)
+                    .sum();
             }
-            accumulated_weight += step.weight;
         }
+    }
 
-        // Si la fase reportada no esta en nuestra lista (ej. un paso nuevo no registrado),
-        // devolvemos un calculo seguro o el ultimo valor conocido.
-        if !found {
-            // Fallback: si no conocemos el paso, asumimos 0% de progreso extra
-            // o podrias retornar sub_progress si quieres comportamiento por defecto.
-            return (accumulated_weight / self.total_weight) * 100.0;
+    /// Update progress for current phase
+    pub fn report(tracker: &Arc<Mutex<Self>>, step_pct: f32, key: &str, args: Vec<String>, stats: Option<DownloadStats>) {
+        if let Ok(t) = tracker.lock() {
+            let current_weight = t.phases.get(t.current_phase_index)
+                .map(|p| p.weight)
+                .unwrap_or(0.0);
+            
+            // Normalized input 0.0-1.0 or 0.0-100.0 detection? 
+            // We assume input is 0.0 to 1.0. If > 1.0, clamp or normalize.
+            let step_norm = if step_pct > 1.0 && step_pct <= 100.0 { step_pct / 100.0 } else { step_pct }.clamp(0.0, 1.0);
+
+            let global = (t.accumulated_weight + (step_norm * current_weight)) / t.total_weight;
+
+            let payload = ProgressPayload {
+                global_progress: global.clamp(0.0, 1.0),
+                step_progress: step_norm,
+                message_key: key.to_string(),
+                message_args: args,
+                stats,
+            };
+
+            (t.reporter)(payload);
         }
+    }
 
-        // 2. Calcular progreso parcial dentro del paso actual
-        // sub_progress viene de 0 a 100, lo normalizamos a 0..1
-        let current_progress_weighted = current_step_weight * (sub_progress / 100.0);
-
-        // 3. Calcular porcentaje total
-        let total = accumulated_weight + current_progress_weighted;
-
-        // Regla de tres simple basada en el peso total configurado
-        (total / self.total_weight) * 100.0
+    /// Update progress for current phase without message args (convenience method)
+    pub fn report_simple(tracker: &Arc<Mutex<Self>>, step_pct: f32, key: &str, stats: Option<DownloadStats>) {
+        Self::report(tracker, step_pct, key, vec![], stats)
     }
 }

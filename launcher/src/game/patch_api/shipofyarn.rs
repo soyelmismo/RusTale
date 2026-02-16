@@ -8,14 +8,14 @@ use super::traits::PatchProvider;
 
 const SHIPOFYARN_API_URL: &str = "https://thecute.cloud/ShipOfYarn/api.php";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ShipOfYarnAPI {
     pub hytale: HytaleData,
     pub jre: JreData,
     pub butler: ButlerData,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct HytaleData {
     pub release: PlatformData,
@@ -23,14 +23,14 @@ pub struct HytaleData {
     pub pre_release: PlatformData,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct PlatformData {
     pub linux: PlatformFiles,
     pub windows: PlatformFiles,
     pub mac: PlatformFiles,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct PlatformFiles {
     #[serde(flatten)]
     pub files: HashMap<String, String>,
@@ -38,14 +38,14 @@ pub struct PlatformFiles {
     pub patch: Option<HashMap<String, String>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct JreData {
     pub linux: HashMap<String, String>,
     pub windows: HashMap<String, String>,
     pub mac: HashMap<String, String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ButlerData {
     pub linux: HashMap<String, String>,
     pub windows: HashMap<String, String>,

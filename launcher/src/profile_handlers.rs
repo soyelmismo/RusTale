@@ -2,14 +2,14 @@
 /// Extracts profile-related logic from main.rs
 
 use crate::config::{self, Profile};
-use crate::main::{Message, RusTale};
+use crate::{Message, RusTale};
 use iced::{clipboard, Task};
 
 impl RusTale {
     /// Handles all profile-related messages
-    pub(crate) fn handle_profile_message(\u0026mut self, message: Message) -\u003e Task<Message> {
+    pub(crate) fn handle_profile_message_ext(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::ProfileSelected(profile) =\u003e {
+            Message::ProfileSelected(profile) => {
                 self.profiles.current_profile = profile.id;
                 self.profile_dropdown_open = false;
 
@@ -20,19 +20,19 @@ impl RusTale {
                 let profiles = self.profiles.clone();
                 Task::perform(
                     async move {
-                        config::save_profiles(\u0026profiles).await;
+                        config::save_profiles(&profiles).await;
                     },
                     |_| Message::None,
                 )
             }
 
-            Message::AddProfile =\u003e {
+            Message::AddProfile => {
                 self.editing_profile = Some((None, String::new()));
                 self.profile_dropdown_open = false;
                 Task::none()
             }
 
-            Message::EditProfile(id) =\u003e {
+            Message::EditProfile(id) => {
                 if let Some(profile) = self.profiles.profiles.iter().find(|p| p.id == id) {
                     self.editing_profile = Some((Some(id), profile.name.clone()));
                 }
@@ -40,9 +40,9 @@ impl RusTale {
                 Task::none()
             }
 
-            Message::DeleteProfile(id) =\u003e {
+            Message::DeleteProfile(id) => {
                 // Don't allow deleting the last profile
-                if self.profiles.profiles.len() \u003e 1 {
+                if self.profiles.profiles.len() > 1 {
                     self.profiles.profiles.retain(|p| p.id != id);
 
                     // If we deleted the current profile, switch to the first one
@@ -56,7 +56,7 @@ impl RusTale {
                     let profiles = self.profiles.clone();
                     return Task::perform(
                         async move {
-                            config::save_profiles(\u0026profiles).await;
+                            config::save_profiles(&profiles).await;
                         },
                         |_| Message::None,
                     );
@@ -64,18 +64,18 @@ impl RusTale {
                 Task::none()
             }
 
-            Message::ProfileNameChanged(name) =\u003e {
+            Message::ProfileNameChanged(name) => {
                 if let Some((_, ref mut current_name)) = self.editing_profile {
                     *current_name = name;
                 }
                 Task::none()
             }
 
-            Message::SaveProfileName =\u003e {
+            Message::SaveProfileName => {
                 if let Some((id, name)) = self.editing_profile.take() {
                     if !name.trim().is_empty() {
                         match id {
-                            Some(existing_id) =\u003e {
+                            Some(existing_id) => {
                                 // Edit existing profile
                                 if let Some(profile) =
                                     self.profiles.profiles.iter_mut().find(|p| p.id == existing_id)
@@ -83,7 +83,7 @@ impl RusTale {
                                     profile.name = name;
                                 }
                             }
-                            None =\u003e {
+                            None => {
                                 // Create new profile
                                 let new_profile = Profile {
                                     id: uuid::Uuid::new_v4(),
@@ -98,7 +98,7 @@ impl RusTale {
                         let profiles = self.profiles.clone();
                         return Task::perform(
                             async move {
-                                config::save_profiles(\u0026profiles).await;
+                                config::save_profiles(&profiles).await;
                             },
                             |_| Message::None,
                         );
@@ -107,12 +107,12 @@ impl RusTale {
                 Task::none()
             }
 
-            Message::CancelProfileEdit =\u003e {
+            Message::CancelProfileEdit => {
                 self.editing_profile = None;
                 Task::none()
             }
 
-            Message::EditProfileUUID(id) =\u003e {
+            Message::EditProfileUUID(id) => {
                 if let Some(profile) = self.profiles.profiles.iter().find(|p| p.id == id) {
                     self.editing_uuid = Some((id, profile.id.to_string()));
                 }
@@ -120,16 +120,16 @@ impl RusTale {
                 Task::none()
             }
 
-            Message::ProfileUUIDChanged(uuid_str) =\u003e {
+            Message::ProfileUUIDChanged(uuid_str) => {
                 if let Some((_, ref mut current_uuid)) = self.editing_uuid {
                     *current_uuid = uuid_str;
                 }
                 Task::none()
             }
 
-            Message::SaveProfileUUID =\u003e {
+            Message::SaveProfileUUID => {
                 if let Some((id, uuid_str)) = self.editing_uuid.take() {
-                    if let Ok(new_uuid) = uuid::Uuid::parse_str(\u0026uuid_str) {
+                    if let Ok(new_uuid) = uuid::Uuid::parse_str(&uuid_str) {
                         if let Some(profile) = self.profiles.profiles.iter_mut().find(|p| p.id == id)
                         {
                             profile.id = new_uuid;
@@ -143,7 +143,7 @@ impl RusTale {
                             let profiles = self.profiles.clone();
                             return Task::perform(
                                 async move {
-                                    config::save_profiles(\u0026profiles).await;
+                                    config::save_profiles(&profiles).await;
                                 },
                                 |_| Message::None,
                             );
@@ -153,26 +153,26 @@ impl RusTale {
                 Task::none()
             }
 
-            Message::CancelProfileUUIDEdit =\u003e {
+            Message::CancelProfileUUIDEdit => {
                 self.editing_uuid = None;
                 Task::none()
             }
 
-            Message::CopyUUID(uuid) =\u003e clipboard::write(uuid),
+            Message::CopyUUID(uuid) => clipboard::write(uuid),
 
-            Message::GenerateRandomUUID =\u003e {
+            Message::GenerateRandomUUID => {
                 if let Some((_, ref mut uuid_str)) = self.editing_uuid {
                     *uuid_str = uuid::Uuid::new_v4().to_string();
                 }
                 Task::none()
             }
 
-            Message::ToggleProfileDropdown =\u003e {
+            Message::ToggleProfileDropdown => {
                 self.profile_dropdown_open = !self.profile_dropdown_open;
                 Task::none()
             }
 
-            _ =\u003e Task::none(),
+            _ => Task::none(),
         }
     }
 }

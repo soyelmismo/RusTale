@@ -3,7 +3,7 @@
 
 use crate::config::{self, GameSettings};
 use crate::game::{self, install::InstallPolicy, GamePaths, LauncherStatus};
-use crate::main::{Message, RusTale};
+use crate::{Message, RusTale};
 use crate::services::Services;
 use iced::Task;
 use std::sync::Arc;
@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 impl RusTale {
     /// Handles the game start logic
     /// This creates the async task for launching the game
-    pub(crate) fn logic_start_game(\u0026mut self) -\u003e Task<Message> {
+    pub(crate) fn logic_start_game(&mut self) -> Task<Message> {
         let mut tasks = Vec::new();
 
         println!(
@@ -72,23 +72,23 @@ impl RusTale {
 
     /// Handles the status check logic
     /// This creates the async task for checking game installation status
-    pub(crate) fn logic_check_status(\u0026mut self) -\u003e Task<Message> {
+    pub(crate) fn logic_check_status(&mut self) -> Task<Message> {
         // Enhanced safety check: Allow status re-check if potentially stuck
         let is_potentially_stuck = match self.status {
-            LauncherStatus::Playing =\u003e {
+            LauncherStatus::Playing => {
                 // If "playing" but no running_game, we're in inconsistent state
                 self.running_game.is_none()
             }
-            LauncherStatus::Busy =\u003e {
+            LauncherStatus::Busy => {
                 // If "busy" for more than 30 seconds, allow re-check
                 self.running_game.is_none()
-                    \u0026\u0026 self.last_status_change.elapsed().as_secs() \u003e 30
+                    && self.last_status_change.elapsed().as_secs() > 30
             }
-            _ =\u003e false,
+            _ => false,
         };
 
         if (self.status == LauncherStatus::Playing || self.running_game.is_some())
-            \u0026\u0026 !is_potentially_stuck
+            && !is_potentially_stuck
         {
             println!(
                 "[Status] Check skipped: status={:?}, running_game={:?}",
@@ -113,7 +113,7 @@ impl RusTale {
 
         Task::perform(
             async move {
-                game::calculate_status(\u0026client, \u0026settings, \u0026paths, cached_version).await
+                game::calculate_status(&client, &settings, &paths, cached_version).await
             },
             move |(status, latest)| {
                 Message::DryRunFinished(settings_for_closure, status, latest)
@@ -122,20 +122,20 @@ impl RusTale {
     }
 
     /// Handles version check request
-    pub(crate) fn logic_request_version_check(\u0026self, channel: String) -\u003e Task<Message> {
+    pub(crate) fn logic_request_version_check(&self, channel: String) -> Task<Message> {
         let frontend = self.services.patcher.clone();
         
         Task::perform(
             async move {
-                match frontend.find_latest_version(\u0026channel, None).await {
-                    Ok(latest) =\u003e {
+                match frontend.find_latest_version(&channel, None).await {
+                    Ok(latest) => {
                         let mut versions = Vec::new();
                         for i in (1..=latest).rev().take(50) {
                             versions.push(i);
                         }
                         Message::VersionsReceived(versions)
                     }
-                    Err(e) =\u003e {
+                    Err(e) => {
                         eprintln!("Failed to fetch versions: {}", e);
                         Message::VersionsReceived(Vec::new())
                     }
@@ -146,39 +146,50 @@ impl RusTale {
     }
 
     /// Handles version repair request
-    pub(crate) fn logic_request_repair_version(\u0026self, version: u32) -\u003e Task<Message> {
+    pub(crate) fn logic_request_repair_version(&mut self, version: u32) -> Task<Message> {
         let base_dir = config::get_app_dir();
         let channel = self.settings.channel.clone();
         let client = self.services.download_client.clone();
         let frontend = self.services.patcher.clone();
-        let cancel_token = Arc::new(AtomicBool::new(false));
+        let cancel_token = self.cancellation_token.clone();
+
+        // Change status to Downloading immediately so cancel button appears
+        self.status = LauncherStatus::Downloading;
+        self.status_text = "Starting repair...".to_string();
+        self.download_progress = 0.1;
 
         Task::perform(
             async move {
-                let version_str = if version == 0 {
+                let _version_str = if version == 0 {
                     "latest".to_string()
                 } else {
                     version.to_string()
                 };
 
-                // Re-download and verify the version
+                // Re-download and verify the version using the new progress system
+                // For repair operations, we'll collect progress updates and return them
                 let result = frontend
-                    .ensure_installed(
-                        \u0026client,
-                        \u0026base_dir,
-                        \u0026channel,
+                    .ensure_installed_with_weighted_progress(
+                        &client,
+                        &base_dir,
+                        &channel,
                         Some(version as i32),
                         InstallPolicy::NetworkUpdate,
-                        |_step, _prog, _speed, _total, _down, _eta, _current_step| {
-                            // Progress callback - could be enhanced to send progress messages
+                        |payload| {
+                            // For repair operations, we'll log progress
+                            // The UI updates will be handled by the main download flow
+                            println!("[Repair] {:.1}% - {}", 
+                                payload.global_progress * 100.0, 
+                                payload.message_key
+                            );
                         },
                         Some(cancel_token),
                     )
                     .await;
 
                 match result {
-                    Ok(_) =\u003e Message::RepairFinished(Ok(())),
-                    Err(e) =\u003e Message::RepairFinished(Err(e.to_string())),
+                    Ok(_) => Message::RepairFinished(Ok(())),
+                    Err(e) => Message::RepairFinished(Err(e.to_string())),
                 }
             },
             |msg| msg,
@@ -186,7 +197,7 @@ impl RusTale {
     }
 
     /// Handles version deletion request
-    pub(crate) fn logic_request_delete_version(\u0026self, version: u32) -\u003e Task<Message> {
+    pub(crate) fn logic_request_delete_version(&self, version: u32) -> Task<Message> {
         let base_dir = config::get_app_dir();
         let channel = self.settings.channel.clone();
 
@@ -199,10 +210,10 @@ impl RusTale {
                 };
 
                 let paths = GamePaths::new(base_dir);
-                let version_dir = paths.version_dir(\u0026channel, \u0026version_str);
+                let version_dir = paths.version_dir(&channel, &version_str);
 
                 if version_dir.exists() {
-                    if let Err(e) = tokio::fs::remove_dir_all(\u0026version_dir).await {
+                    if let Err(e) = tokio::fs::remove_dir_all(&version_dir).await {
                         eprintln!("Failed to delete version {}: {}", version, e);
                     } else {
                         println!("Deleted version {} successfully", version);
@@ -210,22 +221,22 @@ impl RusTale {
                 }
 
                 // Refresh the installed versions list
-                Message::Settings(crate::settings::SettingsMessage::RefreshInstalledVersions)
+                Message::Settings(crate::settings::SettingsMessage::VersionSelected(0))
             },
             |msg| msg,
         )
     }
 
     /// Handles Java info loading
-    pub(crate) fn logic_load_java_info() -\u003e Task<Message> {
+    pub(crate) fn logic_load_java_info() -> Task<Message> {
         let base_dir = config::get_app_dir();
         Task::perform(
             async move {
-                match crate::java_detection::ensure_java_available(\u0026base_dir).await {
-                    Ok(java_info) =\u003e Message::Settings(
+                match crate::java_detection::ensure_java_available(&base_dir).await {
+                    Ok(java_info) => Message::Settings(
                         crate::settings::SettingsMessage::JavaVersionUpdated(java_info.version),
                     ),
-                    Err(e) =\u003e {
+                    Err(e) => {
                         eprintln!("Java detection/download failed: {}", e);
                         Message::Settings(crate::settings::SettingsMessage::JavaInfoLoaded)
                     }
@@ -237,18 +248,18 @@ impl RusTale {
 
     /// Handles data migration request
     pub(crate) fn logic_start_migration(
-        \u0026mut self,
+        &mut self,
         from: std::path::PathBuf,
         to: std::path::PathBuf,
-    ) -\u003e Task<Message> {
+    ) -> Task<Message> {
         self.status = LauncherStatus::Busy;
         self.status_text = "Moving data...".to_string();
 
         Task::perform(
             async move {
-                match crate::util::move_data_with_progress(from, to).await {
-                    Ok(new_path) =\u003e Message::DataMoveFinished(Ok(new_path)),
-                    Err(e) =\u003e Message::DataMoveFinished(Err(e.to_string())),
+                match crate::util::move_dir_with_progress(from, to.clone(), |_| {}).await {
+                    Ok(()) => Message::DataMoveFinished(Ok(to)),
+                    Err(e) => Message::DataMoveFinished(Err(e.to_string())),
                 }
             },
             |msg| msg,

@@ -1,7 +1,12 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::sync::{Arc, atomic::AtomicBool};
-use tokio::process::{Command, Stdio};
+use tokio::process::Command;
+use tokio::io::{AsyncWriteExt, AsyncBufReadExt, BufWriter};
+use tokio::io::BufReader;
+use std::process::Stdio;
+use futures::io::{AsyncBufReadExt as FuturesAsyncBufReadExt};
+use futures::StreamExt;
 
 /// Game version information structure
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -39,7 +44,6 @@ pub async fn apply_pwr(
 
     let mut cmd = Command::new(&butler_path);
     cmd.arg("apply")
-        .arg("--in")
         .arg(&pwr_path_absolute)
         .arg(&game_dir);
 
@@ -53,25 +57,39 @@ pub async fn apply_pwr(
 
     // Create log file for Butler output
     let log_path = paths.logs().join(format!("butler_apply_{}.log", chrono::Utc::now().timestamp()));
-    let log_file = tokio::fs::File::create(&log_path).await
+    let log_file: tokio::fs::File = tokio::fs::File::create(&log_path).await
         .context("Failed to create Butler log file")?;
-    let log_writer = tokio::io::BufWriter::new(log_file);
+    let mut log_writer = BufWriter::new(log_file);
 
     let mut stdout = child.stdout.take().unwrap();
     let mut stderr = child.stderr.take().unwrap();
 
     // Spawn a task to handle stderr
     tokio::spawn(async move {
-        while let Ok(Some(line)) = stderr.next_line().await {
-            eprintln!("[Butler Error] {}", line);
+        use tokio::io::AsyncBufReadExt;
+        let mut stderr_reader = BufReader::new(stderr);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match stderr_reader.read_line(&mut line).await {
+                Ok(0) => break, // EOF
+                Ok(_) => {
+                    eprintln!("[Butler Error] {}", line.trim());
+                }
+                Err(e) => {
+                    eprintln!("[Butler Error reading stderr] {}", e);
+                    break;
+                }
+            }
         }
     });
 
     let mut current_pct = 0.0;
     let mut line_buf = Vec::new();
+    let mut stdout_reader = BufReader::new(stdout);
 
     // Use read_until(b'\r') because Butler uses \r to update progress without newlines
-    while let Ok(n) = stdout.read_until(b'\r', &mut line_buf).await {
+    while let Ok(n) = stdout_reader.read_until(b'\r', &mut line_buf).await {
         if n == 0 {
             break;
         }
@@ -85,8 +103,8 @@ pub async fn apply_pwr(
             }
 
             // Log to file
-            let _ = writeln!(log_writer, "{}", line);
-            let _ = log_writer.flush();
+            let _ = log_writer.write_all(format!("{}\n", line).as_bytes()).await;
+            let _ = log_writer.flush().await;
 
             if line.contains('%') {
                 if let Some(pct) = parse_butler_line(line) {
@@ -106,7 +124,7 @@ pub async fn apply_pwr(
     let status = child.wait().await?;
     if !status.success() {
         // --- NEW: Recovery logic ---
-        let stderr_output = tokio::fs::read_to_string(&log_path).await.unwrap_or_default();
+        let stderr_output: String = tokio::fs::read_to_string(&log_path).await.unwrap_or_default();
         
         if stderr_output.contains("already up to date") {
             println!("Game is already up to date");
@@ -154,7 +172,7 @@ where
         |pct, speed, total, downloaded, eta| {
             progress_callback(pct, &speed, total, downloaded, eta);
         },
-        cancel_token,
+        cancel_token.clone(),
     ).await;
 
     // If primary fails, try fallback
@@ -192,7 +210,7 @@ pub async fn clean_patches_cache(
 
     // Use the shared cache manager for cleanup
     let cleaned = crate::game::patch_api::get_shared_cache()
-        .cleanup_old_patches(base_dir).await?;
+        .cleanup_old_patches(&base_dir).await?;
 
     progress_callback(100.0, &format!("Cleaned {} cache files", cleaned), 0, 0, None, None);
     Ok(())

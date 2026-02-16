@@ -8,7 +8,7 @@ use crate::config;
 /// Equivalente a startup() y env.CreateFolders() en Go.
 pub async fn initialize() -> Result<()> {
     // Initialize the new patch API system
-    crate::game::patch_api::init_patch_api();
+    crate::game::patch_api::PatchApiFrontend::get_instance();
     
     let base_dir = config::get_app_dir();
 

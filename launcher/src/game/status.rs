@@ -79,13 +79,14 @@ pub async fn calculate_status(
     }
 
     // Step 3: Latest mode - check for updates
-    match crate::game::patch_api::compat::get_version_manifest(
-        client,
-        channel,
-        &paths.root,
-        settings.game_version as i32,
-    )
-    .await
+    match crate::game::patch_api::PatchApiFrontend::get_instance()
+        .get_version_info(
+            client,
+            &paths.root,
+            channel,
+            settings.game_version as i32,
+        )
+        .await
     {
         Ok(manifest) => {
             if manifest.update_available {
@@ -96,7 +97,7 @@ pub async fn calculate_status(
         }
         Err(_) => {
             // Can't reach server, try patch API with fallback
-            match crate::game::patch_api::compat::find_latest_version_with_client(client, &settings.channel, None).await {
+            match crate::game::patch_api::PatchApiFrontend::get_instance().find_latest_version(&settings.channel, None).await {
                 Ok(fallback_ver) => {
                     println!("Found latest version via patch API: {}", fallback_ver);
                     // Check if local version matches fallback version

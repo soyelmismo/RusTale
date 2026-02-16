@@ -24,6 +24,7 @@ pub enum NewsMessage {
     GetScrollOffset, // Nuevo mensaje para solicitar el offset actual
 }
 
+#[derive(Debug, Clone)]
 pub struct NewsSection {
     pub posts: Vec<BlogPost>,
     pub images: HashMap<String, image::Handle>,

@@ -168,6 +168,7 @@ impl From<VersionOption> for u32 {
 }
 
 // Estado local del modal
+#[derive(Debug, Clone)]
 pub struct SettingsState {
     pub current_tab: Tab,
     pub temp_settings: GameSettings,

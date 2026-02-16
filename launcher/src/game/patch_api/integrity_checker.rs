@@ -1,8 +1,10 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::fs::File;
 use std::io::Read;
+use ed25519_dalek::VerifyingKey;
+use tokio::task;
 
 use super::PatchApiManager;
 use sha2::{Sha256, Digest};
@@ -18,27 +20,92 @@ impl IntegrityChecker {
         Self { api_manager }
     }
 
-    /// Verifies patch file integrity using SHA256
-    pub fn verify_patch_integrity(&self, patch_path: &PathBuf) -> Result<String> {
-        let mut file = File::open(patch_path)
-            .context("Failed to open patch file for integrity check")?;
+    /// Verifies patch file integrity using SHA256 (Offloaded to Blocking Thread)
+    pub async fn verify_patch_integrity<F>(
+        &self,
+        patch_path: &PathBuf,
+        progress_callback: Option<F>,
+        cancel_token: Option<Arc<AtomicBool>>,
+    ) -> Result<String>
+    where
+        F: Fn(f64, &str) + Send + Sync + Clone + 'static,
+    {
+        // Clonar path para enviarlo al thread
+        let path = patch_path.clone();
         
-        let mut hasher = Sha256::new();
-        let mut buffer = [0; 8192];
+        // Clonar el callback para poder usarlo después
+        let callback = progress_callback.clone();
         
-        loop {
-            let bytes_read = file.read(&mut buffer)
-                .context("Failed to read patch file")?;
+        // Clonar el cancel token para usarlo en el thread bloqueante
+        let cancel_token_clone = cancel_token.clone();
+
+        // MOVIMIENTO CLAVE: spawn_blocking
+        let result = task::spawn_blocking(move || {
+            // Toda esta logica ahora ocurre en un thread independiente que no congela la UI
+            let mut file = File::open(&path)
+                .context("Failed to open patch file for integrity check")?;
             
-            if bytes_read == 0 {
-                break;
+            let file_size = file.metadata()
+                .context("Failed to get patch file metadata")?
+                .len();
+            
+            let mut hasher = Sha256::new();
+            // Buffer adaptativo: más grande para HDD, más pequeño para SSD
+            // 2MB para balance general en HDD lentos
+            let mut buffer = vec![0; 2 * 1024 * 1024]; 
+            let mut bytes_read_total: u64 = 0;
+            let mut loops: u64 = 0;
+            
+            if let Some(cb) = &callback {
+                cb(0.0, "Starting checksum calculation...");
             }
             
-            hasher.update(&buffer[..bytes_read]);
+            loop {
+                let bytes_read = file.read(&mut buffer)
+                    .context("Failed to read patch file")?;
+                
+                if bytes_read == 0 {
+                    break;
+                }
+                
+                hasher.update(&buffer[..bytes_read]);
+                bytes_read_total += bytes_read as u64;
+                
+                loops += 1;
+                
+                // Verificar cancelación cada ciertas iteraciones
+                if let Some(token) = &cancel_token_clone {
+                    if token.load(std::sync::atomic::Ordering::Relaxed) {
+                        return Err(anyhow::anyhow!("Checksum verification cancelled by user"));
+                    }
+                }
+                
+                // Throttle para HDD: Actualizar cada 50MB aprox (menos frecuente para reducir overhead)
+                if loops % 25 == 0 || bytes_read_total == file_size {
+                    if let Some(cb) = &callback {
+                        let progress = if file_size > 0 {
+                            bytes_read_total as f64 / file_size as f64
+                        } else {
+                            0.0
+                        };
+                        
+                        // Formatear porcentaje solo para el callback
+                        let pct_str = format!("{:.0}%", progress * 100.0);
+                        cb(progress, &format!("Calculating checksum... {}", pct_str));
+                    }
+                }
+            }
+            
+            let hash = hasher.finalize();
+            Ok::<String, anyhow::Error>(format!("{:x}", hash))
+        }).await??; // Doble ? (uno para join error, otro para el result interno)
+        
+        // Reportar finalización inmediatamente después de volver al contexto async
+        if let Some(callback) = &progress_callback {
+            callback(1.0, "Checksum calculation completed");
         }
         
-        let hash = hasher.finalize();
-        Ok(format!("{:x}", hash))
+        Ok(result)
     }
 
     /// Verifies patch signature using Ed25519
@@ -108,23 +175,36 @@ impl IntegrityChecker {
             0x1b, 0xe5, 0x0f, 0x9c, 0x4d, 0x2a, 0x7f, 0x9b,
         ];
         
-        Ok(PublicKey::from_bytes(&trusted_key))
+        Ok(VerifyingKey::from_bytes(&trusted_key).unwrap())
     }
 
     /// Verifies complete download integrity
-    pub async fn verify_download_integrity(
+    pub async fn verify_download_integrity<F>(
         &self,
         patch_path: &PathBuf,
         signature_path: Option<&PathBuf>,
         expected_size: Option<u64>,
-    ) -> Result<IntegrityResult> {
+        progress_callback: Option<F>,
+        cancel_token: Option<Arc<AtomicBool>>,
+    ) -> Result<IntegrityResult>
+    where
+        F: Fn(f64, &str) + Send + Sync + 'static,
+    {
         let mut result = IntegrityResult::new();
+        
+        if let Some(callback) = &progress_callback {
+            callback(0.0, "Starting integrity verification...");
+        }
         
         // Check file exists
         if !patch_path.exists() {
             result.valid = false;
             result.errors.push("Patch file does not exist".to_string());
             return Ok(result);
+        }
+        
+        if let Some(callback) = &progress_callback {
+            callback(0.1, "Checking file existence...");
         }
         
         // Check file size
@@ -135,6 +215,9 @@ impl IntegrityChecker {
         result.actual_size = Some(actual_size);
         
         if let Some(expected) = expected_size {
+            if let Some(callback) = &progress_callback {
+                callback(0.2, "Verifying file size...");
+            }
             if actual_size != expected {
                 result.valid = false;
                 result.errors.push(format!("Size mismatch: expected {}, got {}", expected, actual_size));
@@ -142,10 +225,29 @@ impl IntegrityChecker {
         }
         
         // Calculate checksum
-        match self.verify_patch_integrity(patch_path) {
+        if let Some(callback) = &progress_callback {
+            callback(0.0, "Calculating checksum...");
+        }
+        
+        // Create a callback for checksum progress (0.0-1.0 range)
+        let progress_callback = progress_callback.map(|cb| std::sync::Arc::new(cb));
+        let progress_callback_clone = progress_callback.clone();
+        let scaled_callback = move |pct: f64, msg: &str| {
+            // Reportar el progreso real del checksum (0.0-1.0)
+            if let Some(cb) = progress_callback_clone.as_ref() {
+                cb(pct, msg);
+            }
+        };
+        
+        // CAMBIO IMPORTANTE: .await
+        // verify_patch_integrity ahora se llama async
+        match self.verify_patch_integrity(patch_path, Some(scaled_callback), cancel_token).await {
             Ok(checksum) => {
                 result.checksum = Some(checksum.clone());
                 result.checksum_valid = true;
+                if let Some(callback) = &progress_callback {
+                    callback(1.0, "Checksum calculated successfully");
+                }
             }
             Err(e) => {
                 result.valid = false;
@@ -155,18 +257,43 @@ impl IntegrityChecker {
         
         // Verify signature if provided
         if let Some(sig_path) = signature_path {
+            if let Some(callback) = &progress_callback {
+                callback(0.7, "Verifying digital signature...");
+            }
             match self.verify_patch_signature(patch_path, sig_path).await {
                 Ok(signature_valid) => {
                     result.signature_valid = signature_valid;
-                    if !signature_valid {
+                    if signature_valid {
+                        if let Some(callback) = &progress_callback {
+                            callback(0.9, "Digital signature verified successfully");
+                        }
+                    } else {
                         result.valid = false;
                         result.errors.push("Signature verification failed".to_string());
+                        if let Some(callback) = &progress_callback {
+                            callback(0.9, "⚠️ Digital signature verification failed");
+                        }
                     }
                 }
                 Err(e) => {
                     result.valid = false;
                     result.errors.push(format!("Failed to verify signature: {}", e));
+                    if let Some(callback) = &progress_callback {
+                        callback(0.9, &format!("❌ Signature verification error: {}", e));
+                    }
                 }
+            }
+        } else {
+            if let Some(callback) = &progress_callback {
+                callback(0.8, "No signature provided - skipping signature verification");
+            }
+        }
+        
+        if let Some(callback) = &progress_callback {
+            if result.is_valid() {
+                callback(1.0, "✅ Integrity verification completed");
+            } else {
+                callback(1.0, "❌ Integrity verification failed");
             }
         }
         

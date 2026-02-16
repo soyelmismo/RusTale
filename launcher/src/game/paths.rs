@@ -106,4 +106,14 @@ impl GamePaths {
     pub fn dualauth_agent(&self) -> PathBuf {
         self.tools().join("dualauth-agent.jar")
     }
+
+    /// Game directory (root for all game installations)
+    pub fn game_dir(&self) -> PathBuf {
+        self.root.clone()
+    }
+
+    /// Logs directory
+    pub fn logs(&self) -> PathBuf {
+        self.root.join("logs")
+    }
 }

@@ -1,7 +1,6 @@
 use crate::Message;
 use crate::config::GameSettings;
 use crate::game::install::InstallPolicy;
-use crate::game::progress::ProgressTracker;
 use iced::advanced::subscription::{self, Hasher, Recipe};
 use iced::futures::{SinkExt, StreamExt};
 use iced::{Subscription, stream};
@@ -187,16 +186,6 @@ impl Recipe for Runner {
                 let (tx, mut rx) = mpsc::channel(100);
                 let (res_tx, mut res_rx) = mpsc::channel(1);
 
-                let tracker = ProgressTracker::new()
-                    .add_step("check", 1.0)
-                    .add_step("jre", 20.0)
-                    .add_step("butler", 10.0)
-                    .add_step("version", 4.0)
-                    .add_step("download", 45.0)
-                    .add_step("install", 15.0)
-                    .add_step("cleanup", 1.0);
-                let progress_calculator = tracker.clone();
-
                 let install_settings = settings.clone();
                 let install_base = base_dir.clone();
                 let install_client = client.clone();
@@ -205,32 +194,26 @@ impl Recipe for Runner {
                     let progress_tx = tx.clone();
                     let progress_tx_for_steps = tx.clone(); // Clone extra para UpdateTotalSteps
                     let progress_tx_for_error = tx.clone(); // Clone extra para DownloadError
-                    let result = crate::game::patch_api::compat::ensure_installed(
-                        &install_client,
-                        &install_base,
-                        &install_settings.channel,
-                        if install_settings.game_version > 0 {
-                            Some(install_settings.game_version as i32)
-                        } else {
-                            Some(0)
-                        },
-                        install_policy,
-                        move |phase, sub_p, msg, total_bytes, downloaded_bytes, eta, current_step| {
-                            let sub_p_f32 = sub_p as f32;
-                            let general_p = progress_calculator.calculate(phase, sub_p_f32);
-                            
-                            let _ = progress_tx.try_send(Message::DownloadProgress {
-                                progress: general_p,
-                                sub_progress: sub_p_f32,
-                                speed: msg.to_string(),
-                                total_bytes,
-                                downloaded_bytes,
-                                eta,
-                                current_step,
-                            });
-                        },
-                        Some(cancel_token),
-                    ).await;
+                    
+                    // Create the unified progress reporter
+                    let progress_reporter = move |payload: crate::game::progress::ProgressPayload| {
+                        let _ = progress_tx.try_send(Message::ProgressUpdate(payload));
+                    };
+                    
+                    let result = crate::game::patch_api::PatchApiFrontend::get_instance()
+                        .ensure_installed_with_weighted_progress(
+                            &install_client,
+                            &install_base,
+                            &install_settings.channel,
+                            if install_settings.game_version > 0 {
+                                Some(install_settings.game_version as i32)
+                            } else {
+                                Some(0)
+                            },
+                            install_policy,
+                            progress_reporter,
+                            Some(cancel_token),
+                        ).await;
                     
                     match result {
                         Ok((total_steps, ())) => {
@@ -241,7 +224,20 @@ impl Recipe for Runner {
                         }
                         Err(ref e) => {
                             println!("[Install] Installation failed: {}", e);
-                            let _ = progress_tx_for_error.try_send(Message::DownloadError(e.to_string()));
+                            
+                            // Detectar específicamente errores de cancelación
+                            let is_cancelled = e.to_string().contains("cancelled") || 
+                                             e.to_string().contains("Cancelled") ||
+                                             e.to_string().contains("cancel");
+                            
+                            if is_cancelled {
+                                println!("[Install] Installation cancelled by user");
+                                // Para cancelación, solo enviar GameStopped, no DownloadError
+                                let _ = progress_tx_for_error.try_send(Message::GameStopped);
+                            } else {
+                                // Para otros errores, enviar DownloadError como antes
+                                let _ = progress_tx_for_error.try_send(Message::DownloadError(e.to_string()));
+                            }
                         }
                     }
                     let _ = res_tx.send(result).await;
@@ -253,19 +249,24 @@ impl Recipe for Runner {
 
                 match res_rx.recv().await {
                     Some(Ok(_)) => {
+                        println!("[Install] Installation completed successfully, preparing to launch");
                         let _ = output
-                            .send(Message::DownloadProgress {
-                                progress: 100.0,
-                                sub_progress: 100.0,
-                                speed: "Preparing to launch...".to_string(),
-                                total_bytes: 0,
-                                downloaded_bytes: 0,
-                                eta: None,
-                                current_step: None,
-                            })
+                            .send(Message::ProgressUpdate(crate::game::progress::ProgressPayload {
+                                global_progress: 1.0, // 100%
+                                step_progress: 1.0,  // 100%
+                                message_key: "launcher.status.preparing_launch".to_string(),
+                                message_args: vec![],
+                                stats: None,
+                            }))
                             .await;
                     }
-                    _ => {
+                    Some(Err(ref e)) => {
+                        println!("[Install] Installation failed with error: {}", e);
+                        let _ = output.send(Message::GameStopped).await;
+                        return;
+                    }
+                    None => {
+                        println!("[Install] Installation result channel closed unexpectedly");
                         let _ = output.send(Message::GameStopped).await;
                         return;
                     }

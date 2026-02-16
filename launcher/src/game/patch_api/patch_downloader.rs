@@ -66,7 +66,7 @@ impl PatchDownloader {
                     progress_callback(
                         "patch",
                         pct as f64,
-                        &format!("Downloading patch {}→{}... ({}{}{})", from_version, to_version, speed, size_info, eta_info),
+                        &format!("{}→{}: {}{}{}", from_version, to_version, speed, size_info, eta_info),
                         total,
                         downloaded,
                         eta,
@@ -137,7 +137,7 @@ impl PatchDownloader {
         Ok(sig_path)
     }
 
-    /// Downloads both patch and signature
+    /// Downloads both patch and signature (signature is optional)
     pub async fn download_patch_with_signature(
         &self,
         client: &reqwest::Client,
@@ -147,7 +147,7 @@ impl PatchDownloader {
         to_version: i32,
         progress_callback: impl Fn(&str, f64, &str, u64, u64, Option<String>, Option<usize>),
         cancel_token: Option<Arc<AtomicBool>>,
-    ) -> Result<(PathBuf, PathBuf)> {
+    ) -> Result<(PathBuf, Option<PathBuf>)> {
         // Download patch
         let patch_path = self.download_patch(
             client,
@@ -159,8 +159,8 @@ impl PatchDownloader {
             cancel_token.clone(),
         ).await?;
 
-        // Download signature
-        let sig_path = self.download_patch_signature(
+        // Try to download signature (optional - don't fail if it doesn't work)
+        let sig_path = match self.download_patch_signature(
             client,
             base_dir,
             channel,
@@ -168,7 +168,16 @@ impl PatchDownloader {
             to_version,
             &progress_callback,
             cancel_token,
-        ).await?;
+        ).await {
+            Ok(path) => {
+                progress_callback("signature", 100.0, &format!("Patch signature {}→{} downloaded successfully", from_version, to_version), 0, 0, None, Some(1));
+                Some(path)
+            }
+            Err(e) => {
+                progress_callback("signature", 0.0, &format!("Failed to download patch signature {}→{}: {}. Proceeding without signature verification.", from_version, to_version, e), 0, 0, None, Some(1));
+                None
+            }
+        };
 
         Ok((patch_path, sig_path))
     }
@@ -182,7 +191,7 @@ impl PatchDownloader {
         target_version: i32,
         progress_callback: impl Fn(&str, f64, &str, u64, u64, Option<String>, Option<usize>),
         cancel_token: Option<Arc<AtomicBool>>,
-    ) -> Result<(PathBuf, PathBuf)> {
+    ) -> Result<(PathBuf, Option<PathBuf>)> {
         self.download_patch_with_signature(
             client,
             base_dir,
@@ -196,7 +205,7 @@ impl PatchDownloader {
 
     /// Checks if patch is cached
     pub async fn is_patch_cached(&self, base_dir: &PathBuf, from_version: i32, to_version: i32) -> Result<bool> {
-        let cache_dir = crate::config::get_cache_dir("patches").await?;
+        let cache_dir = crate::config::get_cache_dir("patches").await;
         let filename = format!("{}~{}-{}-{}.pwr", from_version, to_version, std::env::consts::OS, get_arch_name());
         let patch_path = cache_dir.join(&filename);
         Ok(patch_path.exists())
@@ -204,7 +213,7 @@ impl PatchDownloader {
 
     /// Checks if patch signature is cached
     pub async fn is_signature_cached(&self, base_dir: &PathBuf, from_version: i32, to_version: i32) -> Result<bool> {
-        let cache_dir = crate::config::get_cache_dir("patches").await?;
+        let cache_dir = crate::config::get_cache_dir("patches").await;
         let filename = format!("{}~{}-{}-{}.pwr.sig", from_version, to_version, std::env::consts::OS, get_arch_name());
         let sig_path = cache_dir.join(&filename);
         Ok(sig_path.exists())
@@ -212,7 +221,7 @@ impl PatchDownloader {
 
     /// Gets cached patch path if exists
     pub async fn get_cached_patch_path(&self, base_dir: &PathBuf, from_version: i32, to_version: i32) -> Result<Option<PathBuf>> {
-        let cache_dir = crate::config::get_cache_dir("patches").await?;
+        let cache_dir = crate::config::get_cache_dir("patches").await;
         let filename = format!("{}~{}-{}-{}.pwr", from_version, to_version, std::env::consts::OS, get_arch_name());
         let patch_path = cache_dir.join(&filename);
         

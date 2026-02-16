@@ -4,9 +4,13 @@ use crate::server::assets::{
 use crate::server::config::ServerConfig;
 use anyhow::{Context, Result};
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
+
+// Import patch_api for shared cache functionality
+use crate::game::patch_api::{PatchApiFrontend, get_shared_cache};
 
 pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     println!("--- RusTale Dedicated Server ---");
@@ -158,7 +162,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
                 String::new()
             };
             
-            println!("[{}] {}{}{}", task, msg, size_info, eta_info);
+            println!("{}... {}% ({}{})", task, pct, msg, size_info);
         }
     };
 
@@ -187,8 +191,8 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     }
 
     let _java_info = crate::java_detection::ensure_java_available(&root_dir).await?;
-    let _butler_path =
-        crate::game::patch_api::install_butler(&client, &root_dir, &callback, None).await?;
+    let patch_frontend = PatchApiFrontend::get_instance();
+    let _butler_path = patch_frontend.install_butler(&client, &root_dir, callback, None).await?;
 
     // 3. Resolver Version y Descargar Servidor
     println!("[2/5] Checking Game Server files...");
@@ -498,6 +502,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
                     None,
                 ).await
                 .map_err(|e| anyhow::anyhow!("Failed to download server patch: {}", e))?;
+            let patch_path: PathBuf = patch_path;
         }
 
         println!("Applying patch via Butler...");
@@ -507,7 +512,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
             &config.branch,
             &version_dir_name,
             &pwr_path,
-            &callback,
+            callback,
             None,
         )
         .await?;

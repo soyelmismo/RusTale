@@ -49,8 +49,8 @@ impl SharedCacheManager {
 
     /// Get cached patch path if exists
     pub async fn get_cached_patch_path(&self, base_dir: &PathBuf, from_version: i32, to_version: i32) -> Result<Option<PathBuf>> {
-        let cache_dir = crate::config::get_cache_dir("patches").await?;
-        let filename = format!("{}~{}-{}.pwr", from_version, to_version, std::env::consts::OS, super::get_arch_name());
+        let cache_dir = crate::config::get_cache_dir("patches").await;
+        let filename = format!("{}~{}-{}-{}.pwr", from_version, to_version, std::env::consts::OS, super::get_arch_name());
         let patch_path = cache_dir.join(&filename);
         
         if patch_path.exists() {
@@ -62,7 +62,7 @@ impl SharedCacheManager {
 
     /// Clean up old patches from cache
     pub async fn cleanup_old_patches(&self, base_dir: &PathBuf) -> Result<usize> {
-        let cache_dir = crate::config::get_cache_dir("patches").await?;
+        let cache_dir = crate::config::get_cache_dir("patches").await;
         
         if !cache_dir.exists() {
             return Ok(0);
@@ -77,21 +77,26 @@ impl SharedCacheManager {
             entries_vec.push(entry);
         }
 
+        // Collect entries with their metadata
+        let mut entries_with_metadata = Vec::new();
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            if let Ok(metadata) = entry.metadata().await {
+                let modified_time = metadata.modified().unwrap_or(std::time::UNIX_EPOCH);
+                entries_with_metadata.push((entry, modified_time));
+            }
+        }
+
         // Sort by modification time (oldest first)
-        entries_vec.sort_by_key(|e| {
-            e.metadata()
-                .map(|m| m.modified().unwrap_or(std::time::UNIX_EPOCH))
-                .unwrap_or(std::time::UNIX_EPOCH)
-        });
+        entries_with_metadata.sort_by_key(|(_, time)| *time);
 
         // Keep only the latest 50 patches to avoid cache bloat
         let max_patches = 50;
-        if entries_vec.len() > max_patches {
-            for entry in entries_vec.iter().take(entries_vec.len() - max_patches) {
-                if let Ok(metadata) = entry.metadata() {
-                    let age = std::time::SystemTime::now()
-                        .duration_since(metadata.modified().unwrap_or(std::time::UNIX_EPOCH))
-                        .as_secs();
+        if entries_with_metadata.len() > max_patches {
+            for (entry, modified_time) in entries_with_metadata.iter().take(entries_with_metadata.len() - max_patches) {
+                let age = std::time::SystemTime::now()
+                    .duration_since(*modified_time)
+                    .unwrap_or(std::time::Duration::ZERO)
+                    .as_secs();
                     
                     // Only delete patches older than 30 days
                     if age > 30 * 24 * 60 * 60 {
@@ -101,7 +106,6 @@ impl SharedCacheManager {
                             cleaned += 1;
                         }
                     }
-                }
             }
         }
 
@@ -110,16 +114,16 @@ impl SharedCacheManager {
 
     /// Get cache statistics
     pub async fn get_cache_stats(&self, base_dir: &PathBuf) -> Result<CacheStats> {
-        let cache_dir = crate::config::get_cache_dir("patches").await?;
+        let cache_dir = crate::config::get_cache_dir("patches").await;
         
         if !cache_dir.exists() {
             return Ok(CacheStats::default());
         }
 
         let mut total_size = 0;
-        let file_count = 0;
+        let mut file_count = 0;
         let mut oldest_age = u64::MAX;
-        let newest_age = 0;
+        let mut newest_age = 0;
 
         let mut entries = tokio::fs::read_dir(&cache_dir).await
             .context("Failed to read cache directory")?;
@@ -127,10 +131,11 @@ impl SharedCacheManager {
         while let Ok(Some(entry)) = entries.next_entry().await {
             file_count += 1;
             
-            if let Ok(metadata) = entry.metadata() {
+            if let Ok(metadata) = entry.metadata().await {
                 let size = metadata.len();
                 let age = std::time::SystemTime::now()
                     .duration_since(metadata.modified().unwrap_or(std::time::UNIX_EPOCH))
+                    .unwrap_or(std::time::Duration::ZERO)
                     .as_secs();
                 
                 total_size += size;
@@ -163,26 +168,20 @@ impl CacheStats {
     }
 }
 
+use std::sync::OnceLock;
+
 /// Global shared cache instance
-static mut SHARED_CACHE: Option<SharedCacheManager> = None;
-static INIT: std::sync::Once = std::sync::Once::new();
+static SHARED_CACHE: OnceLock<SharedCacheManager> = OnceLock::new();
 
 /// Initialize the shared cache system
 pub fn init_shared_cache(api_manager: Arc<PatchApiManager>) {
-    INIT.call_once(|| {
-        unsafe {
-            SHARED_CACHE = Some(SharedCacheManager::new(api_manager));
-        }
-    });
+    SHARED_CACHE.get_or_init(|| SharedCacheManager::new(api_manager));
 }
 
 /// Get the global shared cache instance
 pub fn get_shared_cache() -> &'static SharedCacheManager {
-    INIT.call_once(|| {
+    SHARED_CACHE.get_or_init(|| {
         let api_manager = Arc::new(PatchApiManager::new());
-        unsafe {
-            SHARED_CACHE = Some(SharedCacheManager::new(api_manager));
-        }
-    });
-    unsafe { SHARED_CACHE.as_ref().unwrap() }
+        SharedCacheManager::new(api_manager)
+    })
 }

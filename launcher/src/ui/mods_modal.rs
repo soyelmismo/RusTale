@@ -75,6 +75,7 @@ pub enum ModsMessage {
     VersionsLoaded(Result<(String, Vec<crate::game::mods_api::GenericFile>), String>),
 }
 
+#[derive(Debug, Clone)]
 pub struct ModsState {
     pub is_open: bool,
     pub current_tab: ModTab,

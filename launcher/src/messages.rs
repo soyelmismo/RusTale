@@ -2,7 +2,7 @@
 /// This separates UI events from Core logic events
 
 use crate::config::{GameSettings, ProfilesConfig};
-use crate::game::{LauncherStatus, mods::ModInfo, zip_mods::PatchManifest};
+use crate::game::{LauncherStatus, mods::ModInfo, zip_mods::PatchManifest, progress::ProgressPayload};
 use crate::lang::Localization;
 use std::path::PathBuf;
 
@@ -19,16 +19,8 @@ pub enum CoreMessage {
         latest_version: Option<i32>,
     },
     
-    /// Download progress update
-    DownloadProgress {
-        progress: f32,
-        sub_progress: f32,
-        speed: String,
-        total_bytes: u64,
-        downloaded_bytes: u64,
-        eta: Option<String>,
-        current_step: Option<usize>,
-    },
+    /// Progress update with unified payload
+    ProgressUpdate(ProgressPayload),
     
     /// Game launch result
     GameLaunched(Result<(), String>),
