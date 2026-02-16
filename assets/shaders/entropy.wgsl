@@ -1,122 +1,97 @@
-// =========================================================
-// ENTROPY FRACTAL - PSYCHEDELIC MANDELBROT/JULIA HYBRID
-// =========================================================
+
+// Funcion para crear una neurona individual
+fn draw_neuron(pos: vec2<f32>, activation: f32, id: f32, accent: vec3<f32>) -> vec3<f32> {
+    let dist = length(pos);
+    let neuron_size = 0.08 + activation * 0.05; // Reducido para mas densidad
+    let glow = 1.0 - smoothstep(0.0, neuron_size, dist);
+    
+    // Color base con acento
+    let base_color = mix(
+        vec3<f32>(0.2, 0.1, 0.4), // Purpura
+        accent, // Acento del tema
+        0.6
+    );
+    
+    // Pulsacion hipnotica
+    let pulse = sin(u.time * 3.0 + id) * 0.3 + 0.7;
+    return base_color * glow * activation * pulse;
+}
+
+
+// Funcion helper para distancia a linea
+fn distance_to_line_segment(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
+    let ap = p - a;
+    let ab = b - a;
+    let t = clamp(dot(ap, ab) / dot(ab, ab), 0.0, 1.0);
+    let closest = a + t * ab;
+    return length(p - closest);
+}
 
 // --- MAIN SHADER ---
-@fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    var uv = in.uv * 2.0 - 1.0;
-    uv.x *= u.aspect;
 
-    // 1. INYECCIÓN DE ENTROPÍA (KERNEL SEEDS)
-    // Convertimos los números aleatorios de Rust (alpha/transition) en coordenadas iniciales del caos.
-    // Esto asegura que el patrón fractal base sea ÚNICO cada vez que abres el programa.
-    let seed_chaos_x = sin(u.alpha * 0.0013) * 0.5 + 0.5;
-    let seed_chaos_y = cos(u.transition * 0.0017) * 0.5 + 0.5;
-    
-    // Zoom base variable + Zoom respiratorio más rápido
-    let zoom_seed = 0.8 + (sin(u.transition * 0.02) * 0.3); 
-    var pos = uv * (zoom_seed - (sin(u.time * 0.3) * 0.2));
+// Neural Network - Red neuronal sinaptica con conexiones pulsantes
+var uv = in.uv * 2.0 - 1.0;
+uv.x *= u.aspect;
 
-    // 2. ENTROPÍA DEL MOUSE (Estela Generadora de Llaves) CON INERCIA EXTREMA
-    // En lugar de solo mover la camara, el mouse inyecta una perturbación en el Espacio Complejo.
-    // Esto "derrite" el fractal donde pasas el mouse con inercia pesada.
-    let m_pos = vec2<f32>(u.mouse_x, u.mouse_y);
-    let dist_m = length(uv - vec2<f32>(m_pos.x, -m_pos.y));
-    
-    // INERCIA EXTREMA: Transformación ultra lenta del mouse directo
-    let mouse_factor = 0.005; // Ultra mínimo - casi sin reacción directa
-    // Movimiento retardado usando el tiempo como amortiguador
-    let retarded_time = u.time * 0.01; // Ultra lento
-    let mouse_influence_x = sin(retarded_time + u.mouse_x * mouse_factor) * 0.1;
-    let mouse_influence_y = cos(retarded_time * 1.2 + u.mouse_y * mouse_factor) * 0.1;
-    
-    // Combinar con movimiento base muy lento
-    let smooth_mouse_x = mouse_influence_x;
-    let smooth_mouse_y = mouse_influence_y;
-    let smooth_pos = vec2<f32>(smooth_mouse_x, smooth_mouse_y);
-    let smooth_dist = length(uv - smooth_pos);
-    
-    // La "estela" ultra débil
-    let mouse_warp = 0.15 / (smooth_dist * 15.0 + 2.0); // Mínimo impacto
-    pos += vec2<f32>(sin(smooth_pos.x * 0.5 + retarded_time), cos(smooth_pos.y * 0.5 + retarded_time)) * mouse_warp * 0.01;
+// Grid de neuronas - 64 neuronas expandidas horizontalmente
+let grid_size_x = 16.0; // Expandido horizontalmente
+let grid_size_y = 8.0;  // Mantenido verticalmente
+var cell = floor(vec2<f32>(uv.x * grid_size_x, uv.y * grid_size_y));
+var cell_uv = fract(vec2<f32>(uv.x * grid_size_x, uv.y * grid_size_y)) - 0.5;
 
-    // Colores base con acento del tema
-    let accent = vec3<f32>(u.accent_r, u.accent_g, u.accent_b);
-    var col = vec3<f32>(0.0);
+// Color de acento para las neuronas
+let accent = vec3<f32>(u.accent_r, u.accent_g, u.accent_b);
+var col = vec3<f32>(0.02, 0.01, 0.05); // Fondo oscuro
 
-    // Variables acumulativas para el fractal
-    var z = pos;
-    // C es la constante mágica. Al mezclar el Seed del Kernel con el Mouse,
-    // creamos un conjunto de Julia dinámico que nunca se repite.
-    // Añadimos movimiento autónomo con múltiples frecuencias (mouse más sutil)
-    // MORPHING TEMPORAL: La constante base evoluciona con el tiempo
-    let morph_time = u.time * 0.1; // Velocidad del morphing
-    let morph_x = sin(morph_time) * 0.3;
-    let morph_y = cos(morph_time * 1.3) * 0.3;
-    
-    let c = vec2<f32>(
-        -0.7269 + seed_chaos_x * 0.1 + (u.mouse_x * 0.1) + sin(u.time * 0.4) * 0.05 + morph_x, 
-        0.1889 + seed_chaos_y * 0.1 - (u.mouse_y * 0.1) + cos(u.time * 0.3) * 0.05 + morph_y
-    );
-
-    // Iteración del Fractal (Híbrido Mandelbrot/Julia para máxima psicodelia)
-    var iter_val = 0.0;
-    
-    for (var i: f32 = 0.0; i < 64.0; i = i + 1.0) {
-        // Z = Z^2 + C (Fórmula sagrada del fractal)
-        // Aplicamos una rotación temporal más rápida para que esté "vivo"
-        let t_rot = u.time * 0.5 + (seed_chaos_x * 10.0);
-        let z_new = vec2<f32>(
-            (z.x * z.x - z.y * z.y) + c.x + sin(t_rot)*0.08,
-            (2.0 * z.x * z.y) + c.y + cos(t_rot)*0.08
-        );
-        z = z_new;
-
-        // Velocidad de escape
-        if (length(z) > 4.0) {
-            // Suavizado de bandas para que se vea líquido y no a bloques
-            // Normalizamos entre 0 y 1
-            iter_val = i / 64.0; 
-            break;
+// Dibujar red de neuronas
+for (var x: f32 = 0.0; x < grid_size_x; x = x + 1.0) {
+    for (var y: f32 = 0.0; y < grid_size_y; y = y + 1.0) {
+        let neuron_id = x * grid_size_y + y;
+        var neuron_pos = vec2<f32>(x, y) / vec2<f32>(grid_size_x, grid_size_y) * 2.0 - 1.0;
+        neuron_pos.x *= 1.0 / u.aspect;
+        
+        // Activacion basada en tiempo y mouse
+        let mouse_influence = 1.0 / (length(neuron_pos - vec2<f32>(u.mouse_x, u.mouse_y)) + 0.5);
+        let wave_activation = sin(u.time * 2.0 + neuron_id * 0.5) * 0.5 + 0.5;
+        let activation = (mouse_influence * 0.3 + wave_activation * 0.7) * u.intensity;
+        
+        // Dibujar neurona
+        let local_uv = uv - neuron_pos;
+        col += draw_neuron(local_uv, activation, neuron_id, accent);
+        
+        // Conexiones sinapticas
+        if (x < grid_size_x - 1.0) {
+            var next_pos = vec2<f32>(x + 1.0, y) / vec2<f32>(grid_size_x, grid_size_y) * 2.0 - 1.0;
+            next_pos.x *= 1.0 / u.aspect;
+            
+            // Linea de conexion con efecto de flujo
+            let connection_dist = distance_to_line_segment(uv, neuron_pos, next_pos);
+            let flow = sin(u.time * 4.0 - length(uv - neuron_pos) * 5.0) * 0.5 + 0.5;
+            let connection_glow = 0.02 / (connection_dist + 0.003); // Mas brillante y visible
+            
+            col += accent * connection_glow * flow * activation * 0.5; // Mas intenso
+        }
+        
+        // Conexiones verticales
+        if (y < grid_size_y - 1.0) {
+            var next_pos = vec2<f32>(x, y + 1.0) / vec2<f32>(grid_size_x, grid_size_y) * 2.0 - 1.0;
+            next_pos.x *= 1.0 / u.aspect;
+            
+            let connection_dist = distance_to_line_segment(uv, neuron_pos, next_pos);
+            let flow = sin(u.time * 4.0 - length(uv - neuron_pos) * 5.0) * 0.5 + 0.5;
+            let connection_glow = 0.02 / (connection_dist + 0.003); // Mas brillante y visible
+            
+            col += accent * connection_glow * flow * activation * 0.5; // Mas intenso
         }
     }
-
-    // 3. COLORACIÓN PSICOTRÓPICA
-    if (iter_val > 0.0) {
-        // Paleta de ciclos basada en el tiempo y el acento (más rápida)
-        // El 'iter_val' controla qué tan profundo entramos en el infinito
-        
-        let hue_speed = u.time * 0.8;
-        let spectrum = iter_val * 6.0 + dist_m * 0.3; // La estela del mouse cambia el color localmente (más sutil)
-
-        let r = 0.5 + 0.5 * cos(3.0 + spectrum * 3.0 + hue_speed + u.accent_r);
-        let g = 0.5 + 0.5 * cos(3.0 + spectrum * 3.0 + hue_speed + 2.0 + u.accent_g);
-        let b = 0.5 + 0.5 * cos(3.0 + spectrum * 3.0 + hue_speed + 4.0 + u.accent_b);
-
-        let fractal_col = vec3<f32>(r, g, b);
-        
-        // Mezclar con el acento del usuario para mantener la identidad visual del launcher (más dinámico)
-        col = mix(fractal_col, accent * (2.0 + sin(u.time * 2.0) * 0.8), 0.4);
-        
-        // Añadir brillo ("Bloom") basado en iteraciones cercanas (más intenso)
-        col *= (1.2 + iter_val * 3.0);
-    } 
-    else {
-        // Interior del fractal (Vacio profundo)
-        // Lo teñimos ligeramente del acento muy oscuro
-        col = accent * 0.05;
-    }
-
-    // Efecto visual extra: Ruido granulado (Film Grain) más dinámico usando el seed del Kernel
-    // Ayuda a la sensación de "entropía cruda"
-    let grain = fract(sin(dot(uv * (u.time * 0.3), vec2<f32>(12.9898, 78.233))) * 43758.5453);
-    col += grain * 0.05;
-
-    // Vineta mistica
-    let vign = 1.0 - smoothstep(0.5, 2.0, length(uv));
-    col *= vign;
-
-    // Aplicar intensidad global (Fade in/out al cargar)
-    return vec4<f32>(col * u.intensity, 1.0);
 }
+
+
+// Efecto de ondas cerebrales
+let brain_wave = sin(length(uv) * 10.0 - u.time * 3.0) * 0.5 + 0.5;
+col *= 0.8 + brain_wave * 0.2;
+
+// Post-proceso neuronal
+col = pow(col, vec3<f32>(1.2)); // Contraste aumentado
+
+return vec4<f32>(col, 1.0);

@@ -248,34 +248,145 @@ impl PatchApiFrontend {
             let patch_path = self.patch_downloader.download_patch(
                 client, base_dir, channel, start_version, target_ver_val, 
                 move |phase, pct, speed, total, down, eta, step| {
-                    let stats = DownloadStats {
-                        total_bytes: total,
-                        downloaded_bytes: down,
-                        speed_str: speed.to_string(),
-                        eta_str: eta,
+                    // No pasar estadísticas durante descarga para evitar duplicación con el mensaje
+                    let stats = if total > 0 {
+                        Some(DownloadStats {
+                            total_bytes: total,
+                            downloaded_bytes: down,
+                            speed_str: speed.to_string(),
+                            eta_str: eta,
+                        })
+                    } else {
+                        None
                     };
-                    WeightedProgressTracker::report(&tracker_clone, (pct / 100.0) as f32, "launcher.status.downloading", vec![], Some(stats));
+                    WeightedProgressTracker::report(&tracker_clone, (pct / 100.0) as f32, "launcher.status.downloading", vec![], stats);
                 },
                 cancel_token.clone()
             ).await?;
 
-            // Phase 6: Install
+            // Phase 6: Install with enhanced recovery
             WeightedProgressTracker::set_phase(&tracker, "install");
             WeightedProgressTracker::report(&tracker, 0.0, "launcher.status.patching", vec![], None);
             
             let tracker_clone = tracker.clone();
-            crate::game::patcher::apply_pwr(
+            let install_result = crate::game::patcher::apply_pwr(
                 base_dir, channel, &install_dir_name, &patch_path, 
                 move |phase, pct, speed, total, down, eta, step| {
-                    WeightedProgressTracker::report(&tracker_clone, (pct / 100.0) as f32, "launcher.status.extracting", vec![], None);
+                    // Map patcher progress to our progress system
+                    if pct >= 95.0 {
+                        // Verification phase
+                        WeightedProgressTracker::report(&tracker_clone, 0.95, "launcher.status.verifying", vec![], None);
+                    } else if pct >= 10.0 {
+                        // Main extraction phase
+                        WeightedProgressTracker::report(&tracker_clone, (pct / 100.0) as f32 * 0.9, "launcher.status.extracting", vec![], None);
+                    } else {
+                        // Initial setup
+                        WeightedProgressTracker::report(&tracker_clone, (pct / 100.0) as f32 * 0.1, "launcher.status.patching", vec![], None);
+                    }
                 },
                 cancel_token.clone()
-            ).await?;
+            ).await;
+            
+            match install_result {
+                Ok(_) => {
+                    println!("[INSTALL] Patch application successful");
+                }
+                Err(e) => {
+                    println!("[INSTALL] Patch application failed: {}", e);
+                    
+                    // ENHANCED: Try fallback to complete download if patch fails
+                    WeightedProgressTracker::report(&tracker, 0.5, "launcher.status.recovering", vec![], None);
+                    
+                    // Clean up corrupted installation
+                    let game_dir = crate::game::paths::GamePaths::new(base_dir.clone())
+                        .version_dir(channel, &install_dir_name);
+                    if game_dir.exists() {
+                        println!("[RECOVERY] Removing corrupted installation for fallback");
+                        let _ = tokio::fs::remove_dir_all(&game_dir).await;
+                    }
+                    
+                    // Try downloading complete version instead of patch
+                    match self.patch_downloader.download_complete_version(
+                        client,
+                        base_dir,
+                        channel,
+                        target_version.unwrap_or(0),
+                        |phase, pct, status, total, downloaded, eta, step| {
+                            WeightedProgressTracker::report(&tracker, 0.5 + (pct as f32 / 100.0) * 0.4, "launcher.status.downloading", vec![], None);
+                        },
+                        cancel_token.clone()
+                    ).await {
+                        Ok(complete_patch_path) => {
+                            println!("[RECOVERY] Complete version downloaded, applying...");
+                            
+                            // Try applying the complete patch
+                            let tracker_clone = tracker.clone();
+                            crate::game::patcher::apply_pwr(
+                                base_dir, channel, &install_dir_name, &complete_patch_path,
+                                move |phase, pct, speed, total, down, eta, step| {
+                                    if pct >= 95.0 {
+                                        WeightedProgressTracker::report(&tracker_clone, 0.9, "launcher.status.verifying", vec![], None);
+                                    } else {
+                                        WeightedProgressTracker::report(&tracker_clone, 0.5 + (pct as f32 / 100.0) * 0.4, "launcher.status.extracting", vec![], None);
+                                    }
+                                },
+                                cancel_token.clone()
+                            ).await?;
+                            
+                            println!("[RECOVERY] Fallback to complete version successful");
+                        }
+                        Err(fallback_err) => {
+                            println!("[RECOVERY] Fallback download also failed: {}", fallback_err);
+                            anyhow::bail!("Installation failed: Patch application failed ({}) and fallback download failed ({})", e, fallback_err);
+                        }
+                    }
+                }
+            }
         }
 
-        // Phase 7: Finalize
+        // Phase 7: Final verification and completion
         WeightedProgressTracker::set_phase(&tracker, "finalize");
-        WeightedProgressTracker::report(&tracker, 1.0, "launcher.status.ready", vec![], None);
+        WeightedProgressTracker::report(&tracker, 0.95, "launcher.status.finishing_verification", vec![], None);
+        
+        // Final verification: ensure the game is truly ready
+        let is_latest = target_version.unwrap_or(0) == 0;
+        let install_dir_name = if is_latest { "latest".to_string() } else { target_version.unwrap_or(0).to_string() };
+        
+        // Multiple verification attempts
+        let mut verification_passed = false;
+        for attempt in 1..=3 {
+            if crate::game::install::is_game_installed(base_dir, channel, &install_dir_name).await {
+                let game_dir = crate::game::paths::GamePaths::new(base_dir.clone())
+                    .version_dir(channel, &install_dir_name);
+                
+                match crate::game::patcher::verify_extraction_integrity(&game_dir).await {
+                    Ok(_) => {
+                        verification_passed = true;
+                        println!("[FINAL] Installation verification passed on attempt {}", attempt);
+                        break;
+                    }
+                    Err(e) => {
+                        println!("[FINAL] Verification failed on attempt {}: {}", attempt, e);
+                        if attempt < 3 {
+                            // Wait a bit before retry
+                            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                        }
+                    }
+                }
+            } else {
+                println!("[FINAL] Game executable not found on attempt {}", attempt);
+                if attempt < 3 {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                }
+            }
+        }
+        
+        if verification_passed {
+            WeightedProgressTracker::report(&tracker, 1.0, "launcher.status.ready", vec![], None);
+            println!("[SUCCESS] Installation completed successfully");
+        } else {
+            anyhow::bail!("Installation verification failed after 3 attempts: Game installation appears corrupted");
+        }
 
         Ok((7, ()))
     }

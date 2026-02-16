@@ -19,6 +19,7 @@ pub enum LauncherStatus {
 /// 2. If "latest" mode, check local version vs remote version
 /// 3. If update available, return NeedsUpdate
 /// 4. If specific version selected, just verify it exists
+/// 5. ENHANCED: Verify installation integrity, not just file existence
 ///
 /// Returns: (Status, Optional<remote_version>)
 pub async fn calculate_status(
@@ -51,9 +52,24 @@ pub async fn calculate_status(
         return (LauncherStatus::NeedsInstall, None);
     }
 
-    // If not in latest mode, and it's installed, we're ready
+    // ENHANCED: Verify installation integrity for installed games
+    if is_installed {
+        let game_dir = paths.version_dir(channel, &version_str);
+        match crate::game::patcher::verify_extraction_integrity(&game_dir).await {
+            Ok(_) => {
+                println!("[DEBUG] Installation integrity verified");
+            }
+            Err(e) => {
+                println!("[DEBUG] Installation integrity check failed: {}", e);
+                // Installation exists but is corrupted, needs reinstall
+                return (LauncherStatus::NeedsInstall, None);
+            }
+        }
+    }
+
+    // If not in latest mode, and it's installed and verified, we're ready
     if !is_latest_mode {
-        println!("[DEBUG] Not latest mode and installed, returning Ready");
+        println!("[DEBUG] Not latest mode and installed verified, returning Ready");
         return (LauncherStatus::Ready, None);
     }
 

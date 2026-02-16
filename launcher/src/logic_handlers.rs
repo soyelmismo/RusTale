@@ -211,9 +211,8 @@ impl RusTale {
 
                 let paths = GamePaths::new(base_dir);
                 let version_dir = paths.version_dir(&channel, &version_str);
-
-                if version_dir.exists() {
-                    if let Err(e) = tokio::fs::remove_dir_all(&version_dir).await {
+                {
+                    if let Err(e) = tokio::fs::remove_dir_all(version_dir).await {
                         eprintln!("Failed to delete version {}: {}", version, e);
                     } else {
                         println!("Deleted version {} successfully", version);

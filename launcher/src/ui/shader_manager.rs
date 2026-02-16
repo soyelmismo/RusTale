@@ -55,10 +55,8 @@ fn vs_main(@builtin(vertex_index) v_index: u32) -> VertexOutput {
 "#;
 
 pub fn build_uber_shader() -> String {
-    println!("[Shader] Injecting SINGLE ENTROPY KERNEL...");
 
     // Cargar el archivo especifico
-    // Usamos el mismo HEADER constante definido en el archivo original
     let entropy_src = if let Some(file) = ShaderAssets::get("entropy.wgsl") {
         match String::from_utf8(file.data.to_vec()) {
             Ok(s) => s,
@@ -68,19 +66,9 @@ pub fn build_uber_shader() -> String {
         super::lsd_shader::DEFAULT_FALLBACK.to_string()
     };
 
-    let safe_content = entropy_src;
-    
-    // Limpieza de compatibilidad por si acaso (atan2 -> atan en WGSL estandar viejo)
-    //safe_content = safe_content.replace("atan2(", "atan("); 
-
-    // Eliminamos duplicados si existen en el wgsl
-    let body = safe_content.replace("struct Uniforms", "// struct Uniforms embedded via header");
-    let body = body.replace("@group(0) @binding(0) var<uniform> u: Uniforms;", "// uniform u embedded");
-    
-    // IMPORTANTE: entropy.wgsl trae sus propios helpers.
-    // Solo necesitamos concatenar Header + Body
-    
-    format!("{}\n{}", HEADER, body)
+    // The HEADER provides Uniforms, u, VertexOutput, vs_main, and rot()
+    // We simply append the logic from entropy.wgsl
+    format!("{}\n{}", HEADER, entropy_src)
 }
 
 pub fn get_shader_count() -> usize {

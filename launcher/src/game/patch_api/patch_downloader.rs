@@ -66,7 +66,7 @@ impl PatchDownloader {
                     progress_callback(
                         "patch",
                         pct as f64,
-                        &format!("{}→{}: {}{}{}", from_version, to_version, speed, size_info, eta_info),
+                        &format!("{}→{} ", from_version, to_version),
                         total,
                         downloaded,
                         eta,
