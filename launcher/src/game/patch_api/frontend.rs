@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::sync::{Arc, atomic::AtomicBool, OnceLock};
 
-use super::{PatchApiManager, ButlerInstaller, JreInstaller, VersionManager, PatchDownloader, IntegrityChecker};
+use super::{PatchApiManager, ButlerInstaller, JreInstaller, VersionManager, PatchDownloader};
 use crate::game::progress::{WeightedProgressTracker, OperationPhase, ProgressPayload, DownloadStats};
 
 /// Global singleton instance for PatchApiFrontend
@@ -17,7 +17,6 @@ pub struct PatchApiFrontend {
     jre_installer: JreInstaller,
     version_manager: VersionManager,
     patch_downloader: PatchDownloader,
-    integrity_checker: IntegrityChecker,
 }
 
 impl PatchApiFrontend {
@@ -36,7 +35,6 @@ impl PatchApiFrontend {
             jre_installer: JreInstaller::new(api_manager.clone()),
             version_manager: VersionManager::new(api_manager.clone()),
             patch_downloader: PatchDownloader::new(api_manager.clone()),
-            integrity_checker: IntegrityChecker::new(api_manager),
         }
     }
 
@@ -129,8 +127,8 @@ impl PatchApiFrontend {
         progress_callback("download", 0.0, "Preparing download...", 0, 0, None, Some(4));
 
         if !files_exist || start_version < target_ver_val {
-            // Download patch with optional signature
-            let (patch_path, sig_path) = self.patch_downloader.download_patch_with_signature(
+            // Download patch
+            let patch_path = self.patch_downloader.download_patch(
                 client,
                 base_dir,
                 channel,
@@ -140,27 +138,8 @@ impl PatchApiFrontend {
                 cancel_token.clone(),
             ).await?;
 
-            // Verify integrity (signature is optional)
-            progress_callback("verify", 0.0, "Verifying patch integrity...", 0, 0, None, Some(5));
-            
-            // Clone the callback to avoid move issues
-            let cb = progress_callback.clone();
-            let integrity_result = self.integrity_checker.verify_download_integrity(
-                &patch_path,
-                sig_path.as_ref(), // Use the downloaded signature path
-                None, // We don't know expected size beforehand
-                Some(Box::new(move |pct: f64, msg: &str| {
-                    cb("verify", pct * 100.0, msg, 0, 0, None, Some(5));
-                }) as Box<dyn Fn(f64, &str) + Send + Sync + 'static>),
-                cancel_token.clone(),
-            ).await?;
-
-            if !integrity_result.is_valid() {
-                anyhow::bail!("Patch integrity verification failed: {:?}", integrity_result.errors);
-            }
-
             // Apply patch
-            progress_callback("install", 0.0, "Installing game files...", 0, 0, None, Some(6));
+            progress_callback("install", 0.0, "Installing game files...", 0, 0, None, Some(5));
             crate::game::patcher::apply_pwr(
                 base_dir,
                 channel,
@@ -171,9 +150,9 @@ impl PatchApiFrontend {
             ).await?;
         }
 
-        progress_callback("complete", 100.0, "Installation complete", 0, 0, None, Some(7));
+        progress_callback("complete", 100.0, "Installation complete", 0, 0, None, Some(6));
 
-        Ok((7, ()))
+        Ok((6, ()))
     }
 
     /// Example implementation using the new WeightedProgressTracker system
@@ -196,9 +175,8 @@ impl PatchApiFrontend {
             OperationPhase { id: "jre".to_string(), weight: 25.0 },   // JRE download is heavy
             OperationPhase { id: "butler".to_string(), weight: 15.0 },
             OperationPhase { id: "version".to_string(), weight: 2.0 },
-            OperationPhase { id: "download".to_string(), weight: 45.0 }, // Patch download
-            OperationPhase { id: "verify".to_string(), weight: 3.0 },
-            OperationPhase { id: "install".to_string(), weight: 7.0 },  // Butler apply
+            OperationPhase { id: "download".to_string(), weight: 50.0 }, // Patch download (increased weight)
+            OperationPhase { id: "install".to_string(), weight: 5.0 },  // Butler apply (reduced weight)
             OperationPhase { id: "finalize".to_string(), weight: 1.0 },
         ]);
 
@@ -267,7 +245,7 @@ impl PatchApiFrontend {
             
             // Bridge the patch download callback
             let tracker_clone = tracker.clone();
-            let (patch_path, sig_path) = self.patch_downloader.download_patch_with_signature(
+            let patch_path = self.patch_downloader.download_patch(
                 client, base_dir, channel, start_version, target_ver_val, 
                 move |phase, pct, speed, total, down, eta, step| {
                     let stats = DownloadStats {
@@ -281,48 +259,7 @@ impl PatchApiFrontend {
                 cancel_token.clone()
             ).await?;
 
-            // Phase 6: Verify
-            WeightedProgressTracker::set_phase(&tracker, "verify");
-            // FORZAR REPORTE: Decirle al usuario "Hey, voy a empezar a verificar"
-            // antes de que el código siquiera entre al validador
-            WeightedProgressTracker::report(&tracker, 0.0, "launcher.status.verifying_checksum_with_pct", vec!["0".to_string()], None);
-            
-            // PEQUEÑO CEDER: Darle 1ms al runtime de tokio para que mande el mensaje UI antes de bloquearse
-            // aunque hayamos arreglado el bloqueo, esto ayuda visualmente.
-            tokio::task::yield_now().await;
-            
-            // Clone the tracker to avoid move issues
-            let tracker_clone = tracker.clone();
-            let integrity_result = self.integrity_checker.verify_download_integrity(
-                &patch_path,
-                sig_path.as_ref(), // Use the downloaded signature path
-                None,
-                Some(Box::new(move |pct: f64, _msg: &str| {
-                    // Convertir 0.0-1.0 a porcentaje entero (ej: "45")
-                    let pct_int = (pct * 100.0) as i32;
-                    let args = vec![pct_int.to_string()];
-                    
-                    // Clave: Usar la key especial que definimos con el placeholder {0}%
-                    // Y pasar el progreso exacto para la barra secundaria
-                    WeightedProgressTracker::report(
-                        &tracker_clone, 
-                        pct_int as f32, // Sub-bar llenandose
-                        "launcher.status.verifying_checksum_with_pct", 
-                        args, 
-                        None
-                    );
-                }) as Box<dyn Fn(f64, &str) + Send + Sync>),
-                cancel_token.clone(),
-            ).await?;
-            
-            // Verification complete
-            WeightedProgressTracker::report(&tracker, 1.0, "launcher.status.verifying", vec![], None);
-
-            if !integrity_result.is_valid() {
-                anyhow::bail!("Patch integrity verification failed: {:?}", integrity_result.errors);
-            }
-
-            // Phase 7: Install
+            // Phase 6: Install
             WeightedProgressTracker::set_phase(&tracker, "install");
             WeightedProgressTracker::report(&tracker, 0.0, "launcher.status.patching", vec![], None);
             
@@ -336,11 +273,11 @@ impl PatchApiFrontend {
             ).await?;
         }
 
-        // Phase 8: Finalize
+        // Phase 7: Finalize
         WeightedProgressTracker::set_phase(&tracker, "finalize");
         WeightedProgressTracker::report(&tracker, 1.0, "launcher.status.ready", vec![], None);
 
-        Ok((8, ()))
+        Ok((7, ()))
     }
 
     /// Gets comprehensive version information
@@ -377,23 +314,6 @@ impl PatchApiFrontend {
         cancel_token: Option<Arc<AtomicBool>>,
     ) -> Result<PathBuf> {
         self.patch_downloader.download_patch(client, base_dir, channel, from_version, to_version, progress_callback, cancel_token).await
-    }
-
-    /// Verifies patch integrity
-    pub async fn verify_patch_integrity(
-        &self,
-        patch_path: &PathBuf,
-        signature_path: Option<&PathBuf>,
-        expected_size: Option<u64>,
-        cancel_token: Option<Arc<AtomicBool>>,
-    ) -> Result<super::IntegrityResult> {
-        self.integrity_checker.verify_download_integrity(
-            patch_path, 
-            signature_path, 
-            expected_size, 
-            None::<Box<dyn Fn(f64, &str) + Send + Sync>>,
-            cancel_token,
-        ).await
     }
 
     /// Gets access to the patch downloader for advanced usage

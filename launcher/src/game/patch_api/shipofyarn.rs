@@ -255,12 +255,6 @@ impl PatchProvider for ShipOfYarnProvider {
         self.get_version_url(channel, os, arch, from_version, to_version).await
     }
 
-    async fn get_patch_signature_url(&self, channel: &str, os: &str, arch: &str, from_version: i32, to_version: i32) -> Result<String> {
-        // ShipOfYarn doesn't provide signature URLs, so we'll construct them
-        let patch_url = self.get_patch_url(channel, os, arch, from_version, to_version).await?;
-        Ok(format!("{}.sig", patch_url))
-    }
-
     async fn has_complete_version(&self, channel: &str, os: &str, arch: &str, version: i32) -> Result<bool> {
         let data = self.fetch_data().await?;
         let platform_data = self.get_platform_data(&data, channel)?;

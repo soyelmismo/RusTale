@@ -19,7 +19,7 @@ pub async fn initialize() -> Result<()> {
         config::get_identity_dir(),    // RusTale/server/identity
         base_dir.join("cache"),
         base_dir.join("cache").join("images"),
-        base_dir.join("cache").join("game_patches"),
+        base_dir.join("cache").join("patches"),
         base_dir.join("cache").join("jre"),
         base_dir.join("logs"),
         base_dir.join("tools"),
@@ -45,7 +45,7 @@ pub async fn initialize() -> Result<()> {
 /// Equivalente a env.CleanupLauncher() en Go.
 async fn cleanup_launcher(base_dir: &PathBuf) {
     // --- NUEVO: Limpiar archivos parciales en caches ---
-    let patches_cache = base_dir.join("cache").join("game_patches");
+    let patches_cache = base_dir.join("cache").join("patches");
     cleanup_partials(&patches_cache).await;
 
     let jre_cache = base_dir.join("cache").join("jre");

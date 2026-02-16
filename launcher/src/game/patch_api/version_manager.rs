@@ -107,19 +107,6 @@ impl VersionManager {
         
         self.api_manager.get_patch_url(channel, os, arch, from_version, to_version).await
     }
-
-    /// Gets patch signature URL for a version range
-    pub async fn get_patch_signature_url(
-        &self,
-        channel: &str,
-        from_version: i32,
-        to_version: i32,
-    ) -> Result<String> {
-        let os = std::env::consts::OS;
-        let arch = get_arch_name();
-        
-        self.api_manager.get_patch_signature_url(channel, os, arch, from_version, to_version).await
-    }
 }
 
 fn get_arch_name() -> &'static str {

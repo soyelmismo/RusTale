@@ -18,7 +18,6 @@ pub struct PatchInfo {
     pub channel: String,
     pub is_complete: bool,
     pub download_url: String,
-    pub signature_url: Option<String>,
 }
 
 /// Download information
@@ -47,9 +46,6 @@ pub trait PatchProvider: Send + Sync {
 
     /// Get patch download URL
     async fn get_patch_url(&self, channel: &str, os: &str, arch: &str, from_version: i32, to_version: i32) -> Result<String>;
-
-    /// Get patch signature URL (optional)
-    async fn get_patch_signature_url(&self, channel: &str, os: &str, arch: &str, from_version: i32, to_version: i32) -> Result<String>;
 
     /// Check if a complete version exists
     async fn has_complete_version(&self, channel: &str, os: &str, arch: &str, version: i32) -> Result<bool>;

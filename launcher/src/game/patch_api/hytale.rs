@@ -48,7 +48,6 @@ pub struct FileInfo {
 #[derive(Debug, Deserialize)]
 pub struct PatchInfo {
     pub url: String,
-    pub signature_url: Option<String>,
     pub size: u64,
     pub checksum: String,
 }
@@ -279,11 +278,6 @@ impl PatchProvider for HytaleProvider {
 
     async fn get_patch_url(&self, channel: &str, os: &str, arch: &str, from_version: i32, to_version: i32) -> Result<String> {
         let url = format!("{}patches/{}/{}/{}/{}/{}.pwr", ACCOUNT_DATA_URL, os, arch, channel, from_version, to_version);
-        Ok(url)
-    }
-
-    async fn get_patch_signature_url(&self, channel: &str, os: &str, arch: &str, from_version: i32, to_version: i32) -> Result<String> {
-        let url = format!("{}patches/{}/{}/{}/{}/{}.pwr.sig", ACCOUNT_DATA_URL, os, arch, channel, from_version, to_version);
         Ok(url)
     }
 

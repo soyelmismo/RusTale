@@ -6,7 +6,6 @@ pub mod utils;
 pub mod installer;
 pub mod version_manager;
 pub mod patch_downloader;
-pub mod integrity_checker;
 pub mod frontend;
 pub mod shared_cache;
 
@@ -18,7 +17,6 @@ pub use utils::*;
 pub use installer::{ButlerInstaller, JreInstaller};
 pub use version_manager::VersionManager;
 pub use patch_downloader::PatchDownloader;
-pub use integrity_checker::{IntegrityChecker, IntegrityResult, FormatValidationResult};
 pub use frontend::PatchApiFrontend;
 pub use shared_cache::{SharedCacheManager, init_shared_cache, get_shared_cache, CacheStats};
 
@@ -75,17 +73,6 @@ impl PatchApiManager {
             }
         }
         anyhow::bail!("No provider could fetch patch URL for {}->{}", from_version, to_version)
-    }
-
-    /// Try to get patch signature URL from any provider
-    pub async fn get_patch_signature_url(&self, channel: &str, os: &str, arch: &str, from_version: i32, to_version: i32) -> Result<String> {
-        for provider in &self.providers {
-            if let Ok(url) = provider.get_patch_signature_url(channel, os, arch, from_version, to_version).await {
-                println!("✅ Successfully got patch signature URL from provider: {}", provider.name());
-                return Ok(url);
-            }
-        }
-        anyhow::bail!("No provider could fetch patch signature URL for {}->{}", from_version, to_version)
     }
 
     /// Try to get JRE download URL from any provider

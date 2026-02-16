@@ -116,4 +116,9 @@ impl GamePaths {
     pub fn logs(&self) -> PathBuf {
         self.root.join("logs")
     }
+
+    /// Staging directory for temporary files during patching
+    pub fn staging(&self) -> PathBuf {
+        self.root.join("staging")
+    }
 }

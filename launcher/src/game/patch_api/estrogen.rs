@@ -49,11 +49,6 @@ impl EstrogenProvider {
             ESTROGEN_BASE_URL, operating_system, architecture, channel, start_version, target_version)
     }
 
-    fn guess_patch_sig_url_no_auth(&self, architecture: &str, operating_system: &str, channel: &str, start_version: i32, target_version: i32) -> String {
-        format!("{}/patches/{}/{}/{}/{}/{}.pwr.sig", 
-            ESTROGEN_BASE_URL, operating_system, architecture, channel, start_version, target_version)
-    }
-
     async fn check_version_exists(&self, start_version: i32, end_version: i32, architecture: &str, operating_system: &str, channel: &str) -> bool {
         let url = self.guess_patch_url_no_auth(architecture, operating_system, channel, start_version, end_version);
         check_file_exists(&self.client, &url).await
@@ -136,11 +131,6 @@ impl PatchProvider for EstrogenProvider {
             anyhow::bail!("Patch {}->{} not found for channel {} on {}-{}", from_version, to_version, channel, os, arch);
         }
         
-        Ok(url)
-    }
-
-    async fn get_patch_signature_url(&self, channel: &str, os: &str, arch: &str, from_version: i32, to_version: i32) -> Result<String> {
-        let url = self.guess_patch_sig_url_no_auth(arch, os, channel, from_version, to_version);
         Ok(url)
     }
 

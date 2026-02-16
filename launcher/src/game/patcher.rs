@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
-use std::sync::{Arc, atomic::AtomicBool};
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use tokio::process::Command;
 use tokio::io::{AsyncWriteExt, AsyncBufReadExt, BufWriter};
 use tokio::io::BufReader;
@@ -29,7 +29,7 @@ pub async fn apply_pwr(
     cancel_token: Option<Arc<AtomicBool>>,
 ) -> anyhow::Result<()> {
     let paths = crate::game::paths::GamePaths::new(root_dir.clone());
-    let game_dir = paths.game_dir().join(install_dir_name);
+    let game_dir = paths.version_dir(channel, install_dir_name);
 
     // Ensure game directory exists
     tokio::fs::create_dir_all(&game_dir).await
@@ -41,9 +41,15 @@ pub async fn apply_pwr(
     let butler_path = paths.butler();
     let pwr_path_absolute = std::fs::canonicalize(pwr_path)
         .context("Failed to canonicalize PWR path")?;
+    let staging_dir = paths.staging();
+
+    // Ensure staging directory exists
+    tokio::fs::create_dir_all(&staging_dir).await
+        .context("Failed to create staging directory")?;
 
     let mut cmd = Command::new(&butler_path);
     cmd.arg("apply")
+        .arg(format!("--staging-dir={}", staging_dir.display()))
         .arg(&pwr_path_absolute)
         .arg(&game_dir);
 
@@ -164,13 +170,20 @@ pub async fn download_with_fallback<F>(
 where
     F: FnOnce() -> anyhow::Result<String>,
 {
+    // Flag to coordinate which callback is active (prevents duplication)
+    let primary_active = Arc::new(AtomicBool::new(true));
+    let primary_active_clone = primary_active.clone();
+    
     // Try primary download first
     let download_result = crate::game::downloader::download_file(
         client,
         primary_url,
         dest_path,
         |pct, speed, total, downloaded, eta| {
-            progress_callback(pct, &speed, total, downloaded, eta);
+            // Only update progress if primary is still active
+            if primary_active.load(Ordering::Relaxed) {
+                progress_callback(pct, &speed, total, downloaded, eta);
+            }
         },
         cancel_token.clone(),
     ).await;
@@ -178,6 +191,10 @@ where
     // If primary fails, try fallback
     if download_result.is_err() {
         println!("Main {} download failed, trying fallback API...", file_type);
+        
+        // Deactivate primary callback to prevent duplication
+        primary_active_clone.store(false, Ordering::Relaxed);
+        
         match fallback_url_resolver() {
             Ok(fallback_url) => {
                 println!("Using fallback URL: {}", fallback_url);
@@ -186,7 +203,10 @@ where
                     &fallback_url,
                     dest_path,
                     |pct, speed, total, downloaded, eta| {
-                        progress_callback(pct, &format!("Fallback download... ({})", speed), total, downloaded, eta);
+                        // Only update progress if primary is deactivated
+                        if !primary_active_clone.load(Ordering::Relaxed) {
+                            progress_callback(pct, &format!("Fallback download... ({})", speed), total, downloaded, eta);
+                        }
                     },
                     cancel_token,
                 ).await?;
