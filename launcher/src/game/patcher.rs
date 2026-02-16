@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
-use std::sync::{Arc, atomic::AtomicBool};
 use std::path::PathBuf;
-use std::process::Stdio;
-use tokio::io::AsyncBufReadExt;
+use std::sync::{Arc, atomic::AtomicBool};
+use tokio::process::{Command, Stdio};
 
+/// Game version information structure
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GameVersionInfo {
     pub user_version: i32,
@@ -14,527 +14,55 @@ pub struct GameVersionInfo {
     pub update_available: bool,
 }
 
-/// Implementation of the version search algorithm
-pub async fn get_version_manifest(
-    client: &reqwest::Client,
-    channel: &str,
-    base_dir: &std::path::PathBuf,
-    user_version: i32,
-) -> Result<GameVersionInfo> {
-    let local_version = crate::game::install::get_local_version(base_dir, channel)
-        .await
-        .unwrap_or(0);
-    let latest = find_latest_version(client, channel, Some(local_version)).await?;
-
-    // Generate default list (assuming all versions exist)
-    let mut available: Vec<i32> = (1..=latest).collect();
-    available.reverse(); // From newest to oldest for the UI
-
-    // Try to get real available versions from fallback
-    let available_versions_from_fallback = match crate::game::fallback::fetch_fallback_data(client).await {
-        Ok(fallback_data) => {
-            match crate::game::fallback::get_all_available_versions(&fallback_data, channel) {
-                Ok(fallback_versions) => {
-                    println!("Using {} versions from fallback API for channel {}", fallback_versions.len(), channel);
-                    Some(fallback_versions)
-                }
-                Err(e) => {
-                    println!("Failed to get versions from fallback: {}", e);
-                    None
-                }
-            }
-        }
-        Err(e) => {
-            println!("Failed to fetch fallback data: {}", e);
-            None
-        }
-    };
-
-    Ok(GameVersionInfo {
-        user_version,
-        current_local: local_version,
-        latest_remote: latest,
-        available_versions: available,
-        available_versions_from_fallback,
-        // update if user uses 0 (latest) and its local installed version is lower than latest remote
-        update_available: user_version == 0 && local_version < latest,
-    })
-}
-
-/// Installs Butler if not already installed
-pub async fn install_butler(
-    client: &reqwest::Client,
-    base_dir: &PathBuf,
-    progress_callback: impl Fn(&str, f64, &str, u64, u64, Option<String>, Option<usize>),
-    cancel_token: Option<Arc<AtomicBool>>,
-) -> Result<PathBuf> {
-    let paths = crate::game::paths::GamePaths::new(base_dir.clone());
-    let tools_dir = base_dir.join("tools").join("butler");
-    let butler_path = paths.butler();
-    tokio::fs::create_dir_all(&tools_dir).await?;
-
-    // Check if already installed
-    if butler_path.exists() {
-        let _ = crate::util::make_executable(&butler_path).await;
-        progress_callback("butler", 100.0, "Butler already installed", 0, 0, None, None);
-        return Ok(butler_path);
-    }
-
-    // Determine download URL based on OS
-    let url = match std::env::consts::OS {
-        "windows" => "https://broth.itch.zone/butler/windows-amd64/LATEST/archive/default",
-        "macos" => "https://broth.itch.zone/butler/darwin-amd64/LATEST/archive/default",
-        "linux" => "https://broth.itch.zone/butler/linux-amd64/LATEST/archive/default",
-        _ => anyhow::bail!("Unsupported OS for Butler"),
-    };
-
-    progress_callback("butler", 0.0, "Downloading Butler...", 0, 0, None, None);
-
-    let zip_path = tools_dir.join("butler.zip");
-
-    // Download with automatic fallback
-    download_with_fallback(
-        client,
-        url,
-        &zip_path,
-        |pct, speed, total, downloaded, eta| {
-            progress_callback("butler", pct.into(), &format!("Downloading Butler... ({})", speed), total, downloaded, eta, None);
-        },
-        cancel_token,
-        |fallback_data| crate::game::fallback::get_butler_url(fallback_data),
-        "Butler",
-    ).await?;
-
-    progress_callback("butler", 70.0, "Extracting Butler...", 0, 0, None, None);
-
-    // Extract using spawn_blocking to avoid UI freeze
-    let zip_path_clone = zip_path.clone();
-    let tools_dir_clone = tools_dir.clone();
-
-    tokio::task::spawn_blocking(move || -> Result<()> {
-        let file = std::fs::File::open(&zip_path_clone).context("Failed to open Butler archive")?;
-        let mut archive = zip::ZipArchive::new(file).context("Failed to read Butler archive")?;
-        archive
-            .extract(&tools_dir_clone)
-            .context("Failed to extract Butler")?;
-        Ok(())
-    })
-    .await
-    .context("Butler extraction task failed")??;
-
-    // Make executable on Unix
-    let _ = crate::util::make_executable(&butler_path).await;
-
-    // Cleanup
-    let _ = tokio::fs::remove_file(&zip_path).await;
-
-    progress_callback("butler", 100.0, "Butler installed", 0, 0, None, None);
-
-    Ok(butler_path)
-}
-
-/// Finds the latest available game version from the server
-/// Optimized with speculative parallelism and hinting
-pub async fn find_latest_version(
-    client: &reqwest::Client,
-    channel: &str,
-    start_hint: Option<i32>,
-) -> Result<i32> {
-    let os_name = std::env::consts::OS;
-    let arch = get_arch_name();
-
-    // Helper to check if a version exists on the server
-    let version_exists = |version| {
-        let url = format!(
-            "https://game-patches.hytale.com/patches/{}/{}/{}/0/{}.pwr",
-            os_name, arch, channel, version
-        );
-        let client = client.clone();
-        async move {
-            match client.head(&url).send().await {
-                Ok(resp) => resp.status().is_success(),
-                Err(_) => false,
-            }
-        }
-    };
-
-    let mut found_base = 0;
-
-    // --- STEP 0: HINTING ---
-    if let Some(hint) = start_hint {
-        if hint > 0 {
-            if version_exists(hint).await {
-                found_base = hint;
-                println!("Starting from hint: version {}", hint);
-            }
-        }
-    }
-
-    // --- STEP 1: PARALLEL SHORTCUTS ---
-    if found_base == 0 {
-        let shortcuts = vec![3000, 2000, 1000, 500, 250, 100, 50, 25, 10, 5, 1];
-        println!("Probing version shortcuts in parallel...");
-        
-        let mut futures = Vec::new();
-        for &v in &shortcuts {
-            futures.push(async move { (v, version_exists(v).await) });
-        }
-        
-        let results = futures::future::join_all(futures).await;
-        for (v, exists) in results {
-            if exists && v > found_base {
-                found_base = v;
-            }
-        }
-        
-        if found_base > 0 {
-            println!("Found base version via parallel probe: {}", found_base);
-        }
-    }
-
-    if found_base == 0 {
-        // Try fallback API
-        println!("Main server failed, trying fallback API...");
-        match crate::game::fallback::fetch_fallback_data(client).await {
-            Ok(fallback_data) => {
-                match crate::game::fallback::get_latest_version(&fallback_data, channel) {
-                    Ok(version) => {
-                        println!("Found latest version via fallback: {}", version);
-                        return Ok(version);
-                    }
-                    Err(e) => {
-                        println!("Fallback API failed to get version: {}", e);
-                    }
-                }
-            }
-            Err(e) => {
-                println!("Failed to fetch fallback data: {}", e);
-            }
-        }
-
-        // Double check if at least version 1 exists to ensure server is reachable
-        if version_exists(1).await {
-            found_base = 1;
-        } else {
-            anyhow::bail!(
-                "Cannot reach game server or no versions available for {}/{}",
-                os_name,
-                arch
-            );
-        }
-    }
-
-    // --- PHASE 1: SPECULATIVE EXPONENTIAL SEARCH ---
-    let mut lower = found_base;
-    let mut step = 1;
-    let mut upper_bound = found_base + 100; // Safe default
-    
-    println!("Exponential Search Phase (Speculative)...");
-    loop {
-        // Speculatively check next 3 powers of 2 jumps in parallel
-        let jumps = vec![step, step * 2 + step, step * 4 + step * 2 + step];
-        let mut futures = Vec::new();
-        for &j in &jumps {
-            futures.push(async move { (j, version_exists(lower + j).await) });
-        }
-        
-        let results = futures::future::join_all(futures).await;
-        
-        let mut highest_jump = 0;
-        let mut first_fail = 0;
-        for (j, exists) in results {
-            if exists { 
-                highest_jump = j; 
-            } else if first_fail == 0 {
-                first_fail = j;
-            }
-        }
-        
-        if highest_jump == 0 {
-            // All immediate jumps failed, the bound is somewhere in [lower, lower + jumps[0]]
-            upper_bound = lower + jumps[0];
-            break;
-        } else {
-            lower += highest_jump;
-            if first_fail > 0 {
-                // We found a transition: latest is in [lower, lower + (first_fail - highest_jump)]
-                upper_bound = lower + (first_fail - highest_jump);
-                break;
-            }
-            // All jumps succeeded, increase velocity and continue
-            step *= 4; 
-            println!("Found version {}, jumping further...", lower);
-        }
-        
-        if lower > 10000 { break; }
-    }
-
-    // --- PHASE 2: PARALLEL BINARY SEARCH (4-WAY) ---
-    let mut left = lower;
-    let mut right = upper_bound;
-    let mut latest = lower;
-
-    println!("Refining search in range [{}, {}] (4-Way Parallel)...", left, right);
-    
-    while left <= right {
-        if right - left < 4 {
-            // Very small range, just linear check in parallel
-            let mut futures = Vec::new();
-            // FIX: Must include 'left' because after left = best_mid + 1, 'left' is unconfirmed
-            for v in left..=right {
-                if v > latest { // Avoid re-checking if we already know 'latest'
-                    futures.push(async move { (v, version_exists(v).await) });
-                }
-            }
-            if !futures.is_empty() {
-                let results = futures::future::join_all(futures).await;
-                for (v, exists) in results {
-                    if exists && v > latest { latest = v; }
-                }
-            }
-            break;
-        }
-
-        // Split the range into 4 segments and check the 3 mid-points
-        let d = (right - left) / 4;
-        let p1 = left + d;
-        let p2 = left + 2 * d;
-        let p3 = left + 3 * d;
-        
-        let m_points = vec![p1, p2, p3];
-        let mut futures = Vec::new();
-        for &p in &m_points {
-            futures.push(async move { (p, version_exists(p).await) });
-        }
-        
-        let results = futures::future::join_all(futures).await;
-        
-        let mut best_mid = 0;
-        for (p, exists) in results {
-            if exists { best_mid = p; }
-        }
-
-        if best_mid != 0 {
-            latest = best_mid;
-            left = best_mid + 1;
-        } else {
-            // All mid-points failed, so it must be below p1
-            right = p1 - 1;
-        }
-    }
-
-    println!("Latest version found: {}", latest);
-    Ok(latest)
-}
-
-/// Downloads a server patch file with automatic fallback
-pub async fn download_server_pwr(
-    client: &reqwest::Client,
-    channel: &str,
-    target_version: i32,
-    dest: &PathBuf,
-    progress_callback: impl Fn(f32, &str, u64, u64, Option<String>),
-    cancel_token: Option<Arc<AtomicBool>>,
-) -> anyhow::Result<()> {
-    let os = std::env::consts::OS;
-    let arch = "amd64";
-    let url = format!(
-        "https://game-patches.hytale.com/patches/{}/{}/{}/0/{}.pwr",
-        os, arch, channel, target_version
-    );
-    
-    download_with_fallback(
-        client,
-        &url,
-        dest,
-        |pct, speed, total, downloaded, eta| {
-            progress_callback(pct, &speed, total, downloaded, eta);
-        },
-        cancel_token,
-        |fallback_data| crate::game::fallback::get_version_url(fallback_data, channel, 0, target_version),
-        "server PWR file",
-    ).await
-}
-
-/// Downloads a file with automatic fallback to alternative API
-pub async fn download_with_fallback<F>(
-    client: &reqwest::Client,
-    primary_url: &str,
-    dest: &PathBuf,
-    progress_callback: impl Fn(f32, &str, u64, u64, Option<String>),
-    cancel_token: Option<Arc<AtomicBool>>,
-    fallback_url_resolver: F,
-    file_type: &str,
-) -> anyhow::Result<()>
-where
-    F: FnOnce(&crate::game::fallback::FallbackAPI) -> anyhow::Result<String>,
-{
-    // Try primary download first
-    let download_result = crate::game::downloader::download_file(
-        client,
-        primary_url,
-        dest,
-        |pct, speed, total, downloaded, eta| {
-                progress_callback(pct, &speed, total, downloaded, eta);
-            },
-        cancel_token.clone(),
-    )
-    .await;
-
-    // If primary fails, try fallback
-    if download_result.is_err() {
-        println!("Main {} download failed, trying fallback API...", file_type);
-        match crate::game::fallback::fetch_fallback_data(client).await {
-            Ok(fallback_data) => {
-                match fallback_url_resolver(&fallback_data) {
-                    Ok(fallback_url) => {
-                        println!("Downloading {} from fallback: {}", file_type, fallback_url);
-                        crate::game::downloader::download_file(
-                            client,
-                            &fallback_url,
-                            dest,
-                            |pct, speed, total, downloaded, eta| {
-                progress_callback(pct, &speed, total, downloaded, eta);
-            },
-                            cancel_token,
-                        )
-                        .await?;
-                    }
-                    Err(e) => {
-                        println!("Fallback API failed to get {} URL: {}", file_type, e);
-                        return download_result; // Return original error
-                    }
-                }
-            }
-            Err(e) => {
-                println!("Failed to fetch fallback data: {}", e);
-                return download_result; // Return original error
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Downloads a PWR patch file with automatic fallback
-pub async fn download_pwr(
-    client: &reqwest::Client,
-    channel: &str,
-    prev_version: i32,
-    target_version: i32,
-    progress_callback: impl Fn(&str, f64, &str, u64, u64, Option<String>, Option<usize>),
-    cancel_token: Option<Arc<AtomicBool>>,
-) -> anyhow::Result<PathBuf> {
-    let cache_dir = crate::config::get_cache_dir("game_patches").await;
-    let os_name = std::env::consts::OS;
-    let arch = get_arch_name();
-
-    let file_name = format!("{}-{}.pwr", prev_version, target_version);
-    let dest = cache_dir.join(&file_name);
-
-    let url_remote = format!(
-        "https://game-patches.hytale.com/patches/{}/{}/{}/{}/{}.pwr",
-        os_name, arch, channel, prev_version, target_version
-    );
-
-    progress_callback(
-        "download",
-        10.0,
-        &format!(
-            "Downloading update ({} -> {})...",
-            prev_version, target_version
-        ),
-        0,
-        0,
-        None,
-        None,
-    );
-
-    // Download with automatic fallback
-    download_with_fallback(
-        client,
-        &url_remote,
-        &dest,
-        |pct, speed, total, downloaded, eta| {
-            progress_callback(
-                "download",
-                pct.into(),
-                &format!("Downloading patch... ({})", speed),
-                total,
-                downloaded,
-                eta,
-                None, // download_pwr no conoce el step actual, lo maneja install.rs
-            );
-        },
-        cancel_token,
-        |fallback_data| crate::game::fallback::get_version_url(fallback_data, channel, prev_version, target_version),
-        "PWR file",
-    ).await?;
-
-    progress_callback("download", 40.0, "PWR file downloaded", 0, 0, None, None);
-
-    Ok(dest)
-}
-
 /// Applies a PWR patch file using butler
 pub async fn apply_pwr(
-    base_dir: &PathBuf,
+    root_dir: &PathBuf,
     channel: &str,
-    pwr_file: &PathBuf,
     install_dir_name: &str,
+    pwr_path: &PathBuf,
     progress_callback: impl Fn(&str, f64, &str, u64, u64, Option<String>, Option<usize>),
+    cancel_token: Option<Arc<AtomicBool>>,
 ) -> anyhow::Result<()> {
-    let game_install_dir = base_dir.join(channel).join(install_dir_name);
-    let staging_dir = base_dir.join(channel).join("staging-temp");
+    let paths = crate::game::paths::GamePaths::new(root_dir.clone());
+    let game_dir = paths.game_dir().join(install_dir_name);
 
-    // Ensure target directory exists (Butler requirement)
-    if !game_install_dir.exists() {
-        tokio::fs::create_dir_all(&game_install_dir).await?;
-    }
+    // Ensure game directory exists
+    tokio::fs::create_dir_all(&game_dir).await
+        .context("Failed to create game directory")?;
 
-    // Clean staging directory if it exists to avoid conflicts
-    if staging_dir.exists() {
-        let _ = tokio::fs::remove_dir_all(&staging_dir).await;
-    }
-    tokio::fs::create_dir_all(&staging_dir).await?;
+    progress_callback("install", 0.0, "Applying patch...", 0, 0, None, None);
 
-    let paths = crate::game::paths::GamePaths::new(base_dir.clone());
+    // Use Butler to apply the patch
     let butler_path = paths.butler();
+    let pwr_path_absolute = std::fs::canonicalize(pwr_path)
+        .context("Failed to canonicalize PWR path")?;
 
-    // Ensure logs directory exists
-    let logs_dir = base_dir.join("logs");
-    let _ = tokio::fs::create_dir_all(&logs_dir).await;
-    let log_file_path = logs_dir.join("butler_apply.log");
-    let log_file = std::fs::File::create(&log_file_path)?;
-    let mut log_writer = std::io::BufWriter::new(log_file);
-    use std::io::Write;
+    let mut cmd = Command::new(&butler_path);
+    cmd.arg("apply")
+        .arg("--in")
+        .arg(&pwr_path_absolute)
+        .arg(&game_dir);
 
-    let mut cmd = tokio::process::Command::new(butler_path);
-
-    #[cfg(target_os = "windows")]
-    {
-        cmd.creation_flags(0x08000000);
-    }
+    progress_callback("install", 10.0, "Extracting patch...", 0, 0, None, None);
 
     let mut child = cmd
-        .arg("apply")
-        .arg("--staging-dir")
-        .arg(&staging_dir)
-        .arg(pwr_file)
-        .arg(&game_install_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()?;
+        .spawn()
+        .context("Failed to start Butler")?;
 
-    let stdout = child.stdout.take().unwrap();
-    let stderr = child.stderr.take().unwrap();
+    // Create log file for Butler output
+    let log_path = paths.logs().join(format!("butler_apply_{}.log", chrono::Utc::now().timestamp()));
+    let log_file = tokio::fs::File::create(&log_path).await
+        .context("Failed to create Butler log file")?;
+    let log_writer = tokio::io::BufWriter::new(log_file);
 
-    let mut reader = tokio::io::BufReader::new(stdout);
-    let mut err_reader = tokio::io::BufReader::new(stderr).lines();
+    let mut stdout = child.stdout.take().unwrap();
+    let mut stderr = child.stderr.take().unwrap();
 
     // Spawn a task to handle stderr
     tokio::spawn(async move {
-        while let Ok(Some(line)) = err_reader.next_line().await {
+        while let Ok(Some(line)) = stderr.next_line().await {
             eprintln!("[Butler Error] {}", line);
         }
     });
@@ -543,7 +71,7 @@ pub async fn apply_pwr(
     let mut line_buf = Vec::new();
 
     // Use read_until(b'\r') because Butler uses \r to update progress without newlines
-    while let Ok(n) = reader.read_until(b'\r', &mut line_buf).await {
+    while let Ok(n) = stdout.read_until(b'\r', &mut line_buf).await {
         if n == 0 {
             break;
         }
@@ -578,68 +106,103 @@ pub async fn apply_pwr(
     let status = child.wait().await?;
     if !status.success() {
         // --- NEW: Recovery logic ---
-        eprintln!(
-            "Butler failed. Possible corrupt patch file. Deleting: {:?}",
-            pwr_file
-        );
-
-        // If Butler fails, the .pwr file probably got corrupted (or incomplete if we didn't have atomic downloads).
-        // We delete it to force a new download next time.
-        if pwr_file.exists() {
-            let _ = tokio::fs::remove_file(pwr_file).await;
+        let stderr_output = tokio::fs::read_to_string(&log_path).await.unwrap_or_default();
+        
+        if stderr_output.contains("already up to date") {
+            println!("Game is already up to date");
+            return Ok(());
         }
-
-        // Clean up staging also
-        let _ = tokio::fs::remove_dir_all(&staging_dir).await;
-
-        anyhow::bail!("Butler failed to apply patch with status: {}", status);
+        
+        anyhow::bail!("Butler patch application failed: {}", stderr_output);
     }
 
-    // Clean up staging after success
-    let _ = tokio::fs::remove_dir_all(&staging_dir).await;
-
+    progress_callback("install", 100.0, "Patch applied successfully", 0, 0, None, None);
     Ok(())
 }
 
+/// Helper function to parse Butler progress line
 fn parse_butler_line(line: &str) -> Option<f32> {
-    // Search for the percentage before the '%' symbol
-    let parts: Vec<&str> = line.split('%').collect();
-    if let Some(first_part) = parts.get(0) {
-        let words: Vec<&str> = first_part.split_whitespace().collect();
-        if let Some(last_word) = words.last() {
-            return last_word.parse::<f32>().ok();
+    // Butler outputs progress like: "Progress: 45.23% (1234/5678)"
+    if let Some(progress_start) = line.find("Progress: ") {
+        let progress_part = &line[progress_start + 11..];
+        if let Some(percent_end) = progress_part.find('%') {
+            let percent_str = &progress_part[..percent_end];
+            return percent_str.parse().ok();
         }
     }
     None
 }
 
-fn get_arch_name() -> &'static str {
+/// Downloads a file with automatic fallback using the new patch API system
+pub async fn download_with_fallback<F>(
+    client: &reqwest::Client,
+    primary_url: &str,
+    dest_path: &PathBuf,
+    progress_callback: impl Fn(f32, &str, u64, u64, Option<String>),
+    cancel_token: Option<Arc<AtomicBool>>,
+    fallback_url_resolver: F,
+    file_type: &str,
+) -> anyhow::Result<()>
+where
+    F: FnOnce() -> anyhow::Result<String>,
+{
+    // Try primary download first
+    let download_result = crate::game::downloader::download_file(
+        client,
+        primary_url,
+        dest_path,
+        |pct, speed, total, downloaded, eta| {
+            progress_callback(pct, &speed, total, downloaded, eta);
+        },
+        cancel_token,
+    ).await;
+
+    // If primary fails, try fallback
+    if download_result.is_err() {
+        println!("Main {} download failed, trying fallback API...", file_type);
+        match fallback_url_resolver() {
+            Ok(fallback_url) => {
+                println!("Using fallback URL: {}", fallback_url);
+                crate::game::downloader::download_file(
+                    client,
+                    &fallback_url,
+                    dest_path,
+                    |pct, speed, total, downloaded, eta| {
+                        progress_callback(pct, &format!("Fallback download... ({})", speed), total, downloaded, eta);
+                    },
+                    cancel_token,
+                ).await?;
+            }
+            Err(e) => {
+                anyhow::bail!("Failed to get fallback URL: {}", e);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Cleans up the patches cache directory using the shared cache system
+pub async fn clean_patches_cache(
+    progress_callback: impl Fn(f32, &str, u64, u64, Option<String>, Option<usize>),
+) -> Result<()> {
+    let base_dir = crate::config::get_app_dir();
+    
+    progress_callback(0.0, "Cleaning patches cache...", 0, 0, None, None);
+
+    // Use the shared cache manager for cleanup
+    let cleaned = crate::game::patch_api::get_shared_cache()
+        .cleanup_old_patches(base_dir).await?;
+
+    progress_callback(100.0, &format!("Cleaned {} cache files", cleaned), 0, 0, None, None);
+    Ok(())
+}
+
+/// Helper function to get architecture name
+pub fn get_arch_name() -> &'static str {
     match std::env::consts::ARCH {
         "x86_64" => "amd64",
         "aarch64" => "arm64",
         other => other,
     }
 }
-
-pub async fn clean_patches_cache(progress_callback: &impl Fn(&str, f64, &str, u64, u64, Option<String>, Option<usize>)) -> Result<()> {
-    let patches_cache_dir = crate::config::get_cache_dir("game_patches").await;
-
-    if patches_cache_dir.exists() {
-        progress_callback("cleanup", 0.0, "Cleaning patches cache...", 0, 0, None, None);
-
-        // Delete all .pwr files in the patches directory
-        let mut entries = tokio::fs::read_dir(&patches_cache_dir).await?;
-
-        while let Some(entry) = entries.next_entry().await? {
-            let path = entry.path();
-            if path.is_file() && path.extension().map_or(false, |ext| ext == "pwr") {
-                tokio::fs::remove_file(&path).await?;
-            }
-        }
-
-        progress_callback("cleanup", 100.0, "Patch cache cleaned", 0, 0, None, None);
-    }
-
-    Ok(())
-}
-

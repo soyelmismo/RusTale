@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod auth;
 pub mod fallback;
+pub mod patch_api;
 
 pub mod downloader;
 pub mod install;

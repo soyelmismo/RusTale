@@ -188,13 +188,14 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
 
     let _java_info = crate::java_detection::ensure_java_available(&root_dir).await?;
     let _butler_path =
-        crate::game::patcher::install_butler(&client, &root_dir, &callback, None).await?;
+        crate::game::patch_api::install_butler(&client, &root_dir, &callback, None).await?;
 
     // 3. Resolver Version y Descargar Servidor
     println!("[2/5] Checking Game Server files...");
 
     let target_ver_num = if config.game_version == "latest" {
-        crate::game::patcher::find_latest_version(&client, &config.branch, None).await?
+        let manager = crate::game::patch_api::PatchApiManager::new();
+        manager.get_latest_version(&config.branch, std::env::consts::OS, crate::game::patcher::get_arch_name()).await?
     } else {
         config
             .game_version
@@ -223,7 +224,8 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
                 println!("Warning: {}", e);
                 // Fallback to original logic
                 let target_ver_num = if config.game_version == "latest" {
-                    crate::game::patcher::find_latest_version(&client, &config.branch, None).await?
+                    let manager = crate::game::patch_api::PatchApiManager::new();
+                    manager.get_latest_version(&config.branch, std::env::consts::OS, crate::game::patcher::get_arch_name()).await?
                 } else {
                     config
                         .game_version
@@ -467,34 +469,35 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         if !pwr_path.exists() {
             println!("Downloading Patch for version {}", target_ver_num);
             
-            // Download with automatic fallback (URL logic embedded)
-            if let Err(e) = crate::game::patcher::download_server_pwr(
-                &client,
-                &config.branch,
-                target_ver_num,
-                &pwr_path,
-                |pct, speed, total, downloaded, eta| {
-                    let size_info = if total > 0 {
-                        format!(" ({} / {})", 
-                            crate::game::downloader::format_bytes(downloaded), 
-                            crate::game::downloader::format_bytes(total)
-                        )
-                    } else {
-                        String::new()
-                    };
-                    
-                    let eta_info = if let Some(eta_str) = &eta {
-                        format!(" • ETA: {}", eta_str)
-                    } else {
-                        String::new()
-                    };
-                    
-                    println!("Downloading patch... {}% ({}{}{})", pct, speed, size_info, eta_info);
-                },
-                None,
-            ).await {
-                anyhow::bail!("Failed to download server patch: {}", e);
-            }
+            // Download patch directly using shared cache
+            let patch_path = crate::game::patch_api::get_shared_cache()
+                .get_or_download_patch(
+                    &client,
+                    &cache_dir,
+                    &config.branch,
+                    0, // from_version (0 means complete installation)
+                    target_ver_num,
+                    |phase, progress, msg, total, downloaded, eta, step| {
+                        let size_info = if total > 0 {
+                            format!(" ({} / {})", 
+                                crate::game::downloader::format_bytes(downloaded), 
+                                crate::game::downloader::format_bytes(total)
+                            )
+                        } else {
+                            String::new()
+                        };
+                        
+                        let eta_info = if let Some(eta_str) = &eta {
+                            format!(" • ETA: {}", eta_str)
+                        } else {
+                            String::new()
+                        };
+                        
+                        println!("Downloading patch... {}% ({}{}{})", progress, msg, size_info, eta_info);
+                    },
+                    None,
+                ).await
+                .map_err(|e| anyhow::anyhow!("Failed to download server patch: {}", e))?;
         }
 
         println!("Applying patch via Butler...");
@@ -502,9 +505,10 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         crate::game::patcher::apply_pwr(
             &root_dir,
             &config.branch,
-            &pwr_path,
             &version_dir_name,
+            &pwr_path,
             &callback,
+            None,
         )
         .await?;
 

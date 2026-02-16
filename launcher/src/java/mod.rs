@@ -9,41 +9,38 @@ struct JREPlatform {
     url: String,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize, Default)]
 struct JREJSON {
     download_url: std::collections::HashMap<String, std::collections::HashMap<String, JREPlatform>>,
 }
 
 /// Downloads and installs JRE if not already installed.
 /// Installs into `.../RusTale/tools/jre/latest` to persist across game deletions.
-/// Downloads JRE with automatic fallback
+/// Downloads JRE with automatic fallback using PatchApiManager
 pub async fn download_jre(
     client: &reqwest::Client,
     base_dir: &PathBuf,
     progress_callback: impl Fn(&str, f64, &str, u64, u64, Option<String>),
     cancel_token: Option<Arc<AtomicBool>>,
 ) -> Result<()> {
-    // Try primary JRE API first
-    let resp = client
-        .get("https://launcher.hytale.com/version/release/jre.json")
-        .send()
-        .await;
-
-    match resp {
-        Ok(response) => {
-            if response.status().is_success() {
-                let jre_data: JREJSON = response.json().await.context("Failed to parse JRE info")?;
-                download_jre_from_data(client, &jre_data, base_dir, &progress_callback, cancel_token).await
-            } else {
-                println!("Main JRE API failed, trying fallback...");
-                download_jre_fallback(client, base_dir, &progress_callback, cancel_token).await
-            }
-        }
-        Err(e) => {
-            println!("Main JRE API error: {}, trying fallback...", e);
-            download_jre_fallback(client, base_dir, &progress_callback, cancel_token).await
-        }
-    }
+    // Use PatchApiManager to get JRE URL with automatic fallback
+    let manager = crate::game::patch_api::PatchApiManager::new();
+    let jre_url = manager.get_jre_url(std::env::consts::OS, get_arch_name()).await
+        .context("Failed to get JRE URL from all providers")?;
+    
+    println!("Using JRE URL: {}", jre_url);
+    
+    // Create a simple JREJSON structure for the download function
+    let mut jre_data = JREJSON::default();
+    jre_data.download_url.insert(
+        get_os_name().to_string(),
+        std::collections::HashMap::from([(
+            get_arch_name().to_string(),
+            JREPlatform { url: jre_url }
+        )])
+    );
+    
+    download_jre_from_data(client, &jre_data, base_dir, &progress_callback, cancel_token).await
 }
 
 /// Downloads JRE from parsed data
@@ -270,96 +267,3 @@ fn extract_archive(archive_path: &PathBuf, dest_dir: &PathBuf) -> Result<()> {
 }
 
 
-async fn download_jre_fallback(
-    client: &reqwest::Client,
-    base_dir: &PathBuf,
-    progress_callback: &impl Fn(&str, f64, &str, u64, u64, Option<String>),
-    cancel_token: Option<Arc<AtomicBool>>,
-) -> anyhow::Result<()> {
-    println!("Using fallback JRE download...");
-    
-    let fallback_data = crate::game::fallback::fetch_fallback_data(client).await
-        .context("Failed to fetch fallback data")?;
-    
-    let jre_url = crate::game::fallback::get_jre_url(&fallback_data)
-        .context("Failed to get JRE URL from fallback")?;
-    
-    let paths = crate::game::paths::GamePaths::new(base_dir.clone());
-    let jre_base_dir = paths.tools().join("jre");
-    let latest_dir = jre_base_dir.join("latest");
-    let cache_dir = crate::config::get_cache_dir("jre").await;
-    tokio::fs::create_dir_all(&jre_base_dir).await?;
-    tokio::fs::create_dir_all(&cache_dir).await?;
-
-    let file_name = jre_url.split('/').last().unwrap_or("jre.zip");
-    let cache_file = cache_dir.join(file_name);
-
-    // Download if not cached
-    if !cache_file.exists() {
-        progress_callback("jre", 10.0, &format!("Downloading {} from fallback...", file_name), 0, 0, None);
-
-        crate::game::downloader::download_file(
-            client,
-            &jre_url,
-            &cache_file,
-            |pct, speed, total, downloaded, eta| {
-                let size_info = if total > 0 {
-                    format!("{} / {}", 
-                        crate::game::downloader::format_bytes(downloaded), 
-                        crate::game::downloader::format_bytes(total)
-                    )
-                } else {
-                    crate::game::downloader::format_bytes(downloaded)
-                };
-                
-                let eta_info = if let Some(eta_str) = &eta {
-                    format!(" • ETA: {}", eta_str)
-                } else {
-                    String::new()
-                };
-                
-                progress_callback(
-                    "jre",
-                    pct as f64,
-                    &format!("Downloading JRE from fallback... ({}{}{})", speed, size_info, eta_info),
-                    total,
-                    downloaded,
-                    eta,
-                );
-            },
-            cancel_token,
-        )
-        .await?;
-    }
-
-    progress_callback("jre", 70.0, "Extracting JRE...", 0, 0, None);
-
-    // Only clean up if the directory exists but doesn't contain a valid JRE
-    let should_clean = if latest_dir.exists() {
-        !crate::java::is_jre_installed_at(&latest_dir)
-    } else {
-        true // Directory doesn't exist, we need to create it
-    };
-
-    if should_clean {
-        if latest_dir.exists() {
-            tokio::fs::remove_dir_all(&latest_dir).await?;
-        }
-        tokio::fs::create_dir_all(&latest_dir).await?;
-    }
-
-    // Extract using spawn_blocking to avoid UI freeze
-    let cache_file_clone = cache_file.clone();
-    let latest_dir_clone = latest_dir.clone();
-
-    tokio::task::spawn_blocking(move || -> Result<()> {
-        extract_archive(&cache_file_clone, &latest_dir_clone)?;
-        Ok(())
-    })
-    .await
-    .context("JRE extraction task failed")??;
-
-    progress_callback("jre", 100.0, "JRE installed from fallback", 0, 0, None);
-
-    Ok(())
-}

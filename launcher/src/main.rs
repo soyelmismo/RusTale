@@ -2246,7 +2246,7 @@ impl RusTale {
 
                 Task::perform(
                     async move {
-                        let v = game::patcher::find_latest_version(&client, &chan, None)
+                        let v = game::patch_api::compat::find_latest_version_with_client(&client, &chan, None)
                             .await
                             .unwrap_or(0);
                         let base_dir = config::get_app_dir();

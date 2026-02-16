@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, atomic::AtomicBool};
 use tokio::fs;
 
-use crate::game::patcher::get_version_manifest;
+use crate::game::patch_api::compat::{get_version_manifest, download_pwr};
+use crate::game::patch_api::get_arch_name;
 
 /// Installation policy - defines the intent of the installation operation
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -188,7 +189,7 @@ pub async fn ensure_installed(
     let _java_info = crate::java_detection::ensure_java_available(base_dir).await?;
 
     // 2. Install Butler if needed
-    crate::game::patcher::install_butler(
+    crate::game::patch_api::compat::install_butler(
         client,
         base_dir,
         &progress_callback,
@@ -250,29 +251,23 @@ pub async fn ensure_installed(
     // Always find the highest complete version ≤ target for optimal downloads
     let mut highest_complete_version = 0;
     
-    // Check for complete versions in fallback data (works for both channels)
-    if version_manifest.available_versions_from_fallback.is_some() {
-        match crate::game::fallback::fetch_fallback_data(client).await {
-            Ok(fallback_data) => {
-                // Find highest complete version ≤ target
-                let available_versions = if let Some(ref fallback_versions) = version_manifest.available_versions_from_fallback {
-                    fallback_versions.clone()
-                } else {
-                    version_manifest.available_versions.clone()
-                };
-                
-                for &version in available_versions.iter().rev() { // Check from highest to lowest
-                    if version <= target_ver_val && version > 0 {
-                        if crate::game::fallback::has_complete_version(&fallback_data, channel, version) {
-                            highest_complete_version = version;
-                            println!("Found complete version {} for target {}", version, target_ver_val);
-                            break;
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                println!("DEBUG: Failed to check complete version: {}", e);
+    // Check for complete versions using PatchApiManager
+    let manager = crate::game::patch_api::PatchApiManager::new();
+    
+    // Get available versions first
+    let available_versions = if let Some(ref fallback_versions) = version_manifest.available_versions_from_fallback {
+        fallback_versions.clone()
+    } else {
+        version_manifest.available_versions.clone()
+    };
+    
+    // Find highest complete version ≤ target
+    for &version in available_versions.iter().rev() { // Check from highest to lowest
+        if version <= target_ver_val && version > 0 {
+            if manager.has_complete_version(channel, std::env::consts::OS, get_arch_name(), version).await {
+                highest_complete_version = version;
+                println!("Found complete version {} for target {}", version, target_ver_val);
+                break;
             }
         }
     }
@@ -302,7 +297,7 @@ pub async fn ensure_installed(
             Some(1), // Step 1: complete version
         );
         
-        match crate::game::patcher::download_pwr(
+        match download_pwr(
             client,
             channel,
             0,
@@ -410,7 +405,7 @@ pub async fn ensure_installed(
                 progress_callback(phase, sub_p, msg, total_bytes, downloaded_bytes, eta, Some(current_step_for_download as usize));
             };
             
-            match crate::game::patcher::download_pwr(
+            match download_pwr(
                 client,
                 channel,
                 current_download_start,
@@ -432,7 +427,7 @@ pub async fn ensure_installed(
                     
                     while next_step_index < steps.len() {
                         let future_ver = steps[next_step_index];
-                        match crate::game::patcher::download_pwr(
+                        match download_pwr(
                             client,
                             channel,
                             current_download_start,

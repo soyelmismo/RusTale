@@ -7,6 +7,9 @@ use crate::config;
 /// Inicializa la aplicacion: crea directorios necesarios y realiza limpiezas previas.
 /// Equivalente a startup() y env.CreateFolders() en Go.
 pub async fn initialize() -> Result<()> {
+    // Initialize the new patch API system
+    crate::game::patch_api::init_patch_api();
+    
     let base_dir = config::get_app_dir();
 
     // Lista de carpetas a crear

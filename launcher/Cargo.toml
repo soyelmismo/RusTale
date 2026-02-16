@@ -82,7 +82,6 @@ tower-http = { version = "0.6.2", features = ["cors", "trace"] }
 # portpicker = "0.1.1"
 regex = "1.12.2"
 
-
 # Archive extraction
 zip = { version = "7.2.0", features = ["aes-crypto", "deflate"] }
 flate2 = "1.1.8"

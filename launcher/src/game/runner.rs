@@ -205,7 +205,7 @@ impl Recipe for Runner {
                     let progress_tx = tx.clone();
                     let progress_tx_for_steps = tx.clone(); // Clone extra para UpdateTotalSteps
                     let progress_tx_for_error = tx.clone(); // Clone extra para DownloadError
-                    let result = crate::game::ensure_installed(
+                    let result = crate::game::patch_api::compat::ensure_installed(
                         &install_client,
                         &install_base,
                         &install_settings.channel,
