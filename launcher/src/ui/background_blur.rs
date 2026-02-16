@@ -37,10 +37,7 @@ impl BackgroundBlur {
             current_time: 0.0,
         }
     }
-    
-    pub fn update_time(&mut self, time: f32) {
-        self.current_time = time;
-    }
+
 }
 
 impl<Message> shader::Program<Message> for BackgroundBlur {
@@ -233,8 +230,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     color += textureSample(t_diffuse, s_diffuse, uv + vec2<f32>(0.0, -offset2)) * 0.0375;
 
     // Brillo base + animación sutil para que el 0% GPU se sienta vivo
-    let wave = sin(uniforms.time * 0.3) * 0.03;
-    let final_color = color.rgb * (0.85 + wave);
+    let wave = sin(uniforms.time * 0.1) * 0.03;
+    let final_color = color.rgb * (2 + wave);
     
     return vec4<f32>(final_color, 1.0);
 }

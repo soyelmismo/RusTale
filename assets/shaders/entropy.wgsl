@@ -11,22 +11,35 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // 1. INYECCIÓN DE ENTROPÍA (KERNEL SEEDS)
     // Convertimos los números aleatorios de Rust (alpha/transition) en coordenadas iniciales del caos.
     // Esto asegura que el patrón fractal base sea ÚNICO cada vez que abres el programa.
-    let seed_chaos_x = sin(u.alpha * 0.013); // Frecuencias arbitrarias para mezclar bits
-    let seed_chaos_y = cos(u.transition * 0.017);
+    let seed_chaos_x = sin(u.alpha * 0.0013) * 0.5 + 0.5;
+    let seed_chaos_y = cos(u.transition * 0.0017) * 0.5 + 0.5;
     
     // Zoom base variable + Zoom respiratorio más rápido
     let zoom_seed = 0.8 + (sin(u.transition * 0.02) * 0.3); 
     var pos = uv * (zoom_seed - (sin(u.time * 0.3) * 0.2));
 
-    // 2. ENTROPÍA DEL MOUSE (Estela Generadora de Llaves)
+    // 2. ENTROPÍA DEL MOUSE (Estela Generadora de Llaves) CON INERCIA EXTREMA
     // En lugar de solo mover la camara, el mouse inyecta una perturbación en el Espacio Complejo.
-    // Esto "derrite" el fractal donde pasas el mouse.
+    // Esto "derrite" el fractal donde pasas el mouse con inercia pesada.
     let m_pos = vec2<f32>(u.mouse_x, u.mouse_y);
     let dist_m = length(uv - vec2<f32>(m_pos.x, -m_pos.y));
     
-    // La "estela" es una deformación angular basada en la proximidad (más sutil)
-    let mouse_warp = 0.8 / (dist_m * 6.0 + 0.5); 
-    pos += vec2<f32>(sin(m_pos.x * 2.0 + u.time * 0.5), cos(m_pos.y * 2.0 + u.time * 0.5)) * mouse_warp * 0.1;
+    // INERCIA EXTREMA: Transformación ultra lenta del mouse directo
+    let mouse_factor = 0.005; // Ultra mínimo - casi sin reacción directa
+    // Movimiento retardado usando el tiempo como amortiguador
+    let retarded_time = u.time * 0.01; // Ultra lento
+    let mouse_influence_x = sin(retarded_time + u.mouse_x * mouse_factor) * 0.1;
+    let mouse_influence_y = cos(retarded_time * 1.2 + u.mouse_y * mouse_factor) * 0.1;
+    
+    // Combinar con movimiento base muy lento
+    let smooth_mouse_x = mouse_influence_x;
+    let smooth_mouse_y = mouse_influence_y;
+    let smooth_pos = vec2<f32>(smooth_mouse_x, smooth_mouse_y);
+    let smooth_dist = length(uv - smooth_pos);
+    
+    // La "estela" ultra débil
+    let mouse_warp = 0.15 / (smooth_dist * 15.0 + 2.0); // Mínimo impacto
+    pos += vec2<f32>(sin(smooth_pos.x * 0.5 + retarded_time), cos(smooth_pos.y * 0.5 + retarded_time)) * mouse_warp * 0.01;
 
     // Colores base con acento del tema
     let accent = vec3<f32>(u.accent_r, u.accent_g, u.accent_b);
@@ -37,9 +50,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // C es la constante mágica. Al mezclar el Seed del Kernel con el Mouse,
     // creamos un conjunto de Julia dinámico que nunca se repite.
     // Añadimos movimiento autónomo con múltiples frecuencias (mouse más sutil)
+    // MORPHING TEMPORAL: La constante base evoluciona con el tiempo
+    let morph_time = u.time * 0.1; // Velocidad del morphing
+    let morph_x = sin(morph_time) * 0.3;
+    let morph_y = cos(morph_time * 1.3) * 0.3;
+    
     let c = vec2<f32>(
-        -0.7269 + seed_chaos_x * 0.1 + (u.mouse_x * 0.1) + sin(u.time * 0.4) * 0.05, 
-        0.1889 + seed_chaos_y * 0.1 - (u.mouse_y * 0.1) + cos(u.time * 0.3) * 0.05
+        -0.7269 + seed_chaos_x * 0.1 + (u.mouse_x * 0.1) + sin(u.time * 0.4) * 0.05 + morph_x, 
+        0.1889 + seed_chaos_y * 0.1 - (u.mouse_y * 0.1) + cos(u.time * 0.3) * 0.05 + morph_y
     );
 
     // Iteración del Fractal (Híbrido Mandelbrot/Julia para máxima psicodelia)

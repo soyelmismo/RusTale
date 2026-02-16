@@ -334,7 +334,6 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
                 Ok(0) => break, // EOF (Consola cerrada o Ctrl+Z)
                 Ok(n) => {
                     if let Ok(mut writer) = stdin_writer_user.lock() {
-                        let writer: &mut std::sync::MutexGuard<'_, std::process::ChildStdin> = &mut *writer;
                         if writer.write_all(&buffer[..n]).is_err() { break; }
                         if writer.flush().is_err() { break; }
                     }
@@ -366,7 +365,6 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
 
         // INYECCIÓN QUIRÚRGICA: Escribimos "shutdown" directo a la memoria de Java
         if let Ok(mut writer) = stdin_writer_signal.lock() {
-            let writer: &mut std::sync::MutexGuard<'_, std::process::ChildStdin> = &mut *writer;
             // Escribimos "shutdown" + salto de linea explícito
             // Ignoramos resultado por si Java ya murió antes que nosotros.
             let _ = writer.write_all(b"shutdown\n");

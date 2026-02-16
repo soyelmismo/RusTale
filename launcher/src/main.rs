@@ -250,15 +250,15 @@ pub fn main() -> std::process::ExitCode {
         let is_quickplay = args.quickplay || config_initialization_mode.quickplay;
 
         // Detectar Wayland para desactivar módulos custom
-        #[cfg(target_os = "linux")]
-        let is_wayland = util::is_wayland();
-        #[cfg(not(target_os = "linux"))]
-        let is_wayland = false;
+        //#[cfg(target_os = "linux")]
+        //let is_wayland = util::is_wayland();
+        //#[cfg(not(target_os = "linux"))]
+        let is_wayland = true;
         
-        #[cfg(target_os = "linux")]
-        if is_wayland {
-            println!("[Wayland] Detectado - usando decoraciones nativas y desactivando redimensionamiento custom");
-        }
+        //#[cfg(target_os = "linux")]
+        //if is_wayland {
+        //    println!("[Wayland] Detectado - usando decoraciones nativas y desactivando redimensionamiento custom");
+        //}
 
         let res = iced::application(
             move || RusTale::new(is_quickplay),
@@ -400,6 +400,7 @@ pub enum Message {
 
     // --- MENSAJE PARA CONTROL DE MOUSE EN LSD MODE ---
     MousePressed,
+    MouseReleased, // Nuevo mensaje para cuando se suelta el mouse
     WindowEvent(window::Event),
     // ---------------------------------------------
 
@@ -539,10 +540,10 @@ impl RusTale {
         let (width, height) = config::load_width_height();
 
         // Detectar Wayland para desactivar módulos custom
-        #[cfg(target_os = "linux")]
-        let is_wayland = util::is_wayland();
-        #[cfg(not(target_os = "linux"))]
-        let is_wayland = false;
+        //#[cfg(target_os = "linux")]
+        //let is_wayland = util::is_wayland();
+        //#[cfg(not(target_os = "linux"))]
+        let is_wayland = true;
 
         // 1. API CLIENT: Fast, fails quickly if no response
         let api_client = reqwest::Client::builder()
@@ -788,7 +789,7 @@ impl RusTale {
                         Some(Message::MousePressed) 
                     }
                     iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
-                        Some(Message::ResizeReleased)
+                        Some(Message::MouseReleased)
                     }
                     _ => None,
                 }
@@ -1011,9 +1012,7 @@ impl RusTale {
                 }
 
                 // Actualizar tiempo de los shaders
-                if let Some(ref mut blur) = self.background_blur {
-                    blur.update_time(frame_time);
-                }
+                // Blur ya no necesita actualización de tiempo (estático sin wave)
                 
                 // Detectamos si hay algun modal abierto para animar el texto "dummy"
                 let is_modal_active = self.settings_state.is_open || self.mods_state.is_open;
@@ -2746,6 +2745,12 @@ impl RusTale {
                     self.current_window_pos.y + self.cursor_position.y,
                 );
 
+                Task::none()
+            }
+
+            Message::MouseReleased => {
+                self.is_mouse_pressed = false; // Resetear estado al soltar
+                self.last_mouse_release_time = std::time::Instant::now(); // Registrar cuando se solto
                 Task::none()
             }
 
