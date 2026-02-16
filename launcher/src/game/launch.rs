@@ -77,6 +77,7 @@ fn launch_game_with_agent(
     );
 
     // Configure Linux-specific environment
+    #[cfg(target_os = "linux")]
     configure_linux_env(&mut cmd, &clean_exec, &clean_work_dir)?;
 
     cmd.kill_on_drop(true);
@@ -134,8 +135,8 @@ fn build_game_command(
 }
 
 /// Configure Linux-specific environment variables for game command
+#[cfg(target_os = "linux")]
 fn configure_linux_env(cmd: &mut Command, executable_path: &PathBuf, game_working_dir: &PathBuf) -> Result<()> {
-    #[cfg(target_os = "linux")]
     {
         // 1. SDL Video Driver (Wayland/X11)
         if is_wayland() {

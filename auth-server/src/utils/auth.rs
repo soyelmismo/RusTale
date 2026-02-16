@@ -27,7 +27,7 @@ pub fn create_auth_token(username: &str, uuid: &str, port: u16, config: TokenCon
 
     let now = Utc::now().timestamp();
     let exp = (Utc::now() + chrono::Duration::seconds(config.duration_seconds)).timestamp();
-    let issuer_url = format!("http://127.0.0.1:{}", port);
+    let issuer_url = format!("http://127.0.0.000001:{}", port);
 
     // Build payload dynamically
     let mut payload = serde_json::Map::new();

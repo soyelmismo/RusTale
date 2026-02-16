@@ -183,39 +183,6 @@ pub fn get_saved_port() -> u16 {
     59313 // Default si no hay nadie corriendo
 }
 
-#[cfg(target_os = "windows")]
-pub unsafe fn get_parent_pid() -> u32 {
-    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, PROCESSENTRY32, Process32First, Process32Next, TH32CS_SNAPPROCESS,
-    };
-    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
-
-    unsafe {
-        let pid = GetCurrentProcessId();
-        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if snapshot == windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
-            return 0;
-        }
-
-        let mut entry: PROCESSENTRY32 = std::mem::zeroed();
-        entry.dwSize = std::mem::size_of::<PROCESSENTRY32>() as u32;
-
-        if Process32First(snapshot, &mut entry) != 0 {
-            loop {
-                if entry.th32ProcessID == pid {
-                    windows_sys::Win32::Foundation::CloseHandle(snapshot);
-                    return entry.th32ParentProcessID;
-                }
-                if Process32Next(snapshot, &mut entry) == 0 {
-                    break;
-                }
-            }
-        }
-        windows_sys::Win32::Foundation::CloseHandle(snapshot);
-        0
-    }
-}
-
 pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
@@ -267,7 +234,6 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
 
     // Launch the real Java
     #[cfg(target_os = "windows")]
-    use std::os::windows::process::CommandExt;
     use std::process::Command;
 
     let mut cmd = Command::new(java_real);
@@ -284,19 +250,8 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
 
     // --- NEW: JAVA AGENT INJECTION (SMART CHECK) ---
     // Use GamePaths with the proper data_dir
-    // Check if we're in server mode to use the correct agent path
-    let agent_path = if let Ok(mode) = std::env::var("AURORA_MODE") {
-        if mode == "local" || mode == "sanasol" {
-            // Server mode - use server's agent path
-            let server_dir = crate::config::get_app_dir().join("server");
-            server_dir.join("tools").join("dualauth-agent.jar")
-        } else {
-            // Client mode - use normal agent path
-            let paths = crate::game::paths::GamePaths::new(crate::config::get_app_dir());
-            paths.dualauth_agent()
-        }
-    } else {
-        // No mode specified - use normal path
+    // Always use the main app directory's tools for the agent
+    let agent_path = {
         let paths = crate::game::paths::GamePaths::new(crate::config::get_app_dir());
         paths.dualauth_agent()
     };
@@ -936,11 +891,5 @@ pub fn is_wayland() -> bool {
         }
     }
     
-    false
-}
-
-/// En sistemas no-Linux, nunca estamos en Wayland
-#[cfg(not(target_os = "linux"))]
-pub fn is_wayland() -> bool {
     false
 }
