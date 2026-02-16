@@ -27,6 +27,12 @@ static LAST_ACTIVITY: Lazy<std::sync::Mutex<Instant>> = Lazy::new(|| {
 /// Contador de giros automáticos realizados
 static AUTO_TRIM_COUNT: AtomicU64 = AtomicU64::new(0);
 
+/// Contador de giros consecutivos sin liberación significativa
+static CONSECUTIVE_WEAK_TRIMS: AtomicU64 = AtomicU64::new(0);
+
+/// Umbral de memoria para considerar que un giro fue débil (en MB)
+const WEAK_TRIM_THRESHOLD_MB: f64 = 10.0;
+
 /// Obtiene la ruta del ejecutable actual (cacheada)
 pub fn get_current_exe() -> anyhow::Result<&'static PathBuf> {
     CURRENT_EXE.as_ref().map_err(|e| anyhow::anyhow!("{}", e))
@@ -628,9 +634,19 @@ pub fn check_auto_trim() {
     }
 }
 
-/// Versión de trim_memory() para giros predictivos (menos verbose)
+/// Versión de trim_memory() para giros predictivos con auto-escalado
 fn trim_memory_predictive() {
-    trim_memory_with_level(TrimLevel::Gentle);
+    // Determinar nivel basado en giros consecutivos débiles
+    let consecutive_weak = CONSECUTIVE_WEAK_TRIMS.load(Ordering::Relaxed);
+    
+    let level = match consecutive_weak {
+        0..=2 => TrimLevel::Normal,      // Primeros 3 giros: Normal
+        3..=5 => TrimLevel::Aggressive,   // Giros 4-6: Agresivo
+        _ => TrimLevel::Extreme,            // Más de 6: Extremo
+    };
+    
+    println!("[AUTO-ESCALA] Nivel {:?} ({} giros débiles consecutivos)", level, consecutive_weak);
+    trim_memory_with_level(level);
 }
 
 /// Niveles de agresividad para el giro de memoria
@@ -656,10 +672,131 @@ pub fn trim_memory() {
     trim_memory_with_level(TrimLevel::Normal);
 }
 
+/// Detecta si el sistema Linux tiene swap o zram disponible
+fn has_swap_available() -> bool {
+    // Verificar swap tradicional en /proc/swaps
+    if let Ok(swaps) = std::fs::read_to_string("/proc/swaps") {
+        let lines: Vec<&str> = swaps.lines().collect();
+        // Ignorar la primera línea (headers), verificar si hay al menos una entrada
+        if lines.len() > 1 {
+            for line in lines.iter().skip(1) {
+                if !line.trim().is_empty() && !line.starts_with('#') {
+                    println!("[Swap] Detectado swap tradicional: {}", line.split_whitespace().next().unwrap_or("unknown"));
+                    return true;
+                }
+            }
+        }
+    }
+    
+    // Verificar zram devices en /sys/block/zram*
+    if let Ok(entries) = std::fs::read_dir("/sys/block") {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            if let Some(name_str) = name.to_str() {
+                if name_str.starts_with("zram") {
+                    // Verificar si el zram está activo (tiene tamaño > 0)
+                    let disksize_path = entry.path().join("disksize");
+                    if let Ok(size_str) = std::fs::read_to_string(disksize_path) {
+                        if let Ok(size_bytes) = size_str.trim().parse::<u64>() {
+                            if size_bytes > 0 {
+                                println!("[Swap] Detectado zram activo: {} ({} bytes)", name_str, size_bytes);
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    println!("[Swap] No se detectó swap o zram disponible");
+    false
+}
+
+/// Verifica si debemos usar comportamiento Windows-style en Linux
+fn should_use_windows_style() -> bool {
+    cfg!(target_os = "linux") && {
+        // Prioridad 1: Variable de entorno explícita
+        if let Ok(mode) = std::env::var("RUSTALE_LINUX_SWAP_MODE") {
+            return mode == "windows";
+        }
+        
+        // Prioridad 2: Auto-detección si hay swap disponible
+        if has_swap_available() {
+            println!("[Swap] Auto-activando modo Windows-style (swap detectado)");
+            return true;
+        }
+        
+        false
+    }
+}
+
+/// Fuerza a Linux a mover páginas a swap/zram (comportamiento similar a Windows)
+fn force_linux_swap_behavior() {
+    println!("[Swap] Forzando comportamiento similar a Windows en Linux...");
+    
+    unsafe {
+        // 1. Forzar a mimalloc a liberar memoria agresivamente
+        unsafe extern "C" {
+            fn mi_collect(force: bool);
+        }
+        mi_collect(true);
+        
+        // 2. Forzar a glibc a liberar memoria
+        unsafe extern "C" {
+            fn malloc_trim(pad: usize) -> i32;
+        }
+        malloc_trim(0);
+        
+        // 3. Usar madvise para indicar al kernel que las páginas no son necesarias
+        // Esto incentiva al kernel a mover las páginas a swap
+        #[cfg(target_os = "linux")]
+        {
+            use libc::{madvise, MADV_DONTNEED, MADV_SEQUENTIAL, MADV_RANDOM};
+            
+            // Intentar liberar memoria del proceso actual usando madvise
+            // Nota: Esto es experimental y puede no funcionar en todos los sistemas
+            let result = madvise(
+                std::ptr::null_mut(), 
+                0, 
+                MADV_DONTNEED
+            );
+            
+            if result == 0 {
+                println!("[Swap] madvise(MADV_DONTNEED) ejecutado exitosamente");
+            } else {
+                println!("[Swap] madvise falló (esto es normal en muchos sistemas)");
+            }
+        }
+        
+        // 4. Forzar sync para asegurar que los datos se escriban en disco
+        #[cfg(target_os = "linux")]
+        {
+            unsafe extern "C" {
+                fn sync();
+            }
+            sync();
+        }
+    }
+    
+    // 5. Opcional: Aumentar temporalmente la presión de memoria
+    // Esto incentiva al kernel a usar swap más agresivamente
+    if let Ok(_) = std::fs::write("/proc/sys/vm/vfs_cache_pressure", "100") {
+        println!("[Swap] Aumentada vfs_cache_pressure temporalmente");
+    }
+}
+
 /// Versión escalonada de trim_memory() con diferentes niveles de agresividad
 pub fn trim_memory_with_level(level: TrimLevel) {
     // Medir memoria ANTES del giro
     let before = get_memory_usage();
+    
+    // Verificar si debemos usar comportamiento Windows-style en Linux
+    let use_windows_style_linux = should_use_windows_style();
+    
+    if use_windows_style_linux {
+        println!("[Swap] Modo Windows-style activado para Linux");
+    }
     
     match level {
         TrimLevel::Gentle => {
@@ -695,16 +832,22 @@ pub fn trim_memory_with_level(level: TrimLevel) {
 
             #[cfg(target_os = "linux")]
             {
-                unsafe {
-                    unsafe extern "C" {
-                        fn mi_collect(force: bool);
-                    }
-                    mi_collect(true);
+                if use_windows_style_linux {
+                    // Comportamiento similar a Windows
+                    force_linux_swap_behavior();
+                } else {
+                    // Comportamiento Linux original
+                    unsafe {
+                        unsafe extern "C" {
+                            fn mi_collect(force: bool);
+                        }
+                        mi_collect(true);
 
-                    unsafe extern "C" {
-                        fn malloc_trim(pad: usize) -> i32;
+                        unsafe extern "C" {
+                            fn malloc_trim(pad: usize) -> i32;
+                        }
+                        malloc_trim(0);
                     }
-                    malloc_trim(0);
                 }
             }
         }
@@ -724,16 +867,22 @@ pub fn trim_memory_with_level(level: TrimLevel) {
 
                 #[cfg(target_os = "linux")]
                 {
-                    unsafe {
-                        unsafe extern "C" {
-                            fn mi_collect(force: bool);
-                        }
-                        mi_collect(true);
+                    if use_windows_style_linux {
+                        // Comportamiento similar a Windows
+                        force_linux_swap_behavior();
+                    } else {
+                        // Comportamiento Linux original
+                        unsafe {
+                            unsafe extern "C" {
+                                fn mi_collect(force: bool);
+                            }
+                            mi_collect(true);
 
-                        unsafe extern "C" {
-                            fn malloc_trim(pad: usize) -> i32;
+                            unsafe extern "C" {
+                                fn malloc_trim(pad: usize) -> i32;
+                            }
+                            malloc_trim(0);
                         }
-                        malloc_trim(0);
                     }
                 }
                 
@@ -749,18 +898,32 @@ pub fn trim_memory_with_level(level: TrimLevel) {
             // Intentar liberar cachés adicionales del sistema
             #[cfg(target_os = "linux")]
             {
-                unsafe {
-                    // Intentar liberar caché de directorios
-                    unsafe extern "C" {
-                        fn sync();
-                    }
-                    sync();
+                if use_windows_style_linux {
+                    // Comportamiento extremo similar a Windows
+                    force_linux_swap_behavior();
                     
-                    // Otra pasada de malloc_trim por si acaso
-                    unsafe extern "C" {
-                        fn malloc_trim(pad: usize) -> i32;
+                    // Intentos adicionales de liberación
+                    unsafe {
+                        unsafe extern "C" {
+                            fn malloc_trim(pad: usize) -> i32;
+                        }
+                        malloc_trim(0);
                     }
-                    malloc_trim(0);
+                } else {
+                    // Comportamiento Linux original
+                    unsafe {
+                        // Intentar liberar caché de directorios
+                        unsafe extern "C" {
+                            fn sync();
+                        }
+                        sync();
+                        
+                        // Otra pasada de malloc_trim por si acaso
+                        unsafe extern "C" {
+                            fn malloc_trim(pad: usize) -> i32;
+                        }
+                        malloc_trim(0);
+                    }
                 }
             }
         }
@@ -773,6 +936,17 @@ pub fn trim_memory_with_level(level: TrimLevel) {
         let freed = before.saturating_sub(after);
         let freed_mb = freed as f64 / 1024.0 / 1024.0;
         let after_mb = after as f64 / 1024.0 / 1024.0;
+        
+        // Auto-escalado: contar giros débiles
+        if freed_mb < WEAK_TRIM_THRESHOLD_MB {
+            let weak_count = CONSECUTIVE_WEAK_TRIMS.fetch_add(1, Ordering::Relaxed) + 1;
+            println!("[AUTO-ESCALA] ⚠️ Giro débil: {:.1} MB (< {} MB). Total débiles: {}", 
+                freed_mb, WEAK_TRIM_THRESHOLD_MB, weak_count);
+        } else {
+            // Resetear contador si el giro fue efectivo
+            CONSECUTIVE_WEAK_TRIMS.store(0, Ordering::Relaxed);
+            println!("[AUTO-ESCALA] ✅ Giro efectivo: {:.1} MB. Reset contador de giros débiles", freed_mb);
+        }
         
         let level_emoji = match level {
             TrimLevel::Gentle => "🌸",

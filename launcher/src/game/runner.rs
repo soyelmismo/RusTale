@@ -187,9 +187,12 @@ impl Recipe for Runner {
                 let (res_tx, mut res_rx) = mpsc::channel(1);
 
                 let install_settings = settings.clone();
-                let install_base = base_dir.clone();
                 let install_client = client.clone();
-
+                let install_base = base_dir.clone();
+                let install_client_clone = install_client.clone();
+                let install_base_clone = install_base.clone();
+                let install_channel_clone = install_settings.channel.clone();
+                
                 tokio::spawn(async move {
                     let progress_tx = tx.clone();
                     let progress_tx_for_steps = tx.clone(); // Clone extra para UpdateTotalSteps
@@ -250,6 +253,20 @@ impl Recipe for Runner {
                 match res_rx.recv().await {
                     Some(Ok(_)) => {
                         println!("[Install] Installation completed successfully, preparing to launch");
+                        
+                        // Save version.json for latest installations
+                        if install_settings.game_version == 0 {
+                            let version_info = crate::game::patch_api::PatchApiFrontend::get_instance()
+                                .get_version_info(&install_client_clone, &install_base_clone, &install_channel_clone, 0).await;
+                            if let Ok(info) = version_info {
+                                if let Err(e) = crate::game::install::save_local_version(&install_base_clone, &install_channel_clone, info.latest_remote).await {
+                                    println!("[WARNING] Failed to save version.json: {}", e);
+                                } else {
+                                    println!("[INFO] Saved version.json for latest version: {}", info.latest_remote);
+                                }
+                            }
+                        }
+                        
                         let _ = output
                             .send(Message::ProgressUpdate(crate::game::progress::ProgressPayload {
                                 global_progress: 1.0, // 100%

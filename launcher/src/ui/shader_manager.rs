@@ -1,10 +1,14 @@
 use rust_embed::RustEmbed;
+use std::sync::OnceLock;
 
 // Definimos la ubicacion de los assets relativa al Cargo.toml de 'launcher'
 // Como 'assets' esta en la raiz del workspace (un nivel arriba de launcher), usamos "../"
 #[derive(RustEmbed)]
 #[folder = "../assets/shaders"]
 struct ShaderAssets;
+
+// Almacenamiento global para los shaders cargados
+static SHADER_CACHE: OnceLock<Vec<String>> = OnceLock::new();
 
 /// Estructura comun de Uniforms que se antepone a todos los shaders.
 /// Garantiza que los shaders externos no necesiten definirla y evita errores.
@@ -54,24 +58,65 @@ fn vs_main(@builtin(vertex_index) v_index: u32) -> VertexOutput {
 }
 "#;
 
-pub fn build_uber_shader() -> String {
-
-    // Cargar el archivo especifico
-    let entropy_src = if let Some(file) = ShaderAssets::get("entropy.wgsl") {
-        match String::from_utf8(file.data.to_vec()) {
-            Ok(s) => s,
-            Err(_) => super::lsd_shader::DEFAULT_FALLBACK.to_string(),
+fn load_all_shaders() -> Vec<String> {
+    let mut shaders = Vec::new();
+    
+    // Lista de shaders conocidos en orden específico
+    let shader_files = vec!["mandelbulb.wgsl", "entropy.wgsl"];
+    
+    for file_name in shader_files {
+        if let Some(file) = ShaderAssets::get(file_name) {
+            match String::from_utf8(file.data.to_vec()) {
+                Ok(shader_code) => {
+                    println!("[SHADER] Loaded: {}", file_name);
+                    shaders.push(shader_code);
+                }
+                Err(e) => {
+                    eprintln!("[SHADER] Failed to load {}: {}", file_name, e);
+                    // Agregar fallback si falla la carga
+                    shaders.push(super::lsd_shader::DEFAULT_FALLBACK.to_string());
+                }
+            }
+        } else {
+            eprintln!("[SHADER] Shader file not found: {}", file_name);
+            // Agregar fallback si no se encuentra
+            shaders.push(super::lsd_shader::DEFAULT_FALLBACK.to_string());
         }
+    }
+    
+    // Si no se cargó ningún shader, agregar el fallback
+    if shaders.is_empty() {
+        println!("[SHADER] No shaders loaded, using fallback");
+        shaders.push(super::lsd_shader::DEFAULT_FALLBACK.to_string());
+    }
+    
+    shaders
+}
+
+pub fn build_uber_shader() -> String {
+    build_uber_shader_with_index(0)
+}
+
+pub fn build_uber_shader_with_index(shader_index: usize) -> String {
+    // Inicializar el cache si no está cargado
+    let shaders = SHADER_CACHE.get_or_init(|| load_all_shaders());
+    
+    // Obtener el shader solicitado con fallback al primero si el índice es inválido
+    let shader_src = if shader_index < shaders.len() {
+        &shaders[shader_index]
     } else {
-        super::lsd_shader::DEFAULT_FALLBACK.to_string()
+        println!("[SHADER] Invalid shader index {}, falling back to index 0", shader_index);
+        &shaders[0]
     };
 
     // The HEADER provides Uniforms, u, VertexOutput, vs_main, and rot()
-    // We simply append the logic from entropy.wgsl
-    format!("{}\n{}", HEADER, entropy_src)
+    // We simply append the logic from the selected shader
+    format!("{}\n{}", HEADER, shader_src)
 }
 
 pub fn get_shader_count() -> usize {
-    1 // Solo existe el Universo
+    // Inicializar el cache si no está cargado
+    let shaders = SHADER_CACHE.get_or_init(|| load_all_shaders());
+    shaders.len()
 }
 

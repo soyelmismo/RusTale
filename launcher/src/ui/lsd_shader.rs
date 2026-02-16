@@ -61,18 +61,18 @@ impl LsdShader {
         
         // Generar 2 floats de entropía pura del sistema
         let mut rng = rand::rng(); 
-        // alpha sera nuestra 'Primary Seed' (X axis shift)
-        let entropy_seed_1: f32 = rng.random_range(0.0..1000.0);
-        // transition sera nuestra 'Secondary Seed' (Y axis shift)
-        let entropy_seed_2: f32 = rng.random_range(0.0..1000.0);
+        // Usamos alpha como el "spikiness" de las paredes del túnel (1.0 a 2.0 para rendimiento óptimo)
+        let tunnel_spikiness: f32 = rng.random_range(1.0..2.0);
+        // Usamos transition como semilla para el "Environment Phase"
+        let env_seed: f32 = rng.random_range(0.0..100.0);
 
         Self {
             current_time: 0.0,
             mouse_pos,
             accent,
             shader_id: 0, 
-            alpha: entropy_seed_1,      // Inyeccion de caos #1
-            transition: entropy_seed_2,  // Inyeccion de caos #2
+            alpha: tunnel_spikiness,   // Inyectado como u.alpha
+            transition: env_seed,      // Inyectado como u.transition
             intensity,
             click_intensity: 0.0,
             last_click_time: Instant::now(),

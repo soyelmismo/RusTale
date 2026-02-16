@@ -308,16 +308,17 @@ pub fn main() -> std::process::ExitCode {
 
 
 
-    // 3. SINGLE INSTANCE CHECK
+    crate::util::trim_memory_with_level(crate::util::TrimLevel::Extreme);
+
+    println!("[INIT] ✅ Limpieza inicial completada");
+
+
+    // 4. SINGLE INSTANCE CHECK
 
     let lock_name = if args.dedicated_server {
-
         "RusTaleServer_Lock"
-
     } else {
-
         "RusTaleLauncher_Lock"
-
     };
 
     let instance = SingleInstance::new(lock_name).unwrap();
@@ -806,6 +807,8 @@ pub enum Message {
 
     NextShader,
 
+    NextShaderManual, // Para cambio manual sin restricciones
+
 
 
     ServerPatchProgress(f32),
@@ -1194,11 +1197,15 @@ impl RusTale {
 
         let total_shaders = std::panic::catch_unwind(|| {
 
-            let shader_code = crate::ui::shader_manager::build_uber_shader();
+            // Inicializar el sistema de shaders cargando todos los disponibles
+
+            let shader_count = crate::ui::shader_manager::get_shader_count();
+
+            let shader_code = crate::ui::shader_manager::build_uber_shader_with_index(0);
 
             lsd_shader::set_global_wgsl(shader_code);
 
-            crate::ui::shader_manager::get_shader_count()
+            shader_count
 
         })
 
@@ -1752,7 +1759,7 @@ impl RusTale {
 
 
 
-        let keyboard_sub = if is_interactive {
+        let keyboard_sub = if is_interactive || lsd_active {
 
             iced::event::listen_with(|event, _status, _window_id| {
 
@@ -1760,13 +1767,13 @@ impl RusTale {
 
                     match key {
 
-                        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowRight) => Some(Message::NextShader),
+                        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowRight) => Some(Message::NextShaderManual),
 
-                        iced::keyboard::Key::Character(s) if s.as_str() == "s" => Some(Message::NextShader),
+                        iced::keyboard::Key::Character(s) if s.as_str() == "s" => Some(Message::NextShaderManual),
 
-                        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowLeft) => Some(Message::NextShader),
+                        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowLeft) => Some(Message::NextShaderManual),
 
-                        iced::keyboard::Key::Character(a) if a.as_str() == "a" => Some(Message::NextShader),
+                        iced::keyboard::Key::Character(a) if a.as_str() == "a" => Some(Message::NextShaderManual),
 
                         iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp) => Some(Message::News(NewsMessage::ScrollOffsetChanged(-30.0))),
 
@@ -2225,24 +2232,21 @@ impl RusTale {
                     }
 
                 } else {
-
                     self.shader_change_timer += dt; 
 
                     if self.shader_change_timer > 30.0 {
-
                         self.shader_change_timer = 0.0;
 
                         self.next_shader_idx =
-
                             (self.active_shader_idx + 1) % self.total_shaders_available;
 
                         self.shader_transition = 0.01; 
-
+                        
+                        // Actualizar el shader global con el nuevo índice para rotación automática
+                        let new_shader_code = crate::ui::shader_manager::build_uber_shader_with_index(self.next_shader_idx as usize);
+                        crate::ui::lsd_shader::set_global_wgsl(new_shader_code);
                     }
-
                 }
-
-
 
                 if tasks.is_empty() {
 
@@ -2325,27 +2329,38 @@ impl RusTale {
                 self.last_mouse_release_time = std::time::Instant::now(); 
 
                 Some(Task::none())
-
             }
 
-
-
             Message::NextShader => {
-
                 if self.settings.theme.lsd_mode && self.shader_transition <= 0.0 {
-
                     self.next_shader_idx =
-
                         (self.active_shader_idx + 1) % self.total_shaders_available;
-
                     self.shader_transition = 0.01;
-
                     self.shader_change_timer = 0.0;
-
+                    
+                    // Actualizar el shader global con el nuevo índice
+                    let new_shader_code = crate::ui::shader_manager::build_uber_shader_with_index(self.next_shader_idx as usize);
+                    crate::ui::lsd_shader::set_global_wgsl(new_shader_code);
                 }
 
                 Some(Task::none())
+            }
 
+            Message::NextShaderManual => {
+                if self.settings.theme.lsd_mode {
+                    // Forzar cambio inmediato sin esperar a que termine la transición
+                    self.active_shader_idx = self.next_shader_idx;
+                    self.next_shader_idx =
+                        (self.active_shader_idx + 1) % self.total_shaders_available;
+                    self.shader_transition = 0.01;
+                    self.shader_change_timer = 0.0;
+                    
+                    // Actualizar el shader global con el nuevo índice
+                    let new_shader_code = crate::ui::shader_manager::build_uber_shader_with_index(self.next_shader_idx as usize);
+                    crate::ui::lsd_shader::set_global_wgsl(new_shader_code);
+                }
+
+                Some(Task::none())
             }
 
             
@@ -2845,6 +2860,8 @@ impl RusTale {
             | Message::ResizeReleased
 
             | Message::NextShader
+
+            | Message::NextShaderManual
 
             | Message::WindowResized(_)
 

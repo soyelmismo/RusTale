@@ -200,22 +200,22 @@ impl SmoothTranslateState {
 
         // --- 3. JITTER "HIPNoTICO" (Frecuencia que se intensifica con la quietud) ---
         let center_dist = mouse_pos.distance(bounds.center());
-        let jitter_multiplier = (1.0 + (center_dist / 200.0)).min(2.5);
+        let jitter_multiplier = (1.0 + (center_dist / 300.0)).min(1.8); // Reducido de 2.5 a 1.8
 
-        // Intensificar jitter basado en la quietud del mouse
-        let jitter_intensify_factor = 1.0 + (new_stillness * 2.0); // Multiplica hasta 3x el jitter cuando esta quieto
+        // Intensificar jitter basado en la quietud del mouse (reducido)
+        let jitter_intensify_factor = 1.0 + (new_stillness * 0.5); // Reducido de 2.0 a 0.5 (máximo 1.5x)
 
         // CAMBIO: Multiplicamos el resultado del seno/coseno por `intensity`
-        // Esto asegura que si intensity es 0.0 (inicio de la transicion),
+        // Esto asegura que si intensity es 0.0 (inicio de la transición),
         // el jitter sea matematicamente 0.0 (quietud total).
         let jitter = Vector::new(
-            (time * 3.5 + offset.x * 0.1).sin()
-                * 0.15
+            (time * 1.8 + offset.x * 0.1).sin() // Reducido de 3.5 a 1.8
+                * 0.08 // Reducido de 0.15 a 0.08
                 * jitter_multiplier
                 * intensity
                 * jitter_intensify_factor,
-            (time * 4.2 + offset.y * 0.13).cos()
-                * 0.15
+            (time * 2.1 + offset.y * 0.13).cos() // Reducido de 4.2 a 2.1
+                * 0.08 // Reducido de 0.15 a 0.08
                 * jitter_multiplier
                 * intensity
                 * jitter_intensify_factor,
@@ -535,10 +535,10 @@ pub fn lsd_magic_text<'a, M: 'a>(
     let mut row = iced::widget::row![].spacing(0);
 
     for (i, c) in label.chars().enumerate() {
-        // Onda mucho mas sincronizada (0.08 en lugar de 0.5) para que las letras se muevan juntas
-        let t = ctx.time * 1.8 + (i as f32 * 0.08);
-        let off_x = (t * 1.2).sin() * 2.0;
-        let off_y = (t * 0.8).cos() * 2.0;
+        // Onda mucho mas suave y lenta para evitar temblor excesivo
+        let t = ctx.time * 0.8 + (i as f32 * 0.08);
+        let off_x = (t * 0.6).sin() * 1.0; // Reducido frecuencia y amplitud
+        let off_y = (t * 0.4).cos() * 1.0; // Reducido frecuencia y amplitud
 
         let char_el = iced::widget::text(c.to_string())
             .size(14)
@@ -1706,10 +1706,10 @@ fn get_seeded_disparity(offset: (f32, f32), seed: usize, intensity: f32) -> (f32
     let hash_x = ((s * 12.9898).fract() * 43758.5453).fract();
     let hash_y = ((s * 78.233).fract() * 43758.5453).fract();
     
-    // 2. Componente caótico temporal con múltiples frecuencias primas (no armónicas)
-    let t1 = offset.0 * 1.3;  // Frecuencia prima 1
-    let t2 = offset.1 * 2.7;  // Frecuencia prima 2 (no armónica de 1.3)
-    let t3 = (offset.0 + offset.1) * 5.3;  // Frecuencia prima 3
+    // 2. Componente caótico temporal con frecuencias reducidas para evitar temblor
+    let t1 = offset.0 * 0.4;  // Reducido de 1.3 a 0.4
+    let t2 = offset.1 * 0.7;  // Reducido de 2.7 a 0.7
+    let t3 = (offset.0 + offset.1) * 1.1;  // Reducido de 5.3 a 1.1
     
     // 3. Mapa caótico no lineal (evita patrones predecibles)
     let chaos_x = (t1.sin() * 0.5 + t2.cos() * 0.3 + (t1 * t3).sin() * 0.2) * hash_x;

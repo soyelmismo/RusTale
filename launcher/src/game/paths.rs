@@ -156,10 +156,11 @@ impl GamePaths {
     }
 
     /// Java Agent path
-    /// Automatically creates directory if it doesn't exist
+    /// Ensures the tools directory exists but does not create the JAR file as a directory
     pub fn dualauth_agent(&self) -> PathBuf {
         let path = self.tools().join("dualauth-agent.jar");
-        let _ = self.ensure_dir(&path).expect("Failed to create dualauth agent path");
+        // Only ensure the parent directory (tools) exists, not the JAR file itself
+        let _ = self.ensure_dir(&self.tools()).expect("Failed to create tools directory");
         path
     }
 
