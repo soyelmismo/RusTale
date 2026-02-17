@@ -63,24 +63,34 @@ impl WeightedProgressTracker {
             if let Some(pos) = t.phases.iter().position(|p| p.id == phase_id) {
                 t.current_phase_index = pos;
                 // Sum weights of all previous phases
-                t.accumulated_weight = t.phases.iter()
-                    .take(pos)
-                    .map(|p| p.weight)
-                    .sum();
+                t.accumulated_weight = t.phases.iter().take(pos).map(|p| p.weight).sum();
             }
         }
     }
 
     /// Update progress for current phase
-    pub fn report(tracker: &Arc<Mutex<Self>>, step_pct: f32, key: &str, args: Vec<String>, stats: Option<DownloadStats>) {
+    pub fn report(
+        tracker: &Arc<Mutex<Self>>,
+        step_pct: f32,
+        key: &str,
+        args: Vec<String>,
+        stats: Option<DownloadStats>,
+    ) {
         if let Ok(t) = tracker.lock() {
-            let current_weight = t.phases.get(t.current_phase_index)
+            let current_weight = t
+                .phases
+                .get(t.current_phase_index)
                 .map(|p| p.weight)
                 .unwrap_or(0.0);
-            
-            // Normalized input 0.0-1.0 or 0.0-100.0 detection? 
+
+            // Normalized input 0.0-1.0 or 0.0-100.0 detection?
             // We assume input is 0.0 to 1.0. If > 1.0, clamp or normalize.
-            let step_norm = if step_pct > 1.0 && step_pct <= 100.0 { step_pct / 100.0 } else { step_pct }.clamp(0.0, 1.0);
+            let step_norm = if step_pct > 1.0 && step_pct <= 100.0 {
+                step_pct / 100.0
+            } else {
+                step_pct
+            }
+            .clamp(0.0, 1.0);
 
             let global = (t.accumulated_weight + (step_norm * current_weight)) / t.total_weight;
 
@@ -97,7 +107,12 @@ impl WeightedProgressTracker {
     }
 
     /// Update progress for current phase without message args (convenience method)
-    pub fn report_simple(tracker: &Arc<Mutex<Self>>, step_pct: f32, key: &str, stats: Option<DownloadStats>) {
+    pub fn report_simple(
+        tracker: &Arc<Mutex<Self>>,
+        step_pct: f32,
+        key: &str,
+        stats: Option<DownloadStats>,
+    ) {
         Self::report(tracker, step_pct, key, vec![], stats)
     }
 }

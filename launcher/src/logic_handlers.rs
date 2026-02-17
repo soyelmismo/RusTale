@@ -1,8 +1,7 @@
 /// Logic handlers for core business operations
 /// This module contains all the heavy Task-creating logic that was previously in main.rs
-
 use crate::config;
-use crate::game::{self, install::InstallPolicy, GamePaths, LauncherStatus};
+use crate::game::{self, GamePaths, LauncherStatus, install::InstallPolicy};
 use crate::{Message, RusTale};
 use iced::Task;
 use std::sync::atomic::Ordering;
@@ -79,8 +78,7 @@ impl RusTale {
             }
             LauncherStatus::Busy => {
                 // If "busy" for more than 30 seconds, allow re-check
-                self.running_game.is_none()
-                    && self.last_status_change.elapsed().as_secs() > 30
+                self.running_game.is_none() && self.last_status_change.elapsed().as_secs() > 30
             }
             _ => false,
         };
@@ -110,19 +108,15 @@ impl RusTale {
         let cached_version = self.latest_version;
 
         Task::perform(
-            async move {
-                game::calculate_status(&client, &settings, &paths, cached_version).await
-            },
-            move |(status, latest)| {
-                Message::DryRunFinished(settings_for_closure, status, latest)
-            },
+            async move { game::calculate_status(&client, &settings, &paths, cached_version).await },
+            move |(status, latest)| Message::DryRunFinished(settings_for_closure, status, latest),
         )
     }
 
     /// Handles version check request
     pub(crate) fn logic_request_version_check(&self, channel: String) -> Task<Message> {
         let frontend = self.services.patcher.clone();
-        
+
         Task::perform(
             async move {
                 match frontend.find_latest_version(&channel, None).await {
@@ -176,8 +170,9 @@ impl RusTale {
                         |payload| {
                             // For repair operations, we'll log progress
                             // The UI updates will be handled by the main download flow
-                            println!("[Repair] {:.1}% - {}", 
-                                payload.global_progress * 100.0, 
+                            println!(
+                                "[Repair] {:.1}% - {}",
+                                payload.global_progress * 100.0,
                                 payload.message_key
                             );
                         },

@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use std::sync::atomic;
 use tokio::fs;
 
-
 /// Installation policy - defines the intent of the installation operation
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum InstallPolicy {

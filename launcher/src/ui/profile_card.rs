@@ -196,7 +196,7 @@ pub fn view<'a>(
                         tooltip(
                             theme::magic_button(
                                 button(theme::svg(
-                                        svg(util::icons::icon(util::icons::PERSON))
+                                    svg(util::icons::icon(util::icons::PERSON))
                                         .width(12)
                                         .height(12)
                                         .style(move |t, s| theme::svg_accent(&palette, t, s))

@@ -55,10 +55,7 @@ impl ProfilesConfig {
 
     pub fn add_profile(&mut self, name: String) {
         let new_id = Uuid::new_v4();
-        let new_profile = Profile {
-            id: new_id,
-            name,
-        };
+        let new_profile = Profile { id: new_id, name };
         self.current_profile = new_profile.id;
         self.profiles.push(new_profile);
     }

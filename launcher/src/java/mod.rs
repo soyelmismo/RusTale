@@ -2,10 +2,7 @@ use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::sync::atomic;
 
-
 pub mod proxy;
-
-
 
 /// Gets the path to the Java executable from the tools/jre/latest directory
 pub fn get_java_exec(base_dir: &PathBuf) -> Result<String> {

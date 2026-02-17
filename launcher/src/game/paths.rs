@@ -20,10 +20,8 @@ impl GamePaths {
     pub fn ensure_dir(&self, path: &PathBuf) -> anyhow::Result<PathBuf> {
         if !path.exists() {
             println!("[Paths] Creating directory: {}", path.display());
-            let result = tokio::task::block_in_place(|| {
-                std::fs::create_dir_all(path)
-            });
-            
+            let result = tokio::task::block_in_place(|| std::fs::create_dir_all(path));
+
             match result {
                 Ok(_) => {
                     println!("[Paths] Directory created: {}", path.display());
@@ -33,16 +31,19 @@ impl GamePaths {
                 }
             }
         }
-        
+
         // Double-verify the directory exists to prevent race conditions
         if !path.exists() {
-            anyhow::bail!("Directory verification failed: {} does not exist after creation attempt", path.display());
+            anyhow::bail!(
+                "Directory verification failed: {} does not exist after creation attempt",
+                path.display()
+            );
         }
-        
+
         if !path.is_dir() {
             anyhow::bail!("Path exists but is not a directory: {}", path.display());
         }
-        
+
         Ok(path.to_path_buf())
     }
 
@@ -54,27 +55,28 @@ impl GamePaths {
     /// JRE installation directory
     pub fn jre(&self) -> PathBuf {
         let jre_path = self.tools().join("jre").join("latest");
-        self.ensure_dir(&jre_path).expect("Failed to create JRE directory")
+        self.ensure_dir(&jre_path)
+            .expect("Failed to create JRE directory")
     }
 
     /// Java executable path
     pub fn java_exec(&self) -> PathBuf {
         let bin_dir = self.jre().join("bin");
-        self.ensure_dir(&bin_dir).expect("Failed to create Java bin directory").join(if cfg!(windows) {
-            "java.exe"
-        } else {
-            "java"
-        })
+        self.ensure_dir(&bin_dir)
+            .expect("Failed to create Java bin directory")
+            .join(if cfg!(windows) { "java.exe" } else { "java" })
     }
 
     /// Butler executable path
     pub fn butler(&self) -> PathBuf {
         let butler_dir = self.tools().join("butler");
-        self.ensure_dir(&butler_dir).expect("Failed to create Butler directory").join(if cfg!(windows) {
-            "butler.exe"
-        } else {
-            "butler"
-        })
+        self.ensure_dir(&butler_dir)
+            .expect("Failed to create Butler directory")
+            .join(if cfg!(windows) {
+                "butler.exe"
+            } else {
+                "butler"
+            })
     }
 
     /// Returns the directory where a version SHOULD be installed
@@ -88,7 +90,8 @@ impl GamePaths {
             version_str
         };
         let path = self.channel_dir(channel).join(folder_name);
-        self.ensure_dir(&path).expect("Failed to create version directory");
+        self.ensure_dir(&path)
+            .expect("Failed to create version directory");
         path
     }
 
@@ -117,7 +120,9 @@ impl GamePaths {
     /// Automatically creates directory if it doesn't exist
     pub fn mods_dir(&self, channel: &str, version_str: &str) -> PathBuf {
         let path = self.version_dir(channel, version_str).join("Mods");
-        let _ = self.ensure_dir(&path).expect("Failed to create mods directory");
+        let _ = self
+            .ensure_dir(&path)
+            .expect("Failed to create mods directory");
         path
     }
 
@@ -126,7 +131,9 @@ impl GamePaths {
     /// Automatically creates directory if it doesn't exist
     pub fn disabled_mods_dir(&self, channel: &str, version_str: &str) -> PathBuf {
         let path = self.version_dir(channel, version_str).join("DisabledMods");
-        let _ = self.ensure_dir(&path).expect("Failed to create disabled mods directory");
+        let _ = self
+            .ensure_dir(&path)
+            .expect("Failed to create disabled mods directory");
         path
     }
 
@@ -135,7 +142,9 @@ impl GamePaths {
     /// Automatically creates directory if it doesn't exist
     pub fn core_patches_dir(&self, channel: &str, version_str: &str) -> PathBuf {
         let path = self.version_dir(channel, version_str).join("CorePatches");
-        let _ = self.ensure_dir(&path).expect("Failed to create core patches directory");
+        let _ = self
+            .ensure_dir(&path)
+            .expect("Failed to create core patches directory");
         path
     }
 
@@ -143,7 +152,9 @@ impl GamePaths {
     /// Automatically creates directory if it doesn't exist
     pub fn user_data(&self) -> PathBuf {
         let path = self.root.join("UserData");
-        let _ = self.ensure_dir(&path).expect("Failed to create user data directory");
+        let _ = self
+            .ensure_dir(&path)
+            .expect("Failed to create user data directory");
         path
     }
 
@@ -151,7 +162,9 @@ impl GamePaths {
     /// Automatically creates directory if it doesn't exist
     pub fn channel_dir(&self, channel: &str) -> PathBuf {
         let path = self.root.join(channel);
-        let _ = self.ensure_dir(&path).expect("Failed to create channel directory");
+        let _ = self
+            .ensure_dir(&path)
+            .expect("Failed to create channel directory");
         path
     }
 
@@ -160,7 +173,9 @@ impl GamePaths {
     pub fn dualauth_agent(&self) -> PathBuf {
         let path = self.tools().join("dualauth-agent.jar");
         // Only ensure the parent directory (tools) exists, not the JAR file itself
-        let _ = self.ensure_dir(&self.tools()).expect("Failed to create tools directory");
+        let _ = self
+            .ensure_dir(&self.tools())
+            .expect("Failed to create tools directory");
         path
     }
 
@@ -173,7 +188,9 @@ impl GamePaths {
     /// Automatically creates directory if it doesn't exist
     pub fn logs(&self) -> PathBuf {
         let path = self.root.join("logs");
-        let _ = self.ensure_dir(&path).expect("Failed to create logs directory");
+        let _ = self
+            .ensure_dir(&path)
+            .expect("Failed to create logs directory");
         path
     }
 
@@ -181,7 +198,9 @@ impl GamePaths {
     /// Automatically creates directory if it doesn't exist
     pub fn staging(&self) -> PathBuf {
         let path = self.root.join("staging");
-        let _ = self.ensure_dir(&path).expect("Failed to create staging directory");
+        let _ = self
+            .ensure_dir(&path)
+            .expect("Failed to create staging directory");
         path
     }
 }

@@ -30,8 +30,11 @@ pub async fn calculate_status(
 ) -> (LauncherStatus, Option<i32>) {
     let channel = &settings.channel;
     let is_latest_mode = settings.game_version == 0;
-    
-    println!("[DEBUG] calculate_status - channel: {}, is_latest_mode: {}, cached: {:?}", channel, is_latest_mode, cached_remote_latest);
+
+    println!(
+        "[DEBUG] calculate_status - channel: {}, is_latest_mode: {}, cached: {:?}",
+        channel, is_latest_mode, cached_remote_latest
+    );
 
     // Determine version string for folder lookup
     let version_str = if is_latest_mode {
@@ -44,7 +47,11 @@ pub async fn calculate_status(
     let exe_path = paths.client_exe(channel, &version_str);
 
     let is_installed = tokio::fs::metadata(&exe_path).await.is_ok();
-    println!("[DEBUG] Game installed at {}: {}", exe_path.display(), is_installed);
+    println!(
+        "[DEBUG] Game installed at {}: {}",
+        exe_path.display(),
+        is_installed
+    );
 
     if !is_installed {
         // Game not installed at all
@@ -56,7 +63,10 @@ pub async fn calculate_status(
     if is_installed {
         let game_dir = paths.version_dir(channel, &version_str);
         let integrity_checker = crate::game::patch_api::IntegrityChecker::new();
-        match integrity_checker.verify_extraction_integrity(&game_dir).await {
+        match integrity_checker
+            .verify_extraction_integrity(&game_dir)
+            .await
+        {
             Ok(_) => {
                 println!("[DEBUG] Installation integrity verified");
             }
@@ -99,7 +109,7 @@ pub async fn calculate_status(
     let version_info = crate::game::patch_api::PatchApiFrontend::get_instance()
         .get_version_info(&paths.root, channel, settings.game_version as i32)
         .await;
-    
+
     let version_info = match version_info {
         Ok(info) => info,
         Err(_) => {
@@ -109,7 +119,10 @@ pub async fn calculate_status(
     };
 
     if version_info.update_available {
-        (LauncherStatus::NeedsUpdate, Some(version_info.latest_remote))
+        (
+            LauncherStatus::NeedsUpdate,
+            Some(version_info.latest_remote),
+        )
     } else {
         (LauncherStatus::Ready, Some(version_info.latest_remote))
     }

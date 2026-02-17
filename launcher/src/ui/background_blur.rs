@@ -1,8 +1,8 @@
-use iced::widget::shader;
 use iced::Rectangle;
+use iced::widget::shader;
+pub use iced_renderer::wgpu::wgpu;
 use std::borrow::Cow;
 use std::sync::Arc;
-pub use iced_renderer::wgpu::wgpu;
 
 // ==========================================================
 // UNIFORMS FOR NATIVE BLUR
@@ -11,9 +11,9 @@ pub use iced_renderer::wgpu::wgpu;
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C, align(16))]
 struct BlurUniforms {
-    blur_amount: f32,      // 0.0 to 1.0
-    time: f32,             // Animation time
-    resolution: [f32; 2],  // Canvas resolution
+    blur_amount: f32,     // 0.0 to 1.0
+    time: f32,            // Animation time
+    resolution: [f32; 2], // Canvas resolution
 }
 
 // ==========================================================
@@ -37,7 +37,6 @@ impl BackgroundBlur {
             current_time: 0.0,
         }
     }
-
 }
 
 impl<Message> shader::Program<Message> for BackgroundBlur {
@@ -57,7 +56,9 @@ impl<Message> shader::Program<Message> for BackgroundBlur {
                 resolution: [bounds.width, bounds.height],
             },
             image_data: self.image_data.clone(),
-            needs_upload: !self.last_uploaded.load(std::sync::atomic::Ordering::Relaxed),
+            needs_upload: !self
+                .last_uploaded
+                .load(std::sync::atomic::Ordering::Relaxed),
             uploaded_signal: self.last_uploaded.clone(),
         }
     }
@@ -83,7 +84,11 @@ impl shader::Primitive for BlurPrimitive {
         _viewport: &shader::Viewport,
     ) {
         // Enviar uniforms
-        queue.write_buffer(&pipeline.uniform_buffer, 0, bytemuck::bytes_of(&self.uniforms));
+        queue.write_buffer(
+            &pipeline.uniform_buffer,
+            0,
+            bytemuck::bytes_of(&self.uniforms),
+        );
 
         // Subir textura SOLO si es necesario (0% CPU en frames subsiguientes)
         if self.needs_upload {
@@ -125,14 +130,21 @@ impl shader::Primitive for BlurPrimitive {
                 );
 
                 // Recrear bind group con la nueva textura
-                pipeline.update_texture(device, texture.create_view(&wgpu::TextureViewDescriptor::default()));
-                self.uploaded_signal.store(true, std::sync::atomic::Ordering::Relaxed);
+                pipeline.update_texture(
+                    device,
+                    texture.create_view(&wgpu::TextureViewDescriptor::default()),
+                );
+                self.uploaded_signal
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
             }
         }
     }
 
     fn draw(&self, pipeline: &Self::Pipeline, render_pass: &mut wgpu::RenderPass<'_>) -> bool {
-        if self.uploaded_signal.load(std::sync::atomic::Ordering::Relaxed) {
+        if self
+            .uploaded_signal
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
             render_pass.set_pipeline(&pipeline.pipeline);
             render_pass.set_bind_group(0, &pipeline.bind_group, &[]);
             render_pass.draw(0..6, 0..1);
@@ -251,7 +263,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: wgpu::BufferSize::new(std::mem::size_of::<BlurUniforms>() as u64),
+                        min_binding_size: wgpu::BufferSize::new(
+                            std::mem::size_of::<BlurUniforms>() as u64,
+                        ),
                     },
                     count: None,
                 },
@@ -327,24 +341,35 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         });
 
         // Placeholder BindGroup inicial
-        let placeholder_view = device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
-            size: wgpu::Extent3d::default(),
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        }).create_view(&wgpu::TextureViewDescriptor::default());
+        let placeholder_view = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: None,
+                size: wgpu::Extent3d::default(),
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&wgpu::TextureViewDescriptor::default());
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Blur Bind Group"),
             layout: &layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&placeholder_view) },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&sampler) },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&placeholder_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
             ],
         });
 

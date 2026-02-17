@@ -1,12 +1,15 @@
 use anyhow::{Context, Result};
-use std::path::PathBuf;
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
-use tokio::process::Command;
-use tokio::io::{AsyncWriteExt, AsyncBufReadExt, BufWriter, AsyncReadExt};
-use tokio::io::BufReader;
-use std::process::Stdio;
-use futures::io::{AsyncBufReadExt as FuturesAsyncBufReadExt};
 use futures::StreamExt;
+use futures::io::AsyncBufReadExt as FuturesAsyncBufReadExt;
+use std::path::PathBuf;
+use std::process::Stdio;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+use tokio::io::BufReader;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufWriter};
+use tokio::process::Command;
 
 /// Game version information structure
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -37,51 +40,80 @@ pub async fn apply_pwr(
 
     // Verify directories exist before proceeding
     if !game_dir.exists() {
-        anyhow::bail!("Game directory does not exist after creation: {}", game_dir.display());
+        anyhow::bail!(
+            "Game directory does not exist after creation: {}",
+            game_dir.display()
+        );
     }
     if !staging_dir.exists() {
-        anyhow::bail!("Staging directory does not exist after creation: {}", staging_dir.display());
+        anyhow::bail!(
+            "Staging directory does not exist after creation: {}",
+            staging_dir.display()
+        );
     }
-    
-    println!("[PATHS] Verified directories exist: game={}, staging={}", game_dir.display(), staging_dir.display());
-    
+
+    println!(
+        "[PATHS] Verified directories exist: game={}, staging={}",
+        game_dir.display(),
+        staging_dir.display()
+    );
+
     // Final verification right before Butler command
     // This prevents the "OutputFolder must exist" error from Butler
     for attempt in 0..5 {
         if game_dir.exists() && staging_dir.exists() {
-            println!("[PATHS] Final directory verification passed on attempt {}", attempt + 1);
+            println!(
+                "[PATHS] Final directory verification passed on attempt {}",
+                attempt + 1
+            );
             break;
         } else if attempt < 4 {
-            println!("[PATHS] Directory verification failed, retrying in 200ms... (attempt {})", attempt + 1);
+            println!(
+                "[PATHS] Directory verification failed, retrying in 200ms... (attempt {})",
+                attempt + 1
+            );
             tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
         } else {
-            anyhow::bail!("Critical: Directories do not exist immediately before Butler start: game={}, staging={}", 
-                         game_dir.exists(), staging_dir.exists());
+            anyhow::bail!(
+                "Critical: Directories do not exist immediately before Butler start: game={}, staging={}",
+                game_dir.exists(),
+                staging_dir.exists()
+            );
         }
     }
 
     // Use Butler to apply the patch
     let butler_path = paths.butler();
-    let pwr_path_absolute = std::fs::canonicalize(pwr_path)
-        .context("Failed to canonicalize PWR path")?;
+    let pwr_path_absolute =
+        std::fs::canonicalize(pwr_path).context("Failed to canonicalize PWR path")?;
 
     // Validate patch file integrity before attempting to apply
     progress_callback("install", 2.0, "Validating patch file...", 0, 0, None, None);
-    
+
     // Create IntegrityChecker instance
     let integrity_checker = crate::game::patch_api::IntegrityChecker::new();
-    
-    integrity_checker.validate_patch_file(&pwr_path).await
+
+    integrity_checker
+        .validate_patch_file(&pwr_path)
+        .await
         .context("Patch file validation failed - file may be corrupted")?;
 
     // Enhanced retry logic for patch application
     let mut last_error = None;
-    
+
     for attempt in 1..=2 {
         if attempt > 1 {
             println!("[RETRY] Retrying patch application (attempt {})", attempt);
-            progress_callback("install", 5.0, &format!("Retrying patch application (attempt {})...", attempt), 0, 0, None, None);
-            
+            progress_callback(
+                "install",
+                5.0,
+                &format!("Retrying patch application (attempt {})...", attempt),
+                0,
+                0,
+                None,
+                None,
+            );
+
             // Clean up game directory for retry
             if game_dir.exists() {
                 println!("[CLEANUP] Removing corrupted game directory for retry");
@@ -94,9 +126,17 @@ pub async fn apply_pwr(
                 let _ = paths.staging();
             }
         } else {
-            progress_callback("install", 5.0, "Preparing patch application...", 0, 0, None, None);
+            progress_callback(
+                "install",
+                5.0,
+                "Preparing patch application...",
+                0,
+                0,
+                None,
+                None,
+            );
         }
-        
+
         let mut cmd = Command::new(&butler_path);
         cmd.arg("apply")
             .arg(format!("--staging-dir={}", staging_dir.display()))
@@ -113,8 +153,13 @@ pub async fn apply_pwr(
 
         // Create log file for Butler output
         let logs_dir = paths.logs();
-        let log_path = logs_dir.join(format!("butler_apply_{}_attempt_{}.log", chrono::Utc::now().timestamp(), attempt));
-        let log_file: tokio::fs::File = tokio::fs::File::create(&log_path).await
+        let log_path = logs_dir.join(format!(
+            "butler_apply_{}_attempt_{}.log",
+            chrono::Utc::now().timestamp(),
+            attempt
+        ));
+        let log_file: tokio::fs::File = tokio::fs::File::create(&log_path)
+            .await
             .context("Failed to create Butler log file")?;
         let mut log_writer = BufWriter::new(log_file);
 
@@ -154,7 +199,7 @@ pub async fn apply_pwr(
                     return Err(anyhow::anyhow!("Operation cancelled"));
                 }
             }
-            
+
             if n == 0 {
                 break;
             }
@@ -199,44 +244,86 @@ pub async fn apply_pwr(
         let status = child.wait().await?;
         if status.success() {
             // SUCCESS: Verify extraction integrity before reporting success
-            progress_callback("install", 95.0, "Verifying installation...", 0, 0, None, None);
-            
-            match integrity_checker.verify_extraction_integrity(&game_dir).await {
+            progress_callback(
+                "install",
+                95.0,
+                "Verifying installation...",
+                0,
+                0,
+                None,
+                None,
+            );
+
+            match integrity_checker
+                .verify_extraction_integrity(&game_dir)
+                .await
+            {
                 Ok(_) => {
-                    progress_callback("install", 100.0, "Patch applied successfully", 0, 0, None, None);
-                    println!("[SUCCESS] Patch application and verification completed on attempt {}", attempt);
+                    progress_callback(
+                        "install",
+                        100.0,
+                        "Patch applied successfully",
+                        0,
+                        0,
+                        None,
+                        None,
+                    );
+                    println!(
+                        "[SUCCESS] Patch application and verification completed on attempt {}",
+                        attempt
+                    );
                     return Ok(());
                 }
                 Err(e) => {
-                    last_error = Some(anyhow::anyhow!("Extraction verification failed on attempt {}: {}", attempt, e));
-                    println!("[ERROR] Extraction verification failed on attempt {}: {}", attempt, e);
-                    
+                    last_error = Some(anyhow::anyhow!(
+                        "Extraction verification failed on attempt {}: {}",
+                        attempt,
+                        e
+                    ));
+                    println!(
+                        "[ERROR] Extraction verification failed on attempt {}: {}",
+                        attempt, e
+                    );
+
                     // Log the verification failure
-                    let _ = log_writer.write_all(format!("\n[ERROR] Extraction verification failed: {}\n", e).as_bytes()).await;
+                    let _ = log_writer
+                        .write_all(
+                            format!("\n[ERROR] Extraction verification failed: {}\n", e).as_bytes(),
+                        )
+                        .await;
                     let _ = log_writer.flush().await;
-                    
+
                     // Continue to retry
                 }
             }
         } else {
             // Butler failed
-            let stderr_output: String = tokio::fs::read_to_string(&log_path).await.unwrap_or_default();
-            
+            let stderr_output: String = tokio::fs::read_to_string(&log_path)
+                .await
+                .unwrap_or_default();
+
             if stderr_output.contains("already up to date") {
                 println!("Game is already up to date");
                 return Ok(());
             }
-            
-            last_error = Some(anyhow::anyhow!("Butler patch application failed on attempt {}: {}", attempt, stderr_output));
-            println!("[ERROR] Butler patch application failed on attempt {}: {}", attempt, stderr_output);
+
+            last_error = Some(anyhow::anyhow!(
+                "Butler patch application failed on attempt {}: {}",
+                attempt,
+                stderr_output
+            ));
+            println!(
+                "[ERROR] Butler patch application failed on attempt {}: {}",
+                attempt, stderr_output
+            );
         }
-        
+
         // Clean up for retry
         if game_dir.exists() {
             let _ = tokio::fs::remove_dir_all(&game_dir).await;
         }
     }
-    
+
     // All attempts failed
     Err(last_error.unwrap_or_else(|| anyhow::anyhow!("Patch application failed after 2 attempts")))
 }
@@ -259,15 +346,21 @@ pub async fn clean_patches_cache(
     progress_callback: impl Fn(f32, &str, u64, u64, Option<String>, Option<usize>),
 ) -> Result<()> {
     let base_dir = crate::config::get_app_dir();
-    
+
     progress_callback(0.0, "Cleaning patches cache...", 0, 0, None, None);
 
     // Use the shared cache manager for cleanup
     let cleaned = crate::game::patch_api::get_shared_cache()
-        .cleanup_old_patches().await?;
+        .cleanup_old_patches()
+        .await?;
 
-    progress_callback(100.0, &format!("Cleaned {} cache files", cleaned), 0, 0, None, None);
+    progress_callback(
+        100.0,
+        &format!("Cleaned {} cache files", cleaned),
+        0,
+        0,
+        None,
+        None,
+    );
     Ok(())
 }
-
-

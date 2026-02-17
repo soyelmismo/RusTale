@@ -4,13 +4,13 @@ use crate::game::install::InstallPolicy;
 use iced::advanced::subscription::{self, Hasher, Recipe};
 use iced::futures::{SinkExt, StreamExt};
 use iced::{Subscription, stream};
+use sha2::Digest;
 use std::hash::Hash;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, atomic::AtomicBool};
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
-use sha2::Digest;
 
 /// Security guard to clean up temporary files when exiting the scope via Drop.
 struct FileCleanupGuard {
@@ -28,18 +28,20 @@ impl Drop for FileCleanupGuard {
     }
 }
 
-fn verify_aurora_checksum(aurora_path: &std::path::Path) -> Result<bool, Box<dyn std::error::Error>> {
+fn verify_aurora_checksum(
+    aurora_path: &std::path::Path,
+) -> Result<bool, Box<dyn std::error::Error>> {
     // Checksum embebido como variable de entorno en tiempo de compilación
     const EMBEDDED_CHECKSUM: &str = env!("AURORA_CHECKSUM");
-    
+
     // Calcular checksum del archivo actual
     let aurora_bytes = std::fs::read(aurora_path)?;
     let mut hasher = sha2::Sha256::new();
     hasher.update(&aurora_bytes);
     let current_checksum = format!("{:x}", hasher.finalize());
-    
+
     let is_valid = EMBEDDED_CHECKSUM == current_checksum;
-    
+
     if !is_valid {
         eprintln!("[Security] Aurora checksum mismatch!");
         eprintln!("[Security] Expected: {}", EMBEDDED_CHECKSUM);
@@ -47,13 +49,13 @@ fn verify_aurora_checksum(aurora_path: &std::path::Path) -> Result<bool, Box<dyn
     } else {
         println!("[Security] Aurora checksum verified: {}", current_checksum);
     }
-    
+
     Ok(is_valid)
 }
 
 fn ensure_aurora_installed() -> Result<(), String> {
     let tools_dir = crate::config::get_app_dir().join("tools");
-    
+
     // Asegurar que el directorio tools exista
     if !tools_dir.exists() {
         if let Err(e) = std::fs::create_dir_all(&tools_dir) {
@@ -62,9 +64,9 @@ fn ensure_aurora_installed() -> Result<(), String> {
     }
 
     let aurora_lib = format!("aurora{}", std::env::consts::DLL_SUFFIX);
-    
+
     let aurora_path = tools_dir.join(&aurora_lib);
-    
+
     // Paso 1: Verificar si Aurora ya existe en tools/ con el checksum correcto
     if aurora_path.exists() {
         match verify_aurora_checksum(&aurora_path) {
@@ -80,46 +82,46 @@ fn ensure_aurora_installed() -> Result<(), String> {
             }
         }
     }
-    
+
     // Paso 2: Buscar Aurora junto al ejecutable y copiarlo si es válido
     let exe_path = match std::env::current_exe() {
         Ok(path) => path,
         Err(e) => return Err(format!("Cannot get executable path: {}", e)),
     };
-    
+
     let exe_dir = match exe_path.parent() {
         Some(dir) => dir,
         None => return Err("Cannot get executable directory".to_string()),
     };
-    
+
     let source_path = exe_dir.join(&aurora_lib);
-    
+
     if source_path.exists() {
         println!("[Aurora] Found Aurora binary alongside executable, verifying...");
         match verify_aurora_checksum(&source_path) {
-            Ok(true) => {
-                match std::fs::copy(&source_path, &aurora_path) {
-                    Ok(_) => {
-                        println!("[Aurora] Copied valid Aurora binary to tools/");
-                        return Ok(());
-                    }
-                    Err(e) => return Err(format!("Failed to copy Aurora to tools/: {}", e)),
+            Ok(true) => match std::fs::copy(&source_path, &aurora_path) {
+                Ok(_) => {
+                    println!("[Aurora] Copied valid Aurora binary to tools/");
+                    return Ok(());
                 }
-            }
+                Err(e) => return Err(format!("Failed to copy Aurora to tools/: {}", e)),
+            },
             Ok(false) => {
                 println!("[Aurora] Aurora binary alongside executable has invalid checksum");
             }
             Err(e) => {
-                return Err(format!("Failed to verify Aurora checksum alongside executable: {}", e));
+                return Err(format!(
+                    "Failed to verify Aurora checksum alongside executable: {}",
+                    e
+                ));
             }
         }
     }
-    
+
     // Paso 3: No se encontró Aurora válido en ninguna ubicación
     Err(format!(
         "Aurora binary not found or invalid. Expected locations:\n  - {:?}\n  - {:?}",
-        aurora_path,
-        source_path
+        aurora_path, source_path
     ))
 }
 
@@ -192,17 +194,18 @@ impl Recipe for Runner {
                 let install_client_clone = install_client.clone();
                 let install_base_clone = install_base.clone();
                 let install_channel_clone = install_settings.channel.clone();
-                
+
                 tokio::spawn(async move {
                     let progress_tx = tx.clone();
                     let progress_tx_for_steps = tx.clone(); // Clone extra para UpdateTotalSteps
                     let progress_tx_for_error = tx.clone(); // Clone extra para DownloadError
-                    
+
                     // Create the unified progress reporter
-                    let progress_reporter = move |payload: crate::game::progress::ProgressPayload| {
-                        let _ = progress_tx.try_send(Message::ProgressUpdate(payload));
-                    };
-                    
+                    let progress_reporter =
+                        move |payload: crate::game::progress::ProgressPayload| {
+                            let _ = progress_tx.try_send(Message::ProgressUpdate(payload));
+                        };
+
                     let result = crate::game::patch_api::PatchApiFrontend::get_instance()
                         .ensure_installed_with_weighted_progress(
                             &install_client,
@@ -216,8 +219,9 @@ impl Recipe for Runner {
                             install_policy,
                             progress_reporter,
                             Some(cancel_token),
-                        ).await;
-                    
+                        )
+                        .await;
+
                     match result {
                         Ok((total_steps, ())) => {
                             // Update UI with step information
@@ -227,19 +231,20 @@ impl Recipe for Runner {
                         }
                         Err(ref e) => {
                             println!("[Install] Installation failed: {}", e);
-                            
+
                             // Detectar específicamente errores de cancelación
-                            let is_cancelled = e.to_string().contains("cancelled") || 
-                                             e.to_string().contains("Cancelled") ||
-                                             e.to_string().contains("cancel");
-                            
+                            let is_cancelled = e.to_string().contains("cancelled")
+                                || e.to_string().contains("Cancelled")
+                                || e.to_string().contains("cancel");
+
                             if is_cancelled {
                                 println!("[Install] Installation cancelled by user");
                                 // Para cancelación, solo enviar GameStopped, no DownloadError
                                 let _ = progress_tx_for_error.try_send(Message::GameStopped);
                             } else {
                                 // Para otros errores, enviar DownloadError como antes
-                                let _ = progress_tx_for_error.try_send(Message::DownloadError(e.to_string()));
+                                let _ = progress_tx_for_error
+                                    .try_send(Message::DownloadError(e.to_string()));
                             }
                         }
                     }
@@ -252,29 +257,48 @@ impl Recipe for Runner {
 
                 match res_rx.recv().await {
                     Some(Ok(_)) => {
-                        println!("[Install] Installation completed successfully, preparing to launch");
-                        
+                        println!(
+                            "[Install] Installation completed successfully, preparing to launch"
+                        );
+
                         // Save version.json for latest installations
                         if install_settings.game_version == 0 {
-                            let version_info = crate::game::patch_api::PatchApiFrontend::get_instance()
-                                .get_version_info(&install_base_clone, &install_channel_clone, 0).await;
+                            let version_info =
+                                crate::game::patch_api::PatchApiFrontend::get_instance()
+                                    .get_version_info(
+                                        &install_base_clone,
+                                        &install_channel_clone,
+                                        0,
+                                    )
+                                    .await;
                             if let Ok(info) = version_info {
-                                if let Err(e) = crate::game::install::save_local_version(&install_base_clone, &install_channel_clone, info.latest_remote).await {
+                                if let Err(e) = crate::game::install::save_local_version(
+                                    &install_base_clone,
+                                    &install_channel_clone,
+                                    info.latest_remote,
+                                )
+                                .await
+                                {
                                     println!("[WARNING] Failed to save version.json: {}", e);
                                 } else {
-                                    println!("[INFO] Saved version.json for latest version: {}", info.latest_remote);
+                                    println!(
+                                        "[INFO] Saved version.json for latest version: {}",
+                                        info.latest_remote
+                                    );
                                 }
                             }
                         }
-                        
+
                         let _ = output
-                            .send(Message::ProgressUpdate(crate::game::progress::ProgressPayload {
-                                global_progress: 1.0, // 100%
-                                step_progress: 1.0,  // 100%
-                                message_key: "launcher.status.preparing_launch".to_string(),
-                                message_args: vec![],
-                                stats: None,
-                            }))
+                            .send(Message::ProgressUpdate(
+                                crate::game::progress::ProgressPayload {
+                                    global_progress: 1.0, // 100%
+                                    step_progress: 1.0,   // 100%
+                                    message_key: "launcher.status.preparing_launch".to_string(),
+                                    message_args: vec![],
+                                    stats: None,
+                                },
+                            ))
                             .await;
                     }
                     Some(Err(ref e)) => {
@@ -401,7 +425,8 @@ impl Recipe for Runner {
                         for loc in locations {
                             if loc.exists() {
                                 server_jar_path = loc;
-                                server_dir = server_jar_path.parent()
+                                server_dir = server_jar_path
+                                    .parent()
                                     .map(|p| p.to_path_buf())
                                     .unwrap_or_else(|| game_working_dir.clone());
                                 break;
@@ -480,7 +505,8 @@ impl Recipe for Runner {
                     // Vanilla/cleanup - redundant now but kept for safety
                     #[cfg(target_os = "windows")]
                     {
-                        let dll_path = executable_path.parent()
+                        let dll_path = executable_path
+                            .parent()
                             .map(|p| p.join("Secur32.dll"))
                             .unwrap_or_else(|| executable_path.join("Secur32.dll"));
                         if dll_path.exists() {
@@ -508,30 +534,36 @@ impl Recipe for Runner {
                 // En Windows se copia a la carpeta del cliente como Secur32.dll
                 let mut _cleanup_guard: Option<FileCleanupGuard> = None;
                 if settings.enable_online_fix {
-                    let tools_aurora_path = crate::config::get_app_dir().join("tools").join(format!("aurora{}", std::env::consts::DLL_SUFFIX));
-                    
+                    let tools_aurora_path = crate::config::get_app_dir()
+                        .join("tools")
+                        .join(format!("aurora{}", std::env::consts::DLL_SUFFIX));
+
                     // Verificar que Aurora exista
                     if !tools_aurora_path.exists() {
-                        eprintln!("[Runner] Aurora binary not found at {:?}", tools_aurora_path);
+                        eprintln!(
+                            "[Runner] Aurora binary not found at {:?}",
+                            tools_aurora_path
+                        );
                         return;
                     }
-                    
+
                     #[cfg(target_os = "windows")]
                     {
-                        let dll_path = executable_path.parent()
+                        let dll_path = executable_path
+                            .parent()
                             .map(|p| p.join("Secur32.dll"))
                             .unwrap_or_else(|| executable_path.join("Secur32.dll"));
-                        
+
                         if let Err(e) = std::fs::copy(&tools_aurora_path, &dll_path) {
                             eprintln!("[Runner] Failed to copy Aurora binary: {}", e);
                             return;
                         }
-                        
+
                         // Initialize the guard
                         _cleanup_guard = Some(FileCleanupGuard { path: dll_path });
                         println!("[Runner] Aurora copied to Secur32.dll");
                     }
-                    
+
                     #[cfg(target_os = "linux")]
                     {
                         println!("[Runner] Using Aurora binary from tools/");

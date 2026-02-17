@@ -60,10 +60,10 @@ fn vs_main(@builtin(vertex_index) v_index: u32) -> VertexOutput {
 
 fn load_all_shaders() -> Vec<String> {
     let mut shaders = Vec::new();
-    
+
     // Lista de shaders conocidos en orden específico
     let shader_files = vec!["mandelbulb.wgsl", "entropy.wgsl"];
-    
+
     for file_name in shader_files {
         if let Some(file) = ShaderAssets::get(file_name) {
             match String::from_utf8(file.data.to_vec()) {
@@ -83,13 +83,13 @@ fn load_all_shaders() -> Vec<String> {
             shaders.push(super::lsd_shader::DEFAULT_FALLBACK.to_string());
         }
     }
-    
+
     // Si no se cargó ningún shader, agregar el fallback
     if shaders.is_empty() {
         println!("[SHADER] No shaders loaded, using fallback");
         shaders.push(super::lsd_shader::DEFAULT_FALLBACK.to_string());
     }
-    
+
     shaders
 }
 
@@ -100,12 +100,15 @@ pub fn build_uber_shader() -> String {
 pub fn build_uber_shader_with_index(shader_index: usize) -> String {
     // Inicializar el cache si no está cargado
     let shaders = SHADER_CACHE.get_or_init(|| load_all_shaders());
-    
+
     // Obtener el shader solicitado con fallback al primero si el índice es inválido
     let shader_src = if shader_index < shaders.len() {
         &shaders[shader_index]
     } else {
-        println!("[SHADER] Invalid shader index {}, falling back to index 0", shader_index);
+        println!(
+            "[SHADER] Invalid shader index {}, falling back to index 0",
+            shader_index
+        );
         &shaders[0]
     };
 
@@ -119,4 +122,3 @@ pub fn get_shader_count() -> usize {
     let shaders = SHADER_CACHE.get_or_init(|| load_all_shaders());
     shaders.len()
 }
-

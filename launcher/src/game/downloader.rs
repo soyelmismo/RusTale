@@ -126,7 +126,8 @@ pub async fn download_file(
                                 if last_report.elapsed().as_millis() > 200 {
                                     let speed = bytes_since_last_report as f64
                                         / last_report.elapsed().as_secs_f64();
-                                    let speed_str = crate::game::patch_api::utils::format_speed(speed);
+                                    let speed_str =
+                                        crate::game::patch_api::utils::format_speed(speed);
 
                                     let pct = if total_size > 0 {
                                         (downloaded_len as f32 / total_size as f32) * 100.0
@@ -136,7 +137,8 @@ pub async fn download_file(
 
                                     // Calculate ETA
                                     let eta = if total_size > 0 && speed > 0.0 {
-                                        let remaining_bytes = total_size.saturating_sub(downloaded_len) as f64;
+                                        let remaining_bytes =
+                                            total_size.saturating_sub(downloaded_len) as f64;
                                         let seconds_remaining = remaining_bytes / speed;
                                         if seconds_remaining < 60.0 {
                                             Some(format!("{:.0}s", seconds_remaining))
@@ -149,7 +151,13 @@ pub async fn download_file(
                                         None
                                     };
 
-                                    progress_callback(pct, speed_str, total_size, downloaded_len, eta);
+                                    progress_callback(
+                                        pct,
+                                        speed_str,
+                                        total_size,
+                                        downloaded_len,
+                                        eta,
+                                    );
                                     last_report = std::time::Instant::now();
                                     bytes_since_last_report = 0;
                                 }
@@ -201,4 +209,3 @@ pub async fn download_file(
     progress_callback(100.0, "Complete".to_string(), total_size, total_size, None);
     Ok(())
 }
-

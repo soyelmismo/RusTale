@@ -34,15 +34,14 @@ pub fn icon(svg_data: &'static str) -> svg::Handle {
 
 pub fn load_tray_icon() -> tray_icon::Icon {
     let image_bytes = include_bytes!("../../assets/icon.png");
-    let image = image::load_from_memory(image_bytes)
-        .expect("Failed to load tray icon");
+    let image = image::load_from_memory(image_bytes).expect("Failed to load tray icon");
 
     // --- CORRECCIoN LINUX: Redimensionar icono ---
-    // KDE rechaza iconos grandes enviados por DBus. 
+    // KDE rechaza iconos grandes enviados por DBus.
     // Redimensionamos a 32x32 para asegurar compatibilidad.
     let resized = image.resize_exact(32, 32, FilterType::Lanczos3);
     let rgba_image = resized.to_rgba8();
-    
+
     let width = rgba_image.width();
     let height = rgba_image.height();
     let rgba = rgba_image.into_raw();
@@ -53,10 +52,8 @@ pub fn load_tray_icon() -> tray_icon::Icon {
 pub fn load_window_icon_handle() -> iced::widget::image::Handle {
     // OPTIMIZACIoN: Cachear el Handle del icono para evitar recrear bytes en cada frame
     static WINDOW_ICON: Lazy<iced::widget::image::Handle> = Lazy::new(|| {
-        iced::widget::image::Handle::from_bytes(
-            include_bytes!("../../assets/logo.png").to_vec()
-        )
+        iced::widget::image::Handle::from_bytes(include_bytes!("../../assets/logo.png").to_vec())
     });
-    
+
     WINDOW_ICON.clone()
 }

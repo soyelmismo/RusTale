@@ -23,10 +23,11 @@ pub async fn ensure_agent(
         progress_callback("agent", 0.0, "Checking server agent version...");
 
         // Verificar por tamaño (HEAD request) con un timeout agresivo
-        if let Ok(resp) = client.head(AGENT_URL)
+        if let Ok(resp) = client
+            .head(AGENT_URL)
             .timeout(std::time::Duration::from_secs(5))
             .send()
-            .await 
+            .await
         {
             if resp.status().is_success() {
                 let remote_size = resp.content_length().unwrap_or(0);
@@ -64,24 +65,28 @@ pub async fn ensure_agent(
             &agent_path,
             |pct, speed, total, downloaded, eta| {
                 let size_info = if total > 0 {
-                    format!("{} / {}", 
-                        crate::game::patch_api::utils::format_bytes(downloaded), 
+                    format!(
+                        "{} / {}",
+                        crate::game::patch_api::utils::format_bytes(downloaded),
                         crate::game::patch_api::utils::format_bytes(total)
                     )
                 } else {
                     crate::game::patch_api::utils::format_bytes(downloaded)
                 };
-                
+
                 let eta_info = if let Some(eta_str) = &eta {
                     format!(" • ETA: {}", eta_str)
                 } else {
                     String::new()
                 };
-                
+
                 progress_callback(
                     "agent",
                     pct as f64,
-                    &format!("Downloading Server Auth Agent... ({}{}{})", speed, size_info, eta_info),
+                    &format!(
+                        "Downloading Server Auth Agent... ({}{}{})",
+                        speed, size_info, eta_info
+                    ),
                 );
             },
             _cancel_token,

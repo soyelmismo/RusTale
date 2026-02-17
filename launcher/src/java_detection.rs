@@ -16,22 +16,21 @@ pub async fn ensure_java_available(base_dir: &std::path::Path) -> anyhow::Result
             tokio::task::spawn_blocking(move || get_java_version_sync(&latest_dir)).await??;
         // -------------------
 
-        return Ok(JavaInfo {
-            version,
-        });
+        return Ok(JavaInfo { version });
     }
 
     // 2. Si no esta disponible, descargar usando el nuevo patch API
     let client = reqwest::Client::new();
-    crate::game::patch_api::PatchApiFrontend::get_instance().download_jre(
-        &client,
-        &base_dir.to_path_buf(),
-        |component, progress, status, _total, _downloaded, _eta| {
-            eprintln!("Java {}: {:.1}% - {}", component, progress, status);
-        },
-        None, // Sin token de cancelacion por ahora
-    )
-    .await?;
+    crate::game::patch_api::PatchApiFrontend::get_instance()
+        .download_jre(
+            &client,
+            &base_dir.to_path_buf(),
+            |component, progress, status, _total, _downloaded, _eta| {
+                eprintln!("Java {}: {:.1}% - {}", component, progress, status);
+            },
+            None, // Sin token de cancelacion por ahora
+        )
+        .await?;
 
     // Clonamos latest_dir antes de moverlo al closure
     let latest_dir_clone = latest_dir.clone();
@@ -39,9 +38,7 @@ pub async fn ensure_java_available(base_dir: &std::path::Path) -> anyhow::Result
         tokio::task::spawn_blocking(move || get_java_version_sync(&latest_dir_clone)).await??;
     // ---------------------------
 
-    Ok(JavaInfo {
-        version,
-    })
+    Ok(JavaInfo { version })
 }
 
 /// Obtiene version de Java de forma sincrona (para ejecutar en blocking task)
@@ -85,4 +82,3 @@ fn get_java_version_sync(jre_dir: &std::path::Path) -> anyhow::Result<String> {
 pub struct JavaInfo {
     pub version: String,
 }
-

@@ -48,7 +48,7 @@ pub enum ModsMessage {
     UninstallZipPatch(String, GameSettings),
     PatchOperationFinished(Result<(), String>),
     ModsLoadedComplex(Result<(Vec<ModInfo>, Vec<crate::game::zip_mods::PatchManifest>), String>),
-    
+
     // --- VIEWPORT OPTIMIZATION MESSAGES ---
     ScrollOffsetChanged(f32),
     UpdateViewportHeight(f32),
@@ -103,10 +103,10 @@ pub struct ModsState {
     pub loading_versions: HashSet<String>,
     // Cache de versiones cargadas bajo demanda para cada mod
     pub cached_versions: HashMap<String, Vec<crate::game::mods_api::GenericFile>>,
-    
+
     // --- VIEWPORT OPTIMIZATION FOR MODS LISTS ---
-    pub scroll_offset: f32,         // Posición actual del scroll
-    pub viewport_height: f32,       // Altura del área visible
+    pub scroll_offset: f32,   // Posición actual del scroll
+    pub viewport_height: f32, // Altura del área visible
 }
 
 impl Default for ModsState {
@@ -134,7 +134,7 @@ impl Default for ModsState {
             selected_versions: HashMap::new(),
             loading_versions: HashSet::new(),
             cached_versions: HashMap::new(),
-            
+
             // --- VIEWPORT OPTIMIZATION ---
             scroll_offset: 0.0,
             viewport_height: 400.0, // Altura inicial estimada
@@ -151,22 +151,27 @@ impl ModsState {
             version.to_string()
         }
     }
-    
+
     /// --- VIEWPORT OPTIMIZATION HELPERS ---
     /// Calcula qué elementos son visibles basados en scroll y viewport
-    fn get_visible_range(&self, item_height: f32, total_items: usize, buffer: usize) -> (usize, usize) {
+    fn get_visible_range(
+        &self,
+        item_height: f32,
+        total_items: usize,
+        buffer: usize,
+    ) -> (usize, usize) {
         if self.viewport_height <= 0.0 || total_items == 0 {
             return (0, total_items.min(buffer * 2));
         }
-        
+
         // Calcular índice de inicio basado en scroll offset
         let start_index = (self.scroll_offset / item_height).floor() as usize;
         let start_index = start_index.saturating_sub(buffer); // Buffer arriba
-        
+
         // Calcular cuántos elementos caben en el viewport
         let visible_count = (self.viewport_height / item_height).ceil() as usize;
         let end_index = (start_index + visible_count + buffer).min(total_items); // Buffer abajo
-        
+
         (start_index, end_index)
     }
 
@@ -546,20 +551,23 @@ impl ModsState {
                                     &dest,
                                     |_, _, total, downloaded, eta| {
                                         let size_info = if total > 0 {
-                                            format!("{} / {}", 
-                                                crate::game::patch_api::utils::format_bytes(downloaded), 
+                                            format!(
+                                                "{} / {}",
+                                                crate::game::patch_api::utils::format_bytes(
+                                                    downloaded
+                                                ),
                                                 crate::game::patch_api::utils::format_bytes(total)
                                             )
                                         } else {
                                             crate::game::patch_api::utils::format_bytes(downloaded)
                                         };
-                                        
+
                                         let eta_info = if let Some(eta_str) = &eta {
                                             format!(" • ETA: {}", eta_str)
                                         } else {
                                             String::new()
                                         };
-                                        
+
                                         println!("[Mods] Downloading: {}{}", size_info, eta_info);
                                     },
                                     None,
@@ -710,12 +718,14 @@ impl ModsState {
                         .await
                         .map_err(|e| e.to_string())?
                         .map_err(|e| e.to_string())?;
-                        
+
                         // Solo eliminar el archivo temporal si la instalación fue exitosa
                         // El ZIP híbrido ya está copiado en Mods/ por apply_patch_logic
-                        println!("[Mods] Installation completed, keeping downloaded file for reference");
+                        println!(
+                            "[Mods] Installation completed, keeping downloaded file for reference"
+                        );
                         // let _ = tokio::fs::remove_file(zpc).await; // COMENTADO - No eliminar archivo descargado
-                        
+
                         Ok(())
                     },
                     ModsMessage::PatchOperationFinished,
@@ -770,12 +780,14 @@ impl ModsState {
             ModsMessage::PatchOperationFinished(res) => {
                 self.loading = false;
                 println!("[Mods] PatchOperationFinished received, checking file status...");
-                
+
                 match res {
                     Ok(_) => {
-                        println!("[Mods] Patch operation successful, triggering RefreshLocalBackground");
+                        println!(
+                            "[Mods] Patch operation successful, triggering RefreshLocalBackground"
+                        );
                         Task::done(ModsMessage::RefreshLocalBackground)
-                    },
+                    }
                     Err(e) => {
                         self.error = Some(format!("Failed: {}", e));
                         Task::none()
@@ -1085,23 +1097,24 @@ impl ModsState {
                                 &download_url,
                                 &new_path,
                                 |_, _, total, downloaded, eta| {
-                                        let size_info = if total > 0 {
-                                            format!("{} / {}", 
-                                                crate::game::patch_api::utils::format_bytes(downloaded), 
-                            crate::game::patch_api::utils::format_bytes(total)
-                                            )
-                                        } else {
-                                            crate::game::patch_api::utils::format_bytes(downloaded)
-                                        };
-                                        
-                                        let eta_info = if let Some(eta_str) = &eta {
-                                            format!(" • ETA: {}", eta_str)
-                                        } else {
-                                            String::new()
-                                        };
-                                        
-                                        println!("[Mods] Downloading: {}{}", size_info, eta_info);
-                                    },
+                                    let size_info = if total > 0 {
+                                        format!(
+                                            "{} / {}",
+                                            crate::game::patch_api::utils::format_bytes(downloaded),
+                                            crate::game::patch_api::utils::format_bytes(total)
+                                        )
+                                    } else {
+                                        crate::game::patch_api::utils::format_bytes(downloaded)
+                                    };
+
+                                    let eta_info = if let Some(eta_str) = &eta {
+                                        format!(" • ETA: {}", eta_str)
+                                    } else {
+                                        String::new()
+                                    };
+
+                                    println!("[Mods] Downloading: {}{}", size_info, eta_info);
+                                },
                                 None,
                             )
                             .await
@@ -1250,7 +1263,7 @@ impl ModsState {
                 }
                 Task::none()
             }
-            
+
             // --- VIEWPORT OPTIMIZATION HANDLERS ---
             ModsMessage::ScrollOffsetChanged(offset) => {
                 self.scroll_offset = offset;
@@ -1275,8 +1288,10 @@ impl ModsState {
         );
         Task::perform(
             async move {
-                println!("[Mods] load_mods_task starting, checking Mods directory before integrity check...");
-                
+                println!(
+                    "[Mods] load_mods_task starting, checking Mods directory before integrity check..."
+                );
+
                 // Check Mods directory status before integrity check
                 let paths = crate::game::GamePaths::new(bdc.clone());
                 let mods_dir = paths.mods_dir(&c, &v);
@@ -1293,9 +1308,11 @@ impl ModsState {
                 } else {
                     println!("[Mods] load_mods_task: Mods directory does not exist");
                 }
-                
+
                 // Run integrity verification first
-                if let Ok(fixed_mods) = crate::game::zip_mods::verify_patch_integrity(&paths, &c, &v) {
+                if let Ok(fixed_mods) =
+                    crate::game::zip_mods::verify_patch_integrity(&paths, &c, &v)
+                {
                     if !fixed_mods.is_empty() {
                         println!("[Mods] Integrity check fixed: {:?}", fixed_mods);
                     }
@@ -1304,10 +1321,8 @@ impl ModsState {
                 let j = crate::game::mods::list_mods(&bdc, &c, &v)
                     .await
                     .map_err(|e| e.to_string())?;
-                let p = crate::game::zip_mods::list_patches(
-                    paths.core_patches_dir(&c, &v),
-                )
-                .map_err(|e| e.to_string())?;
+                let p = crate::game::zip_mods::list_patches(paths.core_patches_dir(&c, &v))
+                    .map_err(|e| e.to_string())?;
                 Ok((j, p))
             },
             |res| ModsMessage::ModsLoadedComplex(res),
@@ -1508,12 +1523,13 @@ impl ModsState {
         .align_y(Alignment::Center);
 
         let mut ml = column![Element::from(hj)].spacing(10);
-        
+
         if !self.installed_mods.is_empty() {
             // --- VIEWPORT OPTIMIZATION ---
             const MOD_ROW_HEIGHT: f32 = 80.0; // Altura estimada de cada fila de mod
-            let (start_idx, end_idx) = self.get_visible_range(MOD_ROW_HEIGHT, self.installed_mods.len(), 2);
-            
+            let (start_idx, end_idx) =
+                self.get_visible_range(MOD_ROW_HEIGHT, self.installed_mods.len(), 2);
+
             // Espacio arriba para mantener scroll
             if start_idx > 0 {
                 let space_above = Space::new()
@@ -1521,9 +1537,15 @@ impl ModsState {
                     .height(Length::Fixed(start_idx as f32 * MOD_ROW_HEIGHT));
                 ml = ml.push(space_above);
             }
-            
+
             // Solo renderizar mods visibles
-            for (_, m) in self.installed_mods.iter().enumerate().skip(start_idx).take(end_idx - start_idx) {
+            for (_, m) in self
+                .installed_mods
+                .iter()
+                .enumerate()
+                .skip(start_idx)
+                .take(end_idx - start_idx)
+            {
                 let has_update = if let Some(meta) = &m.metadata {
                     self.mods_with_updates.contains(&meta.mod_id)
                 } else {
@@ -1531,12 +1553,12 @@ impl ModsState {
                 };
                 ml = ml.push(self.view_installed_row(m, has_update, localization, ctx));
             }
-            
+
             // Espacio abajo para mantener scroll total
             if end_idx < self.installed_mods.len() {
-                let space_below = Space::new()
-                    .width(Length::Fill)
-                    .height(Length::Fixed((self.installed_mods.len() - end_idx) as f32 * MOD_ROW_HEIGHT));
+                let space_below = Space::new().width(Length::Fill).height(Length::Fixed(
+                    (self.installed_mods.len() - end_idx) as f32 * MOD_ROW_HEIGHT,
+                ));
                 ml = ml.push(space_below);
             }
         } else if self.patch_mods.is_empty() {
@@ -1547,7 +1569,9 @@ impl ModsState {
         theme::magic_scrollable(
             scrollable(theme::magic_column(content_items, ctx))
                 .id(Id::new(MODS_SCROLL_ID))
-                .on_scroll(|viewport| ModsMessage::ScrollOffsetChanged(viewport.absolute_offset().y))
+                .on_scroll(|viewport| {
+                    ModsMessage::ScrollOffsetChanged(viewport.absolute_offset().y)
+                })
                 .height(Length::Fill)
                 .style(move |t: &Theme, s| theme::scrollable_style(&palette, t, s))
                 .into(),
@@ -1770,7 +1794,6 @@ impl ModsState {
         )
     }
 
-
     fn view_browse<'a>(
         &'a self,
         localization: &'a crate::lang::Localization,
@@ -1814,10 +1837,11 @@ impl ModsState {
         } else {
             // --- VIEWPORT OPTIMIZATION ---
             const MOD_CARD_HEIGHT: f32 = 120.0; // Altura estimada de cada card de mod
-            let (start_idx, end_idx) = self.get_visible_range(MOD_CARD_HEIGHT, self.remote_mods.len(), 1);
-            
+            let (start_idx, end_idx) =
+                self.get_visible_range(MOD_CARD_HEIGHT, self.remote_mods.len(), 1);
+
             let mut l = column([]).spacing(10);
-            
+
             // Espacio arriba para mantener scroll
             if start_idx > 0 {
                 let space_above = Space::new()
@@ -1825,24 +1849,31 @@ impl ModsState {
                     .height(Length::Fixed(start_idx as f32 * MOD_CARD_HEIGHT));
                 l = l.push(space_above);
             }
-            
+
             // Solo renderizar mods visibles
-            for m in self.remote_mods.iter().skip(start_idx).take(end_idx - start_idx) {
+            for m in self
+                .remote_mods
+                .iter()
+                .skip(start_idx)
+                .take(end_idx - start_idx)
+            {
                 l = l.push(self.view_remote_card(m, localization, ctx));
             }
-            
+
             // Espacio abajo para mantener scroll total
             if end_idx < self.remote_mods.len() {
-                let space_below = Space::new()
-                    .width(Length::Fill)
-                    .height(Length::Fixed((self.remote_mods.len() - end_idx) as f32 * MOD_CARD_HEIGHT));
+                let space_below = Space::new().width(Length::Fill).height(Length::Fixed(
+                    (self.remote_mods.len() - end_idx) as f32 * MOD_CARD_HEIGHT,
+                ));
                 l = l.push(space_below);
             }
-            
+
             theme::magic_container(
                 container(theme::magic_scrollable(
                     scrollable(l)
-                        .on_scroll(|viewport| ModsMessage::ScrollOffsetChanged(viewport.absolute_offset().y))
+                        .on_scroll(|viewport| {
+                            ModsMessage::ScrollOffsetChanged(viewport.absolute_offset().y)
+                        })
                         .height(Length::Fill)
                         .style(move |t: &Theme, s| theme::scrollable_style(&palette, t, s))
                         .into(),

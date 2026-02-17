@@ -1,12 +1,12 @@
 use anyhow::{Context, Result};
+use std::io::Read;
 use std::path::PathBuf;
 use std::sync::{Arc, atomic::AtomicBool};
-use std::io::Read;
 use tokio::fs;
 use tokio::io::AsyncReadExt;
 use tokio::task;
 
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 
 /// Integrity checker for patches and downloads using the new patch API system
 #[derive(Clone)]
@@ -23,33 +23,44 @@ impl IntegrityChecker {
     /// Checks if the file exists, is readable, and has valid content
     pub async fn validate_patch_file(&self, pwr_path: &PathBuf) -> anyhow::Result<()> {
         use tokio::fs;
-        
+
         // Check if file exists
         if !pwr_path.exists() {
             anyhow::bail!("Patch file does not exist: {}", pwr_path.display());
         }
-        
+
         // Check file size (should be greater than 0)
-        let metadata = fs::metadata(pwr_path).await
+        let metadata = fs::metadata(pwr_path)
+            .await
             .context("Failed to read patch file metadata")?;
-        
+
         if metadata.len() == 0 {
             anyhow::bail!("Patch file is empty: {}", pwr_path.display());
         }
-        
+
         // Try to read first few bytes to verify it's a valid file
-        let mut file = fs::File::open(pwr_path).await
+        let mut file = fs::File::open(pwr_path)
+            .await
             .context("Failed to open patch file")?;
-        
+
         let mut buffer = [0u8; 1024];
-        let bytes_read = file.read(&mut buffer).await
+        let bytes_read = file
+            .read(&mut buffer)
+            .await
             .context("Failed to read patch file")?;
-        
+
         if bytes_read == 0 {
-            anyhow::bail!("Patch file appears to be corrupted (cannot read): {}", pwr_path.display());
+            anyhow::bail!(
+                "Patch file appears to be corrupted (cannot read): {}",
+                pwr_path.display()
+            );
         }
-        
-        println!("Patch file validation passed: {} ({} bytes)", pwr_path.display(), metadata.len());
+
+        println!(
+            "Patch file validation passed: {} ({} bytes)",
+            pwr_path.display(),
+            metadata.len()
+        );
         Ok(())
     }
 
@@ -58,19 +69,19 @@ impl IntegrityChecker {
     pub async fn verify_extraction_integrity(&self, game_dir: &PathBuf) -> anyhow::Result<()> {
         // List of critical files/directories that must exist after extraction
         let critical_paths = vec![
-            "Client", // Main game client directory
+            "Client",              // Main game client directory
             "Client/HytaleClient", // Main executable (Linux/Mac)
             "Client/HytaleClient.exe", // Main executable (Windows)
-            // Note: Libraries are directly in Client/, not in Client/libs/
-            // We'll check for common library patterns instead
+                                   // Note: Libraries are directly in Client/, not in Client/libs/
+                                   // We'll check for common library patterns instead
         ];
-        
+
         let mut missing_files: Vec<&str> = Vec::new();
         let mut empty_files: Vec<&str> = Vec::new();
-        
+
         for path in &critical_paths {
             let full_path = game_dir.join(path);
-            
+
             if !full_path.exists() {
                 // Skip platform-specific executables that don't apply
                 if path.contains("HytaleClient.exe") && !cfg!(windows) {
@@ -82,7 +93,7 @@ impl IntegrityChecker {
                 missing_files.push(path);
                 continue;
             }
-            
+
             // For files, check they're not empty
             if full_path.is_file() {
                 let metadata = fs::metadata(&full_path).await?;
@@ -91,7 +102,7 @@ impl IntegrityChecker {
                 }
             }
         }
-        
+
         // Additional check: ensure Client directory has substantial content
         let client_dir = game_dir.join("Client");
         if client_dir.exists() {
@@ -99,14 +110,14 @@ impl IntegrityChecker {
             let mut file_count = 0;
             let mut total_size = 0u64;
             let mut has_libraries = false;
-            
+
             while let Ok(Some(entry)) = entries.next_entry().await {
                 if let Ok(metadata) = entry.metadata().await {
                     let path = entry.path();
                     if metadata.is_file() {
                         file_count += 1;
                         total_size += metadata.len();
-                        
+
                         // Check for library files directly in Client/
                         if let Some(extension) = path.extension() {
                             if let Some(ext_str) = extension.to_str() {
@@ -121,40 +132,49 @@ impl IntegrityChecker {
                     }
                 }
             }
-            
+
             // Verify we have libraries and substantial content
             if !has_libraries {
-                anyhow::bail!("No library files found in Client/ directory. Expected .jar, .so, .dll, or .dylib files.");
-            }
-            
-            if file_count < 5 || total_size < 10_000_000 { // Less than 10MB seems suspicious
                 anyhow::bail!(
-                    "Installation appears incomplete: {} files, {} bytes total. Expected at least 5 files and 10MB.",
-                    file_count, total_size
+                    "No library files found in Client/ directory. Expected .jar, .so, .dll, or .dylib files."
                 );
             }
-            
-            println!("Client directory verification passed: {} files, {} bytes, libraries found: {}", 
-                     file_count, total_size, has_libraries);
+
+            if file_count < 5 || total_size < 10_000_000 {
+                // Less than 10MB seems suspicious
+                anyhow::bail!(
+                    "Installation appears incomplete: {} files, {} bytes total. Expected at least 5 files and 10MB.",
+                    file_count,
+                    total_size
+                );
+            }
+
+            println!(
+                "Client directory verification passed: {} files, {} bytes, libraries found: {}",
+                file_count, total_size, has_libraries
+            );
         } else {
             missing_files.push("Client");
         }
-        
+
         if !missing_files.is_empty() || !empty_files.is_empty() {
             let mut error_msg = "Critical game files are missing or corrupted:".to_string();
-            
+
             if !missing_files.is_empty() {
                 error_msg.push_str(&format!("\n  Missing: {}", missing_files.join(", ")));
             }
-            
+
             if !empty_files.is_empty() {
                 error_msg.push_str(&format!("\n  Empty: {}", empty_files.join(", ")));
             }
-            
+
             anyhow::bail!(error_msg);
         }
-        
-        println!("Game extraction verification passed: {} files validated", critical_paths.len());
+
+        println!(
+            "Game extraction verification passed: {} files validated",
+            critical_paths.len()
+        );
         Ok(())
     }
 
@@ -162,16 +182,20 @@ impl IntegrityChecker {
     /// Checks if critical game files exist in the installation directory
     pub async fn verify_install_dir(&self, game_dir: &PathBuf) -> anyhow::Result<()> {
         let critical_paths = vec![
-            "Client", 
-            if cfg!(windows) { "Client/HytaleClient.exe" } else { "Client/HytaleClient" }
+            "Client",
+            if cfg!(windows) {
+                "Client/HytaleClient.exe"
+            } else {
+                "Client/HytaleClient"
+            },
         ];
-        
+
         for path in &critical_paths {
             if !game_dir.join(path).exists() {
                 anyhow::bail!("Missing critical file: {}", path);
             }
         }
-        
+
         Ok(())
     }
 
@@ -187,10 +211,10 @@ impl IntegrityChecker {
     {
         // Clonar path para enviarlo al thread
         let path = patch_path.clone();
-        
+
         // Clonar el callback para poder usarlo después
         let callback = progress_callback.clone();
-        
+
         // Clonar el cancel token para usarlo en el thread bloqueante
         let cancel_token_clone = cancel_token.clone();
 
@@ -199,42 +223,44 @@ impl IntegrityChecker {
             // Toda esta logica ahora ocurre en un thread independiente que no congela la UI
             let mut file = std::fs::File::open(&path)
                 .context("Failed to open patch file for integrity check")?;
-            
-            let file_size = file.metadata()
+
+            let file_size = file
+                .metadata()
                 .context("Failed to get patch file metadata")?
                 .len();
-            
+
             let mut hasher = Sha256::new();
             // Buffer adaptativo: más grande para HDD, más pequeño para SSD
             // 2MB para balance general en HDD lentos
-            let mut buffer = vec![0; 2 * 1024 * 1024]; 
+            let mut buffer = vec![0; 2 * 1024 * 1024];
             let mut bytes_read_total: u64 = 0;
             let mut loops: u64 = 0;
-            
+
             if let Some(cb) = &callback {
                 cb(0.0, "Starting checksum calculation...");
             }
-            
+
             loop {
-                let bytes_read = file.read(&mut buffer)
+                let bytes_read = file
+                    .read(&mut buffer)
                     .context("Failed to read patch file")?;
-                
+
                 if bytes_read == 0 {
                     break;
                 }
-                
+
                 hasher.update(&buffer[..bytes_read]);
                 bytes_read_total += bytes_read as u64;
-                
+
                 loops += 1;
-                
+
                 // Verificar cancelación cada ciertas iteraciones
                 if let Some(token) = &cancel_token_clone {
                     if token.load(std::sync::atomic::Ordering::Relaxed) {
                         return Err(anyhow::anyhow!("Checksum verification cancelled by user"));
                     }
                 }
-                
+
                 // Throttle para HDD: Actualizar cada 50MB aprox (menos frecuente para reducir overhead)
                 if loops % 25 == 0 || bytes_read_total == file_size {
                     if let Some(cb) = &callback {
@@ -243,59 +269,64 @@ impl IntegrityChecker {
                         } else {
                             0.0
                         };
-                        
+
                         // Formatear porcentaje solo para el callback
                         let pct_str = format!("{:.0}%", progress * 100.0);
                         cb(progress, &format!("Calculating checksum... {}", pct_str));
                     }
                 }
             }
-            
+
             let hash = hasher.finalize();
             Ok::<String, anyhow::Error>(format!("{:x}", hash))
-        }).await??; // Doble ? (uno para join error, otro para el result interno)
-        
+        })
+        .await??; // Doble ? (uno para join error, otro para el result interno)
+
         // Reportar finalización inmediatamente después de volver al contexto async
         if let Some(callback) = &progress_callback {
             callback(1.0, "Checksum calculation completed");
         }
-        
+
         Ok(result)
     }
 
     /// Verifies patch signature using Ed25519
-    pub async fn verify_patch_signature(&self, patch_path: &PathBuf, signature_path: &PathBuf) -> Result<bool> {
-        use ed25519_dalek::{Verifier, Signature};
-        
+    pub async fn verify_patch_signature(
+        &self,
+        patch_path: &PathBuf,
+        signature_path: &PathBuf,
+    ) -> Result<bool> {
+        use ed25519_dalek::{Signature, Verifier};
+
         if !signature_path.exists() {
             return Ok(false);
         }
-        
+
         if !patch_path.exists() {
             return Ok(false);
         }
-        
+
         // Read signature file
         let signature_bytes = fs::read(signature_path)
             .await
             .context("Failed to read signature file")?;
-        
+
         // Read patch file
         let patch_bytes = fs::read(patch_path)
             .await
             .context("Failed to read patch file")?;
-        
+
         // Try to parse signature (64 bytes for Ed25519)
         if signature_bytes.len() != 64 {
             return Ok(false);
         }
-        
+
         let signature_array: [u8; 64] = signature_bytes.clone().try_into().unwrap();
         let signature = Signature::from_bytes(&signature_array);
-        
+
         // Load public key from trusted source
         let public_key = self.load_trusted_public_key().await?;
-        
+
         // Verify signature
         match public_key.verify(&patch_bytes, &signature) {
             Ok(()) => Ok(true),
@@ -308,29 +339,30 @@ impl IntegrityChecker {
         // Try to load from config directory first
         if let Some(config_dir) = crate::config::get_app_dir().to_str() {
             let pubkey_path = PathBuf::from(config_dir).join("trusted_public_key.bin");
-            
+
             if pubkey_path.exists() {
                 let pubkey_bytes = fs::read(&pubkey_path)
                     .await
                     .context("Failed to read trusted public key")?;
-                
+
                 if pubkey_bytes.len() == 32 {
-                    if let Ok(key) = ed25519_dalek::VerifyingKey::from_bytes(&pubkey_bytes.try_into().unwrap()) {
-                         return Ok(key);
+                    if let Ok(key) =
+                        ed25519_dalek::VerifyingKey::from_bytes(&pubkey_bytes.try_into().unwrap())
+                    {
+                        return Ok(key);
                     }
                 }
             }
         }
-        
+
         // Fallback to embedded trusted key (for Hytale official patches)
         // This would be the official Hytale public key in a real implementation
         let trusted_key = [
-            0x2d, 0x8d, 0x3c, 0x8a, 0x1b, 0xe5, 0x0f, 0x9c,
-            0x4d, 0x2a, 0x7f, 0x9b, 0x3c, 0x8a, 0x1b, 0xe5,
-            0x0f, 0x9c, 0x4d, 0x2a, 0x7f, 0x9b, 0x3c, 0x8a,
-            0x1b, 0xe5, 0x0f, 0x9c, 0x4d, 0x2a, 0x7f, 0x9b,
+            0x2d, 0x8d, 0x3c, 0x8a, 0x1b, 0xe5, 0x0f, 0x9c, 0x4d, 0x2a, 0x7f, 0x9b, 0x3c, 0x8a,
+            0x1b, 0xe5, 0x0f, 0x9c, 0x4d, 0x2a, 0x7f, 0x9b, 0x3c, 0x8a, 0x1b, 0xe5, 0x0f, 0x9c,
+            0x4d, 0x2a, 0x7f, 0x9b,
         ];
-        
+
         Ok(ed25519_dalek::VerifyingKey::from_bytes(&trusted_key).unwrap())
     }
 
@@ -347,48 +379,53 @@ impl IntegrityChecker {
         F: Fn(f64, &str) + Send + Sync + Clone + 'static,
     {
         let mut result = IntegrityResult::new();
-        
+
         if let Some(callback) = &progress_callback {
             callback(0.0, "Starting integrity verification...");
         }
-        
+
         // Check file exists
         if !patch_path.exists() {
             result.valid = false;
             result.errors.push("Patch file does not exist".to_string());
             return Ok(result);
         }
-        
+
         if let Some(callback) = &progress_callback {
             callback(0.1, "Checking file existence...");
         }
-        
+
         // Check file size
         let actual_size = fs::metadata(patch_path)
             .await
             .context("Failed to get patch metadata")?
             .len();
-        
+
         result.actual_size = Some(actual_size);
-        
+
         if let Some(expected) = expected_size {
             if let Some(callback) = &progress_callback {
                 callback(0.2, "Verifying file size...");
             }
             if actual_size != expected {
                 result.valid = false;
-                result.errors.push(format!("Size mismatch: expected {}, got {}", expected, actual_size));
+                result.errors.push(format!(
+                    "Size mismatch: expected {}, got {}",
+                    expected, actual_size
+                ));
             }
         }
-        
+
         // Calculate checksum
         if let Some(callback) = &progress_callback {
             callback(0.0, "Calculating checksum...");
         }
-        
+
         // Create a callback for checksum progress (0.0-1.0 range)
         use std::sync::Arc;
-        let checksum_callback: Option<Arc<dyn Fn(f64, &str) + Send + Sync>> = progress_callback.clone().map(|cb| Arc::new(cb) as Arc<dyn Fn(f64, &str) + Send + Sync>);
+        let checksum_callback: Option<Arc<dyn Fn(f64, &str) + Send + Sync>> = progress_callback
+            .clone()
+            .map(|cb| Arc::new(cb) as Arc<dyn Fn(f64, &str) + Send + Sync>);
         let checksum_callback_clone = checksum_callback.clone();
         let scaled_callback = move |pct: f64, msg: &str| {
             // Reportar el progreso real del checksum (0.0-1.0)
@@ -396,10 +433,13 @@ impl IntegrityChecker {
                 cb(pct, msg);
             }
         };
-        
+
         // CAMBIO IMPORTANTE: .await
         // verify_patch_integrity ahora se llama async
-        match self.verify_patch_integrity(patch_path, Some(scaled_callback), cancel_token).await {
+        match self
+            .verify_patch_integrity(patch_path, Some(scaled_callback), cancel_token)
+            .await
+        {
             Ok(checksum) => {
                 result.checksum = Some(checksum.clone());
                 result.checksum_valid = true;
@@ -409,10 +449,12 @@ impl IntegrityChecker {
             }
             Err(e) => {
                 result.valid = false;
-                result.errors.push(format!("Failed to calculate checksum: {}", e));
+                result
+                    .errors
+                    .push(format!("Failed to calculate checksum: {}", e));
             }
         }
-        
+
         // Verify signature if provided
         if let Some(sig_path) = signature_path {
             if let Some(callback) = &progress_callback {
@@ -427,7 +469,9 @@ impl IntegrityChecker {
                         }
                     } else {
                         result.valid = false;
-                        result.errors.push("Signature verification failed".to_string());
+                        result
+                            .errors
+                            .push("Signature verification failed".to_string());
                         if let Some(callback) = &progress_callback {
                             callback(0.9, "⚠️ Digital signature verification failed");
                         }
@@ -435,7 +479,9 @@ impl IntegrityChecker {
                 }
                 Err(e) => {
                     result.valid = false;
-                    result.errors.push(format!("Failed to verify signature: {}", e));
+                    result
+                        .errors
+                        .push(format!("Failed to verify signature: {}", e));
                     if let Some(callback) = &progress_callback {
                         callback(0.9, &format!("❌ Signature verification error: {}", e));
                     }
@@ -443,10 +489,13 @@ impl IntegrityChecker {
             }
         } else {
             if let Some(callback) = &progress_callback {
-                callback(0.8, "No signature provided - skipping signature verification");
+                callback(
+                    0.8,
+                    "No signature provided - skipping signature verification",
+                );
             }
         }
-        
+
         if let Some(callback) = &progress_callback {
             if result.is_valid() {
                 callback(1.0, "✅ Integrity verification completed");
@@ -454,7 +503,7 @@ impl IntegrityChecker {
                 callback(1.0, "❌ Integrity verification failed");
             }
         }
-        
+
         Ok(result)
     }
 
@@ -463,11 +512,11 @@ impl IntegrityChecker {
         if !patch_path.exists() {
             return Ok(false);
         }
-        
+
         let metadata = fs::metadata(patch_path)
             .await
             .context("Failed to get patch metadata")?;
-        
+
         // Check if file has reasonable size (> 0 and < 10GB)
         let size = metadata.len();
         Ok(size > 0 && size < 10_000_000_000)
@@ -476,27 +525,29 @@ impl IntegrityChecker {
     /// Validates patch file format
     pub fn validate_patch_format(&self, patch_path: &PathBuf) -> Result<FormatValidationResult> {
         let mut result = FormatValidationResult::new();
-        
+
         if !patch_path.exists() {
             result.valid = false;
             result.errors.push("Patch file does not exist".to_string());
             return Ok(result);
         }
-        
-        let mut file = std::fs::File::open(patch_path)
-            .context("Failed to open patch file")?;
-        
+
+        let mut file = std::fs::File::open(patch_path).context("Failed to open patch file")?;
+
         // Read first few bytes to check format
         let mut header = [0; 16];
-        let bytes_read = file.read(&mut header)
+        let bytes_read = file
+            .read(&mut header)
             .context("Failed to read patch header")?;
-        
+
         if bytes_read < 4 {
             result.valid = false;
-            result.errors.push("File too small to be a valid patch".to_string());
+            result
+                .errors
+                .push("File too small to be a valid patch".to_string());
             return Ok(result);
         }
-        
+
         // Check for common patch formats
         if header.starts_with(b"PWR") {
             result.format = Some("PWR".to_string());
@@ -511,7 +562,7 @@ impl IntegrityChecker {
             result.valid = false;
             result.errors.push("Unknown patch format".to_string());
         }
-        
+
         Ok(result)
     }
 }
@@ -540,11 +591,11 @@ impl IntegrityResult {
             warnings: Vec::new(),
         }
     }
-    
+
     pub fn is_valid(&self) -> bool {
         self.valid && self.errors.is_empty()
     }
-    
+
     pub fn has_warnings(&self) -> bool {
         !self.warnings.is_empty()
     }
@@ -568,7 +619,7 @@ impl FormatValidationResult {
             warnings: Vec::new(),
         }
     }
-    
+
     pub fn is_valid(&self) -> bool {
         self.valid && self.errors.is_empty()
     }

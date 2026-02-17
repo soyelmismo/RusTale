@@ -15,7 +15,7 @@ fn parse_version(version: &str) -> Vec<u32> {
 fn should_update(local: &str, remote: &str) -> bool {
     let local_parts = parse_version(local);
     let remote_parts = parse_version(remote);
-    
+
     // Siempre actualizar si las versiones son diferentes (upgrade o downgrade)
     local_parts != remote_parts
 }
@@ -23,19 +23,19 @@ fn should_update(local: &str, remote: &str) -> bool {
 fn is_downgrade(local: &str, remote: &str) -> bool {
     let local_parts = parse_version(local);
     let remote_parts = parse_version(remote);
-    
+
     // Comparar versión por versión
     for i in 0..std::cmp::max(local_parts.len(), remote_parts.len()) {
         let local = local_parts.get(i).unwrap_or(&0);
         let remote = remote_parts.get(i).unwrap_or(&0);
-        
+
         if remote < local {
             return true; // Es downgrade
         } else if remote > local {
             return false; // Es upgrade
         }
     }
-    
+
     false // Mismas versiones
 }
 
@@ -99,9 +99,15 @@ pub async fn check_for_updates(client: &Client) -> Result<Option<ReleaseInfo>> {
     if should_update(&local_ver, &remote_ver) {
         if get_asset_url(&release).is_some() {
             if is_downgrade(&local_ver, &remote_ver) {
-                println!("[Updater] Downgrade detected: v{} -> v{}", local_ver, remote_ver);
+                println!(
+                    "[Updater] Downgrade detected: v{} -> v{}",
+                    local_ver, remote_ver
+                );
             } else {
-                println!("[Updater] Upgrade detected: v{} -> v{}", local_ver, remote_ver);
+                println!(
+                    "[Updater] Upgrade detected: v{} -> v{}",
+                    local_ver, remote_ver
+                );
             }
             return Ok(Some(release));
         }

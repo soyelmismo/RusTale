@@ -8,8 +8,7 @@ use crate::game::paths::GamePaths;
 
 /// Downloader for game patches using the new patch API system
 #[derive(Clone)]
-pub struct PatchDownloader {
-}
+pub struct PatchDownloader {}
 
 impl PatchDownloader {
     pub fn new() -> Self {
@@ -32,23 +31,43 @@ impl PatchDownloader {
         tokio::fs::create_dir_all(&cache_dir).await?;
 
         // Get patch URL from patch API
-        let patch_url = PatchApiManager::get_patch_url_static(channel, std::env::consts::OS, get_arch_name(), from_version, to_version).await
-            .context("Failed to get patch download URL")?;
+        let patch_url = PatchApiManager::get_patch_url_static(
+            channel,
+            std::env::consts::OS,
+            get_arch_name(),
+            from_version,
+            to_version,
+        )
+        .await
+        .context("Failed to get patch download URL")?;
 
         // Generate filename
-        let filename = format!("{}~{}-{}-{}.pwr", from_version, to_version, std::env::consts::OS, get_arch_name());
+        let filename = format!(
+            "{}~{}-{}-{}.pwr",
+            from_version,
+            to_version,
+            std::env::consts::OS,
+            get_arch_name()
+        );
         let patch_path = cache_dir.join(&filename);
 
         // Download if not cached
         if !patch_path.exists() {
-            progress_callback("patch", 0.0, &format!("Downloading patch {}→{}...", from_version, to_version), 0, 0, None, Some(0));
+            progress_callback(
+                "patch",
+                0.0,
+                &format!("Downloading patch {}→{}...", from_version, to_version),
+                0,
+                0,
+                None,
+                Some(0),
+            );
 
             crate::game::downloader::download_file(
                 client,
                 &patch_url,
                 &patch_path,
                 |pct, speed, total, downloaded, eta| {
-                    
                     progress_callback(
                         "patch",
                         pct as f64,
@@ -60,11 +79,28 @@ impl PatchDownloader {
                     );
                 },
                 cancel_token,
-            ).await?;
+            )
+            .await?;
 
-            progress_callback("patch", 100.0, &format!("Patch {}→{} downloaded", from_version, to_version), 0, 0, None, Some(0));
+            progress_callback(
+                "patch",
+                100.0,
+                &format!("Patch {}→{} downloaded", from_version, to_version),
+                0,
+                0,
+                None,
+                Some(0),
+            );
         } else {
-            progress_callback("patch", 100.0, &format!("Patch {}→{} found in cache", from_version, to_version), 0, 0, None, Some(0));
+            progress_callback(
+                "patch",
+                100.0,
+                &format!("Patch {}→{} found in cache", from_version, to_version),
+                0,
+                0,
+                None,
+                Some(0),
+            );
         }
 
         Ok(patch_path)
@@ -88,23 +124,46 @@ impl PatchDownloader {
             target_version,
             progress_callback,
             cancel_token,
-        ).await
+        )
+        .await
     }
 
     /// Checks if patch is cached
-    pub async fn is_patch_cached(&self, base_dir: &PathBuf, from_version: i32, to_version: i32) -> Result<bool> {
+    pub async fn is_patch_cached(
+        &self,
+        base_dir: &PathBuf,
+        from_version: i32,
+        to_version: i32,
+    ) -> Result<bool> {
         let cache_dir = crate::config::get_cache_dir("patches").await;
-        let filename = format!("{}~{}-{}-{}.pwr", from_version, to_version, std::env::consts::OS, get_arch_name());
+        let filename = format!(
+            "{}~{}-{}-{}.pwr",
+            from_version,
+            to_version,
+            std::env::consts::OS,
+            get_arch_name()
+        );
         let patch_path = cache_dir.join(&filename);
         Ok(patch_path.exists())
     }
 
     /// Gets cached patch path if exists
-    pub async fn get_cached_patch_path(&self, base_dir: &PathBuf, from_version: i32, to_version: i32) -> Result<Option<PathBuf>> {
+    pub async fn get_cached_patch_path(
+        &self,
+        base_dir: &PathBuf,
+        from_version: i32,
+        to_version: i32,
+    ) -> Result<Option<PathBuf>> {
         let cache_dir = crate::config::get_cache_dir("patches").await;
-        let filename = format!("{}~{}-{}-{}.pwr", from_version, to_version, std::env::consts::OS, get_arch_name());
+        let filename = format!(
+            "{}~{}-{}-{}.pwr",
+            from_version,
+            to_version,
+            std::env::consts::OS,
+            get_arch_name()
+        );
         let patch_path = cache_dir.join(&filename);
-        
+
         if patch_path.exists() {
             Ok(Some(patch_path))
         } else {
@@ -112,4 +171,3 @@ impl PatchDownloader {
         }
     }
 }
-

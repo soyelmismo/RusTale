@@ -1,5 +1,5 @@
-use async_trait::async_trait;
 use anyhow::Result;
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -20,15 +20,15 @@ pub struct GenericMod {
     pub website_url: String,
     pub provider: ModProvider,
     // Metadatos internos del proveedor (guardar el struct original si hace falta)
-    pub latest_files: Vec<GenericFile>, 
+    pub latest_files: Vec<GenericFile>,
 }
 
 // Representa una version especifica descargable
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GenericFile {
     pub file_id: String,
-    pub name: String,        // Nombre del archivo (ej: "mod-v1.2.jar")
-    pub version_name: String,// Nombre de la version (ej: "v1.2 Release")
+    pub name: String,         // Nombre del archivo (ej: "mod-v1.2.jar")
+    pub version_name: String, // Nombre de la version (ej: "v1.2 Release")
     pub download_url: Option<String>,
     pub release_date: chrono::DateTime<chrono::Utc>,
     pub game_versions: Vec<String>, // Versiones compatibles del juego
@@ -46,7 +46,7 @@ impl std::fmt::Display for GenericFile {
         } else {
             &self.name
         };
-        
+
         // Mostrar versiones de juego compatibles de forma truncada si es muy larga
         let game_versions = if self.game_versions.is_empty() {
             "Any".to_string()
@@ -58,7 +58,7 @@ impl std::fmt::Display for GenericFile {
                 joined
             }
         };
-        
+
         // Formato: "version_name [game_versions]" - mas claro para el usuario
         write!(f, "{} [{}]", display_version, game_versions)
     }
@@ -68,7 +68,7 @@ impl std::fmt::Display for GenericFile {
 #[async_trait]
 pub trait ModRepository: Send + Sync {
     async fn search(&self, query: &str, index: u32, page_size: u32) -> Result<SearchResults>;
-    
+
     // Obtener versiones disponibles para un Mod
     async fn get_versions(&self, mod_id: &str) -> Result<Vec<GenericFile>>;
 }

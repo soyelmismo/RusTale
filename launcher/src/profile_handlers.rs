@@ -1,9 +1,8 @@
 /// Profile management handlers
 /// Extracts profile-related logic from main.rs
-
 use crate::config::{self, Profile};
 use crate::{Message, RusTale};
-use iced::{clipboard, Task};
+use iced::{Task, clipboard};
 
 impl RusTale {
     /// Handles all profile-related messages
@@ -19,12 +18,13 @@ impl RusTale {
                 // Save profiles asynchronously
                 let profiles = self.profiles.clone();
                 Task::perform(
-                    async move {
-                        config::save_profiles(&profiles).await
-                    },
+                    async move { config::save_profiles(&profiles).await },
                     |result| {
                         if let Err(e) = result {
-                            return Message::DownloadError(format!("Failed to save profile: {}", e));
+                            return Message::DownloadError(format!(
+                                "Failed to save profile: {}",
+                                e
+                            ));
                         }
                         Message::None
                     },
@@ -60,12 +60,13 @@ impl RusTale {
                     // Save profiles asynchronously
                     let profiles = self.profiles.clone();
                     return Task::perform(
-                        async move {
-                            config::save_profiles(&profiles).await
-                        },
+                        async move { config::save_profiles(&profiles).await },
                         |result| {
                             if let Err(e) = result {
-                                return Message::DownloadError(format!("Failed to save profile: {}", e));
+                                return Message::DownloadError(format!(
+                                    "Failed to save profile: {}",
+                                    e
+                                ));
                             }
                             Message::None
                         },
@@ -87,8 +88,11 @@ impl RusTale {
                         match id {
                             Some(existing_id) => {
                                 // Edit existing profile
-                                if let Some(profile) =
-                                    self.profiles.profiles.iter_mut().find(|p| p.id == existing_id)
+                                if let Some(profile) = self
+                                    .profiles
+                                    .profiles
+                                    .iter_mut()
+                                    .find(|p| p.id == existing_id)
                                 {
                                     profile.name = name;
                                 }
@@ -107,12 +111,13 @@ impl RusTale {
                         // Save profiles asynchronously
                         let profiles = self.profiles.clone();
                         return Task::perform(
-                            async move {
-                                config::save_profiles(&profiles).await
-                            },
+                            async move { config::save_profiles(&profiles).await },
                             |result| {
                                 if let Err(e) = result {
-                                    return Message::DownloadError(format!("Failed to save profile: {}", e));
+                                    return Message::DownloadError(format!(
+                                        "Failed to save profile: {}",
+                                        e
+                                    ));
                                 }
                                 Message::None
                             },
@@ -145,7 +150,8 @@ impl RusTale {
             Message::SaveProfileUUID => {
                 if let Some((id, uuid_str)) = self.editing_uuid.take() {
                     if let Ok(new_uuid) = uuid::Uuid::parse_str(&uuid_str) {
-                        if let Some(profile) = self.profiles.profiles.iter_mut().find(|p| p.id == id)
+                        if let Some(profile) =
+                            self.profiles.profiles.iter_mut().find(|p| p.id == id)
                         {
                             profile.id = new_uuid;
 
@@ -157,12 +163,13 @@ impl RusTale {
                             // Save profiles asynchronously
                             let profiles = self.profiles.clone();
                             return Task::perform(
-                                async move {
-                                    config::save_profiles(&profiles).await
-                                },
+                                async move { config::save_profiles(&profiles).await },
                                 |result| {
                                     if let Err(e) = result {
-                                        return Message::DownloadError(format!("Failed to save profile: {}", e));
+                                        return Message::DownloadError(format!(
+                                            "Failed to save profile: {}",
+                                            e
+                                        ));
                                     }
                                     Message::None
                                 },

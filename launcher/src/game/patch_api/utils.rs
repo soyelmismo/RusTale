@@ -2,76 +2,74 @@
 
 /// Format bytes in human-readable format
 pub fn format_bytes(bytes: u64) -> String {
-    if bytes > 1_000_000_000 { 
-        format!("{:.2} GB", bytes as f64 / 1_073_741_824.0) 
-    } else if bytes > 1_000_000 { 
-        format!("{:.1} MB", bytes as f64 / 1_048_576.0) 
-    } else if bytes > 1_000 { 
-        format!("{:.1} KB", bytes as f64 / 1024.0) 
-    } else { 
-        format!("{} B", bytes) 
+    if bytes > 1_000_000_000 {
+        format!("{:.2} GB", bytes as f64 / 1_073_741_824.0)
+    } else if bytes > 1_000_000 {
+        format!("{:.1} MB", bytes as f64 / 1_048_576.0)
+    } else if bytes > 1_000 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{} B", bytes)
     }
 }
 
 /// Format speed in human-readable format
 pub fn format_speed(bytes_per_sec: f64) -> String {
-    if bytes_per_sec > 1_000_000.0 { 
-        format!("{:.2} MB/s", bytes_per_sec / 1_048_576.0) 
-    } else if bytes_per_sec > 1_000.0 { 
-        format!("{:.2} KB/s", bytes_per_sec / 1024.0) 
-    } else { 
-        format!("{:.0} B/s", bytes_per_sec) 
+    if bytes_per_sec > 1_000_000.0 {
+        format!("{:.2} MB/s", bytes_per_sec / 1_048_576.0)
+    } else if bytes_per_sec > 1_000.0 {
+        format!("{:.2} KB/s", bytes_per_sec / 1024.0)
+    } else {
+        format!("{:.0} B/s", bytes_per_sec)
     }
 }
-
 
 /// Check if a filename looks like a JRE distribution file
 pub fn looks_like_jre_file(filename: &str) -> bool {
     let filename_lower = filename.to_lowercase();
-    
+
     // Check if it's a compressed archive (likely JRE distribution)
-    let is_archive = filename_lower.ends_with(".tar.gz") || 
-                   filename_lower.ends_with(".zip") ||
-                   filename_lower.ends_with(".tar");
-    
+    let is_archive = filename_lower.ends_with(".tar.gz")
+        || filename_lower.ends_with(".zip")
+        || filename_lower.ends_with(".tar");
+
     // Check if it's related to Java/JRE
-    let is_java = filename_lower.contains("jre") || 
-                 filename_lower.contains("jdk") || 
-                 filename_lower.contains("java") ||
-                 filename_lower.contains("openjdk");
-    
+    let is_java = filename_lower.contains("jre")
+        || filename_lower.contains("jdk")
+        || filename_lower.contains("java")
+        || filename_lower.contains("openjdk");
+
     // Exclude common non-JRE files
-    let is_excluded = filename_lower.contains("readme") ||
-                     filename_lower.contains("license") ||
-                     filename_lower.contains("changelog") ||
-                     filename_lower.contains(".txt") ||
-                     filename_lower.contains(".md");
-    
+    let is_excluded = filename_lower.contains("readme")
+        || filename_lower.contains("license")
+        || filename_lower.contains("changelog")
+        || filename_lower.contains(".txt")
+        || filename_lower.contains(".md");
+
     is_archive && is_java && !is_excluded
 }
 
 /// Check if a filename looks like a Butler distribution file
 pub fn looks_like_butler_file(filename: &str) -> bool {
     let filename_lower = filename.to_lowercase();
-    
+
     // Check if it's a compressed archive
-    let is_archive = filename_lower.ends_with(".tar.gz") || 
-                   filename_lower.ends_with(".zip") ||
-                   filename_lower.ends_with(".tar");
-    
+    let is_archive = filename_lower.ends_with(".tar.gz")
+        || filename_lower.ends_with(".zip")
+        || filename_lower.ends_with(".tar");
+
     // Check if it's related to Butler
     let is_butler = filename_lower.contains("butler");
-    
+
     // Exclude common non-Butler files
-    let is_excluded = filename_lower.contains("readme") ||
-                     filename_lower.contains("license") ||
-                     filename_lower.contains("changelog") ||
-                     filename_lower.contains(".txt") ||
-                     filename_lower.contains(".md");
-    
+    let is_excluded = filename_lower.contains("readme")
+        || filename_lower.contains("license")
+        || filename_lower.contains("changelog")
+        || filename_lower.contains(".txt")
+        || filename_lower.contains(".md");
+
     is_archive && is_butler && !is_excluded
 }
-
 
 /// Extract version range from filename for patches
 /// Returns (from_version, to_version)
@@ -79,7 +77,7 @@ pub fn extract_versions_from_filename(filename: &str) -> Option<(i32, i32)> {
     if let Some(start) = filename.find('v') {
         let version_part = &filename[start + 1..];
         let version_part = version_part.split('-').next()?;
-        
+
         if let Some(tilde_pos) = version_part.find('~') {
             // Incremental format: "19~20" -> (19, 20)
             let from_part = &version_part[..tilde_pos];
@@ -100,9 +98,6 @@ pub fn extract_versions_from_filename(filename: &str) -> Option<(i32, i32)> {
     }
 }
 
-
-
-
 /// Get architecture name in standard format
 pub fn get_arch_name() -> &'static str {
     match std::env::consts::ARCH {
@@ -112,12 +107,13 @@ pub fn get_arch_name() -> &'static str {
     }
 }
 
-
-
 /// Get Butler download URL from itch.io CDN fallback
 /// This works as a universal fallback for all platforms
 pub fn get_butler_fallback_url(os: &str, arch: &str) -> String {
-    format!("https://broth.itch.zone/butler/{}-{}/LATEST/archive.zip", os, arch)
+    format!(
+        "https://broth.itch.zone/butler/{}-{}/LATEST/archive.zip",
+        os, arch
+    )
 }
 
 /// Get Java download URL from Adoptium (Temurin) CDN fallback
@@ -125,10 +121,10 @@ pub fn get_butler_fallback_url(os: &str, arch: &str) -> String {
 pub fn get_java_adoptium_url(os: &str, arch: &str) -> String {
     // Map to Adoptium's naming conventions
     let os_name = match os {
-        "darwin" => "mac",  // Adoptium uses "mac" instead of "darwin"
+        "darwin" => "mac", // Adoptium uses "mac" instead of "darwin"
         _ => os,
     };
-    
+
     let arch_name = match arch {
         "amd64" | "x86_64" => "x64", // They don't use amd64, Adoptium uses x64
         "aarch64" | "arm64" => "aarch64",
@@ -151,10 +147,10 @@ pub async fn check_file_exists(client: &reqwest::Client, url: &str) -> bool {
 
 /// Generic version discovery using exponential and binary search
 /// Accepts a future-returning closure to check if a version exists
-pub async fn find_latest_version_generic<F, Fut>(current: i32, mut check_exists: F) -> i32 
-where 
+pub async fn find_latest_version_generic<F, Fut>(current: i32, mut check_exists: F) -> i32
+where
     F: FnMut(i32) -> Fut,
-    Fut: std::future::Future<Output = bool>
+    Fut: std::future::Future<Output = bool>,
 {
     let current = if current <= 0 { 1 } else { current };
     let mut last_version = current;
@@ -167,8 +163,11 @@ where
         }
         while last_version + 1 < cur_version {
             let middle = (cur_version + last_version) / 2;
-            if check_exists(middle).await { last_version = middle; } 
-            else { cur_version = middle; }
+            if check_exists(middle).await {
+                last_version = middle;
+            } else {
+                cur_version = middle;
+            }
         }
     }
     last_version
@@ -177,7 +176,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     #[test]
     fn test_looks_like_jre_file() {
@@ -197,11 +195,16 @@ mod tests {
 
     #[test]
     fn test_extract_versions_from_filename() {
-        assert_eq!(extract_versions_from_filename("v8-linux-amd64.pwr"), Some((0, 8)));
-        assert_eq!(extract_versions_from_filename("v19~20-linux-amd64.pwr"), Some((19, 20)));
+        assert_eq!(
+            extract_versions_from_filename("v8-linux-amd64.pwr"),
+            Some((0, 8))
+        );
+        assert_eq!(
+            extract_versions_from_filename("v19~20-linux-amd64.pwr"),
+            Some((19, 20))
+        );
         assert_eq!(extract_versions_from_filename("invalid.txt"), None);
     }
-
 
     #[test]
     fn test_get_butler_fallback_url() {

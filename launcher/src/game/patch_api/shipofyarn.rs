@@ -1,7 +1,7 @@
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::Deserialize;
-use anyhow::{Context, Result};
 use std::collections::HashMap;
 
 use super::traits::PatchProvider;
@@ -37,7 +37,6 @@ pub struct PlatformFiles {
     pub patch: Option<HashMap<String, String>>,
 }
 
-
 /// ShipOfYarn API provider (fallback API)
 pub struct ShipOfYarnProvider {
     client: Client,
@@ -57,7 +56,8 @@ impl ShipOfYarnProvider {
             return Ok(cached.clone());
         }
 
-        let response = self.client
+        let response = self
+            .client
             .get(SHIPOFYARN_API_URL)
             .send()
             .await
@@ -67,13 +67,14 @@ impl ShipOfYarnProvider {
             anyhow::bail!("ShipOfYarn API returned status: {}", response.status());
         }
 
-        let response_text = response.text().await.context("Failed to read response body")?;
-        
+        let response_text = response
+            .text()
+            .await
+            .context("Failed to read response body")?;
+
         let data: ShipOfYarnAPI = serde_json::from_str(&response_text)
-            .map_err(|e| {
-                anyhow::anyhow!("Failed to decode ShipOfYarn response: {}", e)
-            })?;
-        
+            .map_err(|e| anyhow::anyhow!("Failed to decode ShipOfYarn response: {}", e))?;
+
         Ok(data)
     }
 
@@ -95,7 +96,6 @@ impl ShipOfYarnProvider {
         }
     }
 
-            
     fn extract_version_from_filename(filename: &str) -> Option<i32> {
         if let Some((_, to)) = extract_versions_from_filename(filename) {
             Some(to)
@@ -104,7 +104,14 @@ impl ShipOfYarnProvider {
         }
     }
 
-    async fn get_version_url(&self, channel: &str, os: &str, arch: &str, prev_version: i32, target_version: i32) -> Result<String> {
+    async fn get_version_url(
+        &self,
+        channel: &str,
+        os: &str,
+        arch: &str,
+        prev_version: i32,
+        target_version: i32,
+    ) -> Result<String> {
         let data = self.fetch_data().await?;
         let channel_data = self.get_channel(&data, channel)?;
         let os_data = Self::get_files_for_current_os(channel_data)?;
@@ -123,7 +130,14 @@ impl ShipOfYarnProvider {
             }
         }
 
-        anyhow::bail!("Patch {}->{} not found for channel {} on {}-{}", prev_version, target_version, channel, os, arch)
+        anyhow::bail!(
+            "Patch {}->{} not found for channel {} on {}-{}",
+            prev_version,
+            target_version,
+            channel,
+            os,
+            arch
+        )
     }
 }
 
@@ -161,17 +175,22 @@ impl PatchProvider for ShipOfYarnProvider {
         Ok(max_version)
     }
 
-    async fn get_available_versions(&self, channel: &str, os: &str, _arch: &str) -> Result<Vec<i32>> {
+    async fn get_available_versions(
+        &self,
+        channel: &str,
+        os: &str,
+        _arch: &str,
+    ) -> Result<Vec<i32>> {
         let data = self.fetch_data().await?;
         let channel_data = self.get_channel(&data, channel)?;
         let os_data = Self::get_files_for_current_os(channel_data)?;
 
         let mut complete_versions = std::collections::HashSet::new();
         let mut incremental_versions = std::collections::HashSet::new();
-        
+
         // Always include version 0 as base version
         complete_versions.insert(0);
-        
+
         // Extract version numbers from filenames
         for filename in os_data.keys() {
             if let Some((from_ver, to_ver)) = extract_versions_from_filename(filename) {
@@ -200,20 +219,34 @@ impl PatchProvider for ShipOfYarnProvider {
         } else {
             complete_versions.into_iter().collect()
         };
-        
+
         result.sort();
         Ok(result)
     }
 
-    async fn get_patch_url(&self, channel: &str, os: &str, arch: &str, from_version: i32, to_version: i32) -> Result<String> {
-        self.get_version_url(channel, os, arch, from_version, to_version).await
+    async fn get_patch_url(
+        &self,
+        channel: &str,
+        os: &str,
+        arch: &str,
+        from_version: i32,
+        to_version: i32,
+    ) -> Result<String> {
+        self.get_version_url(channel, os, arch, from_version, to_version)
+            .await
     }
 
-    async fn has_complete_version(&self, channel: &str, os: &str, arch: &str, version: i32) -> Result<bool> {
+    async fn has_complete_version(
+        &self,
+        channel: &str,
+        os: &str,
+        arch: &str,
+        version: i32,
+    ) -> Result<bool> {
         let data = self.fetch_data().await?;
         let channel_data = self.get_channel(&data, channel)?;
         let os_data = Self::get_files_for_current_os(channel_data)?;
-        
+
         let expected_filename = format!("v{}-{}-{}.pwr", version, os, arch);
         Ok(os_data.contains_key(&expected_filename))
     }

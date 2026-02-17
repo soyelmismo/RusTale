@@ -3,8 +3,8 @@ use iced::widget::shader;
 use iced::{Color, Point, Rectangle};
 pub use iced_renderer::wgpu::wgpu;
 use std::borrow::Cow;
-use std::time::Instant;
 use std::panic::AssertUnwindSafe;
+use std::time::Instant;
 
 // ==========================================================
 // UNIFORMES: La "Memoria compartida" CPU -> GPU
@@ -25,8 +25,8 @@ struct Uniforms {
     intensity: f32, // Control global del brillo
 
     // BLOQUE 3 (16b)
-    alpha: f32,     // Opacidad para transiciones
-    shader_id: u32, // Que algoritmo usar (0, 1, 2...)
+    alpha: f32,          // Opacidad para transiciones
+    shader_id: u32,      // Que algoritmo usar (0, 1, 2...)
     next_shader_id: u32, // ID Siguiente para transicion
     transition: f32,     // Progreso de transicion 0.0 a 1.0
 }
@@ -39,13 +39,13 @@ pub struct LsdShader {
     current_time: f32,
     mouse_pos: Point,
     accent: Color,
-    shader_id: u32,   // ID del shader actual
-    alpha: f32,       // Transparencia (0.0 a 1.0)
-    intensity: f32,   // Intensidad dinamica basada en mouse_stillness
-    click_intensity: f32, // Pico de intensidad para ondas de choque
+    shader_id: u32,           // ID del shader actual
+    alpha: f32,               // Transparencia (0.0 a 1.0)
+    intensity: f32,           // Intensidad dinamica basada en mouse_stillness
+    click_intensity: f32,     // Pico de intensidad para ondas de choque
     last_click_time: Instant, // Para controlar el decaimiento del pulso
-    next_shader_id: u32, // ID del shader siguiente para transiciones
-    transition: f32,     // Progreso de transicion (0.0 a 1.0)
+    next_shader_id: u32,      // ID del shader siguiente para transiciones
+    transition: f32,          // Progreso de transicion (0.0 a 1.0)
 }
 
 impl LsdShader {
@@ -58,9 +58,9 @@ impl LsdShader {
         intensity: f32,
     ) -> Self {
         use rand::Rng; // Importante: usar 'rand' para acceder al Kernel PRNG
-        
+
         // Generar 2 floats de entropía pura del sistema
-        let mut rng = rand::rng(); 
+        let mut rng = rand::rng();
         // Usamos alpha como el "spikiness" de las paredes del túnel (1.0 a 2.0 para rendimiento óptimo)
         let tunnel_spikiness: f32 = rng.random_range(1.0..2.0);
         // Usamos transition como semilla para el "Environment Phase"
@@ -70,9 +70,9 @@ impl LsdShader {
             current_time: 0.0,
             mouse_pos,
             accent,
-            shader_id: 0, 
-            alpha: tunnel_spikiness,   // Inyectado como u.alpha
-            transition: env_seed,      // Inyectado como u.transition
+            shader_id: 0,
+            alpha: tunnel_spikiness, // Inyectado como u.alpha
+            transition: env_seed,    // Inyectado como u.transition
             intensity,
             click_intensity: 0.0,
             last_click_time: Instant::now(),
@@ -130,7 +130,7 @@ impl<Message> shader::Program<Message> for LsdShader {
         // Decaimiento del pulso de clic (exponencial)
         let click_decay = (self.last_click_time.elapsed().as_secs_f32() * 8.0).exp();
         let current_click_intensity = self.click_intensity / click_decay;
-        
+
         // Combinar intensidad base con pulso de clic
         let combined_intensity = self.intensity + current_click_intensity;
 
@@ -198,7 +198,8 @@ impl shader::Pipeline for LsdPipeline {
                 label: Some("Dynamic RusTale Uber-Shader"),
                 source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&source_code)),
             })
-        })).unwrap_or_else(|_| {
+        }))
+        .unwrap_or_else(|_| {
             eprintln!("[SHADER] Failed to create shader module! Using fallback.");
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Fallback Shader"),
@@ -245,7 +246,7 @@ impl shader::Pipeline for LsdPipeline {
                     targets: &[Some(wgpu::ColorTargetState {
                         format,
                         // IMPORTANTE: Alpha Blending Activado para transiciones fluidas
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING), 
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -253,7 +254,8 @@ impl shader::Pipeline for LsdPipeline {
                 multiview: None,
                 cache: None,
             })
-        })).unwrap_or_else(|_| {
+        }))
+        .unwrap_or_else(|_| {
             eprintln!("[SHADER] Failed to create render pipeline! Creating minimal pipeline.");
             // FIX: Envolver tambien este bloque en AssertUnwindSafe
             std::panic::catch_unwind(AssertUnwindSafe(|| {
@@ -274,7 +276,7 @@ impl shader::Pipeline for LsdPipeline {
                         entry_point: Some("fs_main"),
                         targets: &[Some(wgpu::ColorTargetState {
                             format,
-                            blend: Some(wgpu::BlendState::ALPHA_BLENDING), 
+                            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                             write_mask: wgpu::ColorWrites::ALL,
                         })],
                         compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -282,7 +284,8 @@ impl shader::Pipeline for LsdPipeline {
                     multiview: None,
                     cache: None,
                 })
-            })).unwrap_or_else(|_| {
+            }))
+            .unwrap_or_else(|_| {
                 eprintln!("[SHADER] Failed to create minimal pipeline! Using default.");
                 device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                     label: Some("Default Pipeline"),
@@ -301,7 +304,7 @@ impl shader::Pipeline for LsdPipeline {
                         entry_point: Some("fs_main"),
                         targets: &[Some(wgpu::ColorTargetState {
                             format,
-                            blend: Some(wgpu::BlendState::ALPHA_BLENDING), 
+                            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                             write_mask: wgpu::ColorWrites::ALL,
                         })],
                         compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -328,7 +331,11 @@ impl shader::Pipeline for LsdPipeline {
             }],
         });
 
-        Self { pipeline, bind_group, buffer }
+        Self {
+            pipeline,
+            bind_group,
+            buffer,
+        }
     }
 }
 
@@ -352,29 +359,32 @@ pub fn should_use_safe_mode() -> bool {
     if std::env::var("RUSTALE_FORCE_SAFE_MODE").is_ok() {
         return true;
     }
-    
+
     // Verificar si estamos en un entorno virtual o contenedor
-    if std::env::var("WSL_DISTRO_NAME").is_ok() || 
-       std::env::var("DOCKER_CONTAINER").is_ok() {
+    if std::env::var("WSL_DISTRO_NAME").is_ok() || std::env::var("DOCKER_CONTAINER").is_ok() {
         println!("[SHADER] Detected virtual environment, enabling safe mode");
         return true;
     }
-    
+
     // Verificar si hay drivers de software conocidos
     if let Ok(adapter) = std::env::var("WGPU_ADAPTER_NAME") {
         let adapter_lower = adapter.to_lowercase();
-        if adapter_lower.contains("microsoft") && 
-           (adapter_lower.contains("basic") || adapter_lower.contains("warp")) {
+        if adapter_lower.contains("microsoft")
+            && (adapter_lower.contains("basic") || adapter_lower.contains("warp"))
+        {
             println!("[SHADER] Detected software renderer, enabling safe mode");
             return true;
         }
     }
-    
+
     false
 }
 
 pub fn get_global_wgsl() -> &'static str {
-    GLOBAL_WGSL.get().map(|s| s.as_str()).unwrap_or(DEFAULT_FALLBACK)
+    GLOBAL_WGSL
+        .get()
+        .map(|s| s.as_str())
+        .unwrap_or(DEFAULT_FALLBACK)
 }
 
 // Shader de emergencia por si falla la carga

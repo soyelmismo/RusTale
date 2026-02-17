@@ -2,16 +2,15 @@ use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::sync::{Arc, atomic::AtomicBool};
 
-use super::{PatchDownloader, PatchApiManager};
+use super::{PatchApiManager, PatchDownloader};
 
 /// Shared cache manager for patch downloads
 /// This ensures both client and server use the same cache files
-pub struct SharedCacheManager {
-}
+pub struct SharedCacheManager {}
 
 impl SharedCacheManager {
     pub fn new() -> Self {
-        Self { }
+        Self {}
     }
 
     /// Get or download a patch file (shared between client and server)
@@ -26,7 +25,10 @@ impl SharedCacheManager {
         cancel_token: Option<Arc<AtomicBool>>,
     ) -> Result<PathBuf> {
         // Check if patch is already cached
-        if let Some(cached_path) = self.get_cached_patch_path(base_dir, from_version, to_version).await? {
+        if let Some(cached_path) = self
+            .get_cached_patch_path(base_dir, from_version, to_version)
+            .await?
+        {
             if cached_path.exists() {
                 progress_callback("cache", 100.0, "Using cached patch", 0, 0, None, Some(0));
                 return Ok(cached_path);
@@ -35,23 +37,36 @@ impl SharedCacheManager {
 
         // Download patch using the new patch API system
         let downloader = PatchDownloader::new();
-        downloader.download_patch(
-            client,
-            base_dir,
-            channel,
-            from_version,
-            to_version,
-            progress_callback,
-            cancel_token,
-        ).await
+        downloader
+            .download_patch(
+                client,
+                base_dir,
+                channel,
+                from_version,
+                to_version,
+                progress_callback,
+                cancel_token,
+            )
+            .await
     }
 
     /// Get cached patch path if exists
-    pub async fn get_cached_patch_path(&self, base_dir: &PathBuf, from_version: i32, to_version: i32) -> Result<Option<PathBuf>> {
+    pub async fn get_cached_patch_path(
+        &self,
+        base_dir: &PathBuf,
+        from_version: i32,
+        to_version: i32,
+    ) -> Result<Option<PathBuf>> {
         let cache_dir = crate::config::get_cache_dir("patches").await;
-        let filename = format!("{}~{}-{}-{}.pwr", from_version, to_version, std::env::consts::OS, super::get_arch_name());
+        let filename = format!(
+            "{}~{}-{}-{}.pwr",
+            from_version,
+            to_version,
+            std::env::consts::OS,
+            super::get_arch_name()
+        );
         let patch_path = cache_dir.join(&filename);
-        
+
         if patch_path.exists() {
             Ok(Some(patch_path))
         } else {
@@ -62,13 +77,14 @@ impl SharedCacheManager {
     /// Clean up old patches from cache
     pub async fn cleanup_old_patches(&self) -> Result<usize> {
         let cache_dir = crate::config::get_cache_dir("patches").await;
-        
+
         if !cache_dir.exists() {
             return Ok(0);
         }
 
         let mut cleaned = 0;
-        let mut entries = tokio::fs::read_dir(&cache_dir).await
+        let mut entries = tokio::fs::read_dir(&cache_dir)
+            .await
             .context("Failed to read cache directory")?;
         let mut entries_vec = Vec::new();
 
@@ -91,20 +107,27 @@ impl SharedCacheManager {
         // Keep only the latest 50 patches to avoid cache bloat
         let max_patches = 50;
         if entries_with_metadata.len() > max_patches {
-            for (entry, modified_time) in entries_with_metadata.iter().take(entries_with_metadata.len() - max_patches) {
+            for (entry, modified_time) in entries_with_metadata
+                .iter()
+                .take(entries_with_metadata.len() - max_patches)
+            {
                 let age = std::time::SystemTime::now()
                     .duration_since(*modified_time)
                     .unwrap_or(std::time::Duration::ZERO)
                     .as_secs();
-                    
-                    // Only delete patches older than 30 days
-                    if age > 30 * 24 * 60 * 60 {
-                        if let Err(e) = tokio::fs::remove_file(&entry.path()).await {
-                            eprintln!("Failed to remove old patch {}: {}", entry.path().display(), e);
-                        } else {
-                            cleaned += 1;
-                        }
+
+                // Only delete patches older than 30 days
+                if age > 30 * 24 * 60 * 60 {
+                    if let Err(e) = tokio::fs::remove_file(&entry.path()).await {
+                        eprintln!(
+                            "Failed to remove old patch {}: {}",
+                            entry.path().display(),
+                            e
+                        );
+                    } else {
+                        cleaned += 1;
                     }
+                }
             }
         }
 
@@ -114,7 +137,7 @@ impl SharedCacheManager {
     /// Get cache statistics
     pub async fn get_cache_stats(&self) -> Result<CacheStats> {
         let cache_dir = crate::config::get_cache_dir("patches").await;
-        
+
         if !cache_dir.exists() {
             return Ok(CacheStats::default());
         }
@@ -124,19 +147,20 @@ impl SharedCacheManager {
         let mut oldest_age = u64::MAX;
         let mut newest_age = 0;
 
-        let mut entries = tokio::fs::read_dir(&cache_dir).await
+        let mut entries = tokio::fs::read_dir(&cache_dir)
+            .await
             .context("Failed to read cache directory")?;
 
         while let Ok(Some(entry)) = entries.next_entry().await {
             file_count += 1;
-            
+
             if let Ok(metadata) = entry.metadata().await {
                 let size = metadata.len();
                 let age = std::time::SystemTime::now()
                     .duration_since(metadata.modified().unwrap_or(std::time::UNIX_EPOCH))
                     .unwrap_or(std::time::Duration::ZERO)
                     .as_secs();
-                
+
                 total_size += size;
                 oldest_age = oldest_age.min(age);
                 newest_age = newest_age.max(age);

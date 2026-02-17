@@ -1,10 +1,10 @@
 use crate::config::OnlineFixMode;
 use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::io::{Read, Write};
 use std::time::{Duration, Instant};
 
 #[cfg(target_os = "linux")]
@@ -15,14 +15,12 @@ pub mod image_cache;
 pub mod win_job;
 
 /// Cache global para evitar syscalls repetidas de current_exe()
-static CURRENT_EXE: Lazy<anyhow::Result<PathBuf>> = Lazy::new(|| {
-    std::env::current_exe().context("Failed to get current executable path")
-});
+static CURRENT_EXE: Lazy<anyhow::Result<PathBuf>> =
+    Lazy::new(|| std::env::current_exe().context("Failed to get current executable path"));
 
 /// Última actividad registrada (para giro predictivo)
-static LAST_ACTIVITY: Lazy<std::sync::Mutex<Instant>> = Lazy::new(|| {
-    std::sync::Mutex::new(Instant::now())
-});
+static LAST_ACTIVITY: Lazy<std::sync::Mutex<Instant>> =
+    Lazy::new(|| std::sync::Mutex::new(Instant::now()));
 
 /// Contador de giros automáticos realizados
 static AUTO_TRIM_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -196,7 +194,9 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
     println!("Raw Args: {:?}", args);
 
     let current_exe = get_current_exe()?;
-    let bin_dir = current_exe.parent().context("Failed to get executable directory")?;
+    let bin_dir = current_exe
+        .parent()
+        .context("Failed to get executable directory")?;
 
     let java_original_name = if cfg!(windows) {
         "java_original.exe"
@@ -260,7 +260,7 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
         let paths = crate::game::paths::GamePaths::new(crate::config::get_app_dir());
         paths.dualauth_agent()
     };
-    
+
     if agent_path.exists() {
         // Check if Java Agent is already present to avoid duplication
         let agent_arg = format!("-javaagent:{}", agent_path.to_string_lossy());
@@ -285,7 +285,7 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
     println!("Launching real java...");
 
     // [BLOQUE FINAL PARA SERVER RUNNER]
-    
+
     // 1. Configuramos PIPED solo para stdin (necesitamos inyectar comandos).
     // stdout/stderr se heredan para que veas el log, pero Java será tolerante si la ventana se cierra.
     cmd.stdin(std::process::Stdio::piped());
@@ -309,23 +309,23 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
         unsafe {
             cmd.pre_exec(|| {
                 // Importante: Esto requiere que tu Cargo.toml tenga "libc"
-                libc::setpgid(0, 0); 
+                libc::setpgid(0, 0);
                 Ok(())
             });
         }
     }
 
-    // Ahora lanzamos. 
+    // Ahora lanzamos.
     // En Linux: Java estará en su propio PGID y no morirá al cerrar la terminal.
     // Rust recibirá la señal, escribirá "shutdown", Java obedecerá.
     let mut child = cmd.spawn().context("Failed to spawn server process")?;
 
     // Capturamos el stdin de Java para uso exclusivo de Rust
     let child_stdin = child.stdin.take().context("Failed to open child stdin")?;
-    
+
     // Compartimos el stdin entre el usuario (teclado) y el sistema de emergencia
     let shared_stdin = Arc::new(std::sync::Mutex::new(child_stdin));
-    
+
     let stdin_writer_user = shared_stdin.clone();
     let stdin_writer_signal = shared_stdin.clone();
 
@@ -340,8 +340,12 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
                 Ok(0) => break, // EOF (Consola cerrada o Ctrl+Z)
                 Ok(n) => {
                     if let Ok(mut writer) = stdin_writer_user.lock() {
-                        if writer.write_all(&buffer[..n]).is_err() { break; }
-                        if writer.flush().is_err() { break; }
+                        if writer.write_all(&buffer[..n]).is_err() {
+                            break;
+                        }
+                        if writer.flush().is_err() {
+                            break;
+                        }
                     }
                 }
                 Err(_) => break, // Error de lectura (ej: ventana destruida)
@@ -362,7 +366,7 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
         }
         stop_sent_c.store(true, std::sync::atomic::Ordering::Relaxed);
 
-        // Intentamos imprimir alerta. Si la ventana ya no existe (click en X), 
+        // Intentamos imprimir alerta. Si la ventana ya no existe (click en X),
         // println! podría fallar, así que ignoramos errores.
         let _ = std::panic::catch_unwind(|| {
             println!("\n[RusTale] CLOSING EVENT DETECTED!");
@@ -376,8 +380,8 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
             let _ = writer.write_all(b"shutdown\n");
             let _ = writer.flush();
         }
-        
-        // NO hacemos exit(). Dejamos que este closure termine. 
+
+        // NO hacemos exit(). Dejamos que este closure termine.
         // El hilo principal (abajo) está esperando a Java (child.wait()).
         // Al enviar 'shutdown', Java empezará a guardar y cerrarse solo.
     });
@@ -570,15 +574,15 @@ async fn remove_dir_recursive_exclude(dir: &Path, exclude_file: &Path) -> Result
 fn get_memory_usage() -> u64 {
     #[cfg(target_os = "windows")]
     {
-        use windows_sys::Win32::System::ProcessStatus::PROCESS_MEMORY_COUNTERS;
-        use windows_sys::Win32::System::ProcessStatus::K32GetProcessMemoryInfo;
-        use windows_sys::Win32::System::Threading::GetCurrentProcess;
         use std::mem;
-        
+        use windows_sys::Win32::System::ProcessStatus::K32GetProcessMemoryInfo;
+        use windows_sys::Win32::System::ProcessStatus::PROCESS_MEMORY_COUNTERS;
+        use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
         unsafe {
             let mut pmc: PROCESS_MEMORY_COUNTERS = mem::zeroed();
             pmc.cb = mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
-            
+
             if K32GetProcessMemoryInfo(GetCurrentProcess(), &mut pmc, pmc.cb) != 0 {
                 pmc.WorkingSetSize as u64
             } else {
@@ -586,11 +590,11 @@ fn get_memory_usage() -> u64 {
             }
         }
     }
-    
+
     #[cfg(target_os = "linux")]
     {
         use std::fs;
-        
+
         // Leer /proc/self/stat para obtener RSS
         if let Ok(stat) = fs::read_to_string("/proc/self/stat") {
             // El campo 23 (índice 22) es RSS en páginas
@@ -603,7 +607,7 @@ fn get_memory_usage() -> u64 {
         }
         0
     }
-    
+
     #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     {
         0 // No implementado para otras plataformas
@@ -620,16 +624,20 @@ pub fn register_activity() {
 /// Verifica si ha pasado suficiente tiempo de inactividad para un giro automático
 pub fn check_auto_trim() {
     const INACTIVITY_THRESHOLD: Duration = Duration::from_secs(30); // 30 segundos de inactividad
-    
+
     if let Ok(mut last) = LAST_ACTIVITY.lock() {
         if last.elapsed() > INACTIVITY_THRESHOLD {
             // Realizar giro predictivo
             trim_memory_predictive();
             *last = Instant::now(); // Resetear timer
-            
+
             // Incrementar contador
             let count = AUTO_TRIM_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
-            println!("[GIRO] 🤖 Auto-giro #{} por inactividad ({}s)", count, INACTIVITY_THRESHOLD.as_secs());
+            println!(
+                "[GIRO] 🤖 Auto-giro #{} por inactividad ({}s)",
+                count,
+                INACTIVITY_THRESHOLD.as_secs()
+            );
         }
     }
 }
@@ -638,14 +646,17 @@ pub fn check_auto_trim() {
 fn trim_memory_predictive() {
     // Determinar nivel basado en giros consecutivos débiles
     let consecutive_weak = CONSECUTIVE_WEAK_TRIMS.load(Ordering::Relaxed);
-    
+
     let level = match consecutive_weak {
-        0..=2 => TrimLevel::Normal,      // Primeros 3 giros: Normal
-        3..=5 => TrimLevel::Aggressive,   // Giros 4-6: Agresivo
-        _ => TrimLevel::Extreme,            // Más de 6: Extremo
+        0..=2 => TrimLevel::Normal,     // Primeros 3 giros: Normal
+        3..=5 => TrimLevel::Aggressive, // Giros 4-6: Agresivo
+        _ => TrimLevel::Extreme,        // Más de 6: Extremo
     };
-    
-    println!("[AUTO-ESCALA] Nivel {:?} ({} giros débiles consecutivos)", level, consecutive_weak);
+
+    println!(
+        "[AUTO-ESCALA] Nivel {:?} ({} giros débiles consecutivos)",
+        level, consecutive_weak
+    );
     trim_memory_with_level(level);
 }
 
@@ -664,7 +675,7 @@ pub enum TrimLevel {
 ///
 /// En Windows: Mueve páginas al archivo de paginación (EmptyWorkingSet).
 /// En Linux: Fuerza a 'mimalloc' (Rust) y 'glibc' (GTK/System) a devolver memoria al Kernel.
-/// 
+///
 /// Ahora mide el impacto real del "giro" mostrando cuánta memoria se liberó.
 pub fn trim_memory() {
     trim_memory_with_level(TrimLevel::Normal);
@@ -679,13 +690,16 @@ fn has_swap_available() -> bool {
         if lines.len() > 1 {
             for line in lines.iter().skip(1) {
                 if !line.trim().is_empty() && !line.starts_with('#') {
-                    println!("[Swap] Detectado swap tradicional: {}", line.split_whitespace().next().unwrap_or("unknown"));
+                    println!(
+                        "[Swap] Detectado swap tradicional: {}",
+                        line.split_whitespace().next().unwrap_or("unknown")
+                    );
                     return true;
                 }
             }
         }
     }
-    
+
     // Verificar zram devices en /sys/block/zram*
     if let Ok(entries) = std::fs::read_dir("/sys/block") {
         for entry in entries.flatten() {
@@ -697,7 +711,10 @@ fn has_swap_available() -> bool {
                     if let Ok(size_str) = std::fs::read_to_string(disksize_path) {
                         if let Ok(size_bytes) = size_str.trim().parse::<u64>() {
                             if size_bytes > 0 {
-                                println!("[Swap] Detectado zram activo: {} ({} bytes)", name_str, size_bytes);
+                                println!(
+                                    "[Swap] Detectado zram activo: {} ({} bytes)",
+                                    name_str, size_bytes
+                                );
                                 return true;
                             }
                         }
@@ -706,7 +723,7 @@ fn has_swap_available() -> bool {
             }
         }
     }
-    
+
     println!("[Swap] No se detectó swap o zram disponible");
     false
 }
@@ -718,13 +735,13 @@ fn should_use_windows_style() -> bool {
         if let Ok(mode) = std::env::var("RUSTALE_LINUX_SWAP_MODE") {
             return mode == "windows";
         }
-        
+
         // Prioridad 2: Auto-detección si hay swap disponible
         if has_swap_available() {
             println!("[Swap] Auto-activando modo Windows-style (swap detectado)");
             return true;
         }
-        
+
         false
     }
 }
@@ -732,41 +749,37 @@ fn should_use_windows_style() -> bool {
 /// Fuerza a Linux a mover páginas a swap/zram (comportamiento similar a Windows)
 fn force_linux_swap_behavior() {
     println!("[Swap] Forzando comportamiento similar a Windows en Linux...");
-    
+
     unsafe {
         // 1. Forzar a mimalloc a liberar memoria agresivamente
         unsafe extern "C" {
             fn mi_collect(force: bool);
         }
         mi_collect(true);
-        
+
         // 2. Forzar a glibc a liberar memoria
         unsafe extern "C" {
             fn malloc_trim(pad: usize) -> i32;
         }
         malloc_trim(0);
-        
+
         // 3. Usar madvise para indicar al kernel que las páginas no son necesarias
         // Esto incentiva al kernel a mover las páginas a swap
         #[cfg(target_os = "linux")]
         {
-            use libc::{madvise, MADV_DONTNEED};
-            
+            use libc::{MADV_DONTNEED, madvise};
+
             // Intentar liberar memoria del proceso actual usando madvise
             // Nota: Esto es experimental y puede no funcionar en todos los sistemas
-            let result = madvise(
-                std::ptr::null_mut(), 
-                0, 
-                MADV_DONTNEED
-            );
-            
+            let result = madvise(std::ptr::null_mut(), 0, MADV_DONTNEED);
+
             if result == 0 {
                 println!("[Swap] madvise(MADV_DONTNEED) ejecutado exitosamente");
             } else {
                 println!("[Swap] madvise falló (esto es normal en muchos sistemas)");
             }
         }
-        
+
         // 4. Forzar sync para asegurar que los datos se escriban en disco
         #[cfg(target_os = "linux")]
         {
@@ -776,7 +789,7 @@ fn force_linux_swap_behavior() {
             sync();
         }
     }
-    
+
     // 5. Opcional: Aumentar temporalmente la presión de memoria
     // Esto incentiva al kernel a usar swap más agresivamente
     if let Ok(_) = std::fs::write("/proc/sys/vm/vfs_cache_pressure", "100") {
@@ -788,14 +801,14 @@ fn force_linux_swap_behavior() {
 pub fn trim_memory_with_level(level: TrimLevel) {
     // Medir memoria ANTES del giro
     let before = get_memory_usage();
-    
+
     // Verificar si debemos usar comportamiento Windows-style en Linux
     let use_windows_style_linux = should_use_windows_style();
-    
+
     if use_windows_style_linux {
         println!("[Swap] Modo Windows-style activado para Linux");
     }
-    
+
     match level {
         TrimLevel::Normal => {
             // Comportamiento estándar original
@@ -830,7 +843,7 @@ pub fn trim_memory_with_level(level: TrimLevel) {
                 }
             }
         }
-        
+
         TrimLevel::Aggressive => {
             // Múltiples pasadas para máxima limpieza
             for _i in 0..3 {
@@ -864,23 +877,23 @@ pub fn trim_memory_with_level(level: TrimLevel) {
                         }
                     }
                 }
-                
+
                 // Pequeña pausa entre pasadas
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
         }
-        
+
         TrimLevel::Extreme => {
             // Modo servidor: todo lo posible + configuración adicional
             trim_memory_with_level(TrimLevel::Aggressive);
-            
+
             // Intentar liberar cachés adicionales del sistema
             #[cfg(target_os = "linux")]
             {
                 if use_windows_style_linux {
                     // Comportamiento extremo similar a Windows
                     force_linux_swap_behavior();
-                    
+
                     // Intentos adicionales de liberación
                     unsafe {
                         unsafe extern "C" {
@@ -896,7 +909,7 @@ pub fn trim_memory_with_level(level: TrimLevel) {
                             fn sync();
                         }
                         sync();
-                        
+
                         // Otra pasada de malloc_trim por si acaso
                         unsafe extern "C" {
                             fn malloc_trim(pad: usize) -> i32;
@@ -907,38 +920,56 @@ pub fn trim_memory_with_level(level: TrimLevel) {
             }
         }
     }
-    
+
     // Medir memoria DESPUÉS del giro y calcular impacto
     let after = get_memory_usage();
-    
-    if before > 0 && after > 0 && matches!(level, TrimLevel::Normal | TrimLevel::Aggressive | TrimLevel::Extreme) {
+
+    if before > 0
+        && after > 0
+        && matches!(
+            level,
+            TrimLevel::Normal | TrimLevel::Aggressive | TrimLevel::Extreme
+        )
+    {
         let freed = before.saturating_sub(after);
         let freed_mb = freed as f64 / 1024.0 / 1024.0;
         let after_mb = after as f64 / 1024.0 / 1024.0;
-        
+
         // Auto-escalado: contar giros débiles
         if freed_mb < WEAK_TRIM_THRESHOLD_MB {
             let weak_count = CONSECUTIVE_WEAK_TRIMS.fetch_add(1, Ordering::Relaxed) + 1;
-            println!("[AUTO-ESCALA] ⚠️ Giro débil: {:.1} MB (< {} MB). Total débiles: {}", 
-                freed_mb, WEAK_TRIM_THRESHOLD_MB, weak_count);
+            println!(
+                "[AUTO-ESCALA] ⚠️ Giro débil: {:.1} MB (< {} MB). Total débiles: {}",
+                freed_mb, WEAK_TRIM_THRESHOLD_MB, weak_count
+            );
         } else {
             // Resetear contador si el giro fue efectivo
             CONSECUTIVE_WEAK_TRIMS.store(0, Ordering::Relaxed);
-            println!("[AUTO-ESCALA] ✅ Giro efectivo: {:.1} MB. Reset contador de giros débiles", freed_mb);
+            println!(
+                "[AUTO-ESCALA] ✅ Giro efectivo: {:.1} MB. Reset contador de giros débiles",
+                freed_mb
+            );
         }
-        
+
         let level_emoji = match level {
             TrimLevel::Normal => "🌀",
             TrimLevel::Aggressive => "🌪️",
             TrimLevel::Extreme => "💥",
         };
-        
-        if freed_mb > 0.1 { // Solo mostrar si liberamos más de 0.1 MB
-            println!("[GIRO] {} Memoria liberada: {:.1} MB ({:.1} MB → {:.1} MB) [{:?}]", 
-                level_emoji, freed_mb, before / 1024 / 1024, after_mb, level);
+
+        if freed_mb > 0.1 {
+            // Solo mostrar si liberamos más de 0.1 MB
+            println!(
+                "[GIRO] {} Memoria liberada: {:.1} MB ({:.1} MB → {:.1} MB) [{:?}]",
+                level_emoji,
+                freed_mb,
+                before / 1024 / 1024,
+                after_mb,
+                level
+            );
         }
     }
-    
+
     // Log silencioso para debug interno si se requiere, pero evitamos spam en release.
     #[cfg(debug_assertions)]
     println!("[Memory] {:?} Trim execution completed.", level);
@@ -948,11 +979,12 @@ pub fn trim_memory_with_level(level: TrimLevel) {
 pub fn get_memory_stats() -> MemoryStats {
     let current = get_memory_usage();
     let current_mb = current as f64 / 1024.0 / 1024.0;
-    
+
     MemoryStats {
         current_mb: current_mb,
         auto_trims: AUTO_TRIM_COUNT.load(Ordering::Relaxed),
-        last_activity: LAST_ACTIVITY.lock()
+        last_activity: LAST_ACTIVITY
+            .lock()
             .map(|instant| instant.elapsed())
             .unwrap_or(Duration::ZERO),
     }
@@ -980,7 +1012,7 @@ impl MemoryStats {
         } else {
             "🐘" // Muy pesado
         };
-        
+
         let activity_status = if self.last_activity < Duration::from_secs(10) {
             "🟢 Activo"
         } else if self.last_activity < Duration::from_secs(30) {
@@ -988,9 +1020,11 @@ impl MemoryStats {
         } else {
             "🔴 Dormido"
         };
-        
-        format!("{} {:.1}MB | {} | Auto-giros: {}", 
-            weight_emoji, self.current_mb, activity_status, self.auto_trims)
+
+        format!(
+            "{} {:.1}MB | {} | Auto-giros: {}",
+            weight_emoji, self.current_mb, activity_status, self.auto_trims
+        )
     }
 }
 
@@ -998,7 +1032,7 @@ impl MemoryStats {
 pub fn sanitize_path(path: &std::path::PathBuf) -> std::path::PathBuf {
     // 1. Obtener ruta absoluta canónica
     let absolute = path.canonicalize().unwrap_or(path.clone());
-    
+
     // 2. Si estamos en Windows, quitar el prefijo UNC extendido
     #[cfg(windows)]
     {
@@ -1007,7 +1041,7 @@ pub fn sanitize_path(path: &std::path::PathBuf) -> std::path::PathBuf {
             return std::path::PathBuf::from(&str_path[4..]);
         }
     }
-    
+
     absolute
 }
 
@@ -1019,19 +1053,19 @@ pub fn is_wayland() -> bool {
     if std::env::var("WAYLAND_DISPLAY").is_ok() {
         return true;
     }
-    
+
     // Método 2: Variable de entorno XDG_SESSION_TYPE
     if let Ok(session_type) = std::env::var("XDG_SESSION_TYPE") {
         if session_type.to_lowercase() == "wayland" {
             return true;
         }
     }
-    
+
     // Método 3: Variable de entorno WAYLAND_SOCKET
     if std::env::var("WAYLAND_SOCKET").is_ok() {
         return true;
     }
-    
+
     // Método 4: Verificar procesos de compositores Wayland (fallback)
     if let Ok(output) = std::process::Command::new("pgrep")
         .args(&["-f", "sway|weston|gnome-shell.*wayland|kwin_wayland"])
@@ -1041,6 +1075,6 @@ pub fn is_wayland() -> bool {
             return true;
         }
     }
-    
+
     false
 }

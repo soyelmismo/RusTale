@@ -9,7 +9,7 @@ use crate::config;
 pub async fn initialize() -> Result<()> {
     // Initialize the new patch API system
     crate::game::patch_api::PatchApiFrontend::get_instance();
-    
+
     let base_dir = config::get_app_dir();
 
     // Lista de carpetas a crear
@@ -24,7 +24,7 @@ pub async fn initialize() -> Result<()> {
         base_dir.join("logs"),
         base_dir.join("tools"),
         base_dir.join("tools").join("butler"),
-        base_dir.join("tools").join("jre")
+        base_dir.join("tools").join("jre"),
     ];
 
     for folder in folders {

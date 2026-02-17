@@ -2,11 +2,9 @@ use crate::news::BlogPost;
 use crate::util::image_cache::load_news_image;
 use crate::{Message, theme, util};
 use iced::widget::{
-    ProgressBar, Space, button, column, container, image, row, scrollable, svg, Id,
+    Id, ProgressBar, Space, button, column, container, image, row, scrollable, svg,
 };
-use iced::{
-    Alignment, Background, ContentFit, Element, Length, Renderer, Task, Theme,
-};
+use iced::{Alignment, Background, ContentFit, Element, Length, Renderer, Task, Theme};
 use std::collections::HashMap;
 
 const NEWS_SCROLL_ID: &str = "news_scroll";
@@ -21,7 +19,7 @@ pub enum NewsMessage {
     OpenAllNews,
     ScrollOffsetChanged(f32), // Absolute position from Scrollable
     ScrollDelta(f32),         // Relative change from global listener
-    GetScrollOffset, // Nuevo mensaje para solicitar el offset actual
+    GetScrollOffset,          // Nuevo mensaje para solicitar el offset actual
 }
 
 #[derive(Debug, Clone)]
@@ -31,7 +29,7 @@ pub struct NewsSection {
     pub loading: bool,
     pub loaded_once: bool, // Nueva bandera para lazy loading
     pub error: Option<String>,
-    pub scroll_offset: f32, // Posición actual del scroll
+    pub scroll_offset: f32,   // Posición actual del scroll
     pub viewport_height: f32, // Altura del viewport visible
 }
 
@@ -40,7 +38,7 @@ impl NewsSection {
         Self {
             posts: Vec::new(),
             images: HashMap::new(),
-            loading: false, // Default: NO cargando
+            loading: false,     // Default: NO cargando
             loaded_once: false, // Default: NO ha cargado
             error: None,
             scroll_offset: 0.0,
@@ -51,8 +49,8 @@ impl NewsSection {
     // Nuevo método helper para saber si iniciar la carga
     pub fn should_load(&self) -> bool {
         // Cargar si nunca ha cargado, o si hay posts pero no imágenes (ej: después de liberar memoria)
-        (!self.loaded_once && !self.loading) || 
-        (!self.posts.is_empty() && self.images.is_empty() && !self.loading)
+        (!self.loaded_once && !self.loading)
+            || (!self.posts.is_empty() && self.images.is_empty() && !self.loading)
     }
 
     pub fn update(&mut self, message: NewsMessage, client: reqwest::Client) -> Task<Message> {
@@ -61,7 +59,7 @@ impl NewsSection {
                 self.loading = true;
                 self.loaded_once = true; // Marcar como intentado
                 self.error = None;
-                
+
                 // Si ya hay posts, solo cargar imágenes faltantes (recuperación de memoria)
                 if !self.posts.is_empty() {
                     let mut image_tasks = Vec::new();
@@ -77,9 +75,7 @@ impl NewsSection {
                                             .map_err(|e| e.to_string());
                                         (key, res)
                                     },
-                                    |(key, res)| {
-                                        Message::News(NewsMessage::ImageLoaded(key, res))
-                                    },
+                                    |(key, res)| Message::News(NewsMessage::ImageLoaded(key, res)),
                                 ));
                             }
                         }
@@ -157,14 +153,11 @@ impl NewsSection {
                             let c = client.clone();
                             image_tasks.push(Task::perform(
                                 async move {
-                                    let res = load_news_image(&c, &key)
-                                        .await
-                                        .map_err(|e| e.to_string());
+                                    let res =
+                                        load_news_image(&c, &key).await.map_err(|e| e.to_string());
                                     (key, res)
                                 },
-                                |(key, res)| {
-                                    Message::News(NewsMessage::ImageLoaded(key, res))
-                                },
+                                |(key, res)| Message::News(NewsMessage::ImageLoaded(key, res)),
                             ));
                         }
                     }
@@ -317,11 +310,11 @@ impl NewsSection {
     ) -> Element<'a, NewsMessage, Theme, Renderer> {
         let palette = ctx.palette;
         container(theme::text_body(loc.t("news.empty"), ctx))
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .center_y(Length::Fill)
-        .style(move |t| theme::container_style_transparent(&palette, t))
-        .into()
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_y(Length::Fill)
+            .style(move |t| theme::container_style_transparent(&palette, t))
+            .into()
     }
 
     fn view_posts<'a>(
@@ -331,34 +324,37 @@ impl NewsSection {
         ctx: theme::UIContext,
     ) -> Element<'a, NewsMessage, Theme, Renderer> {
         let palette = ctx.palette;
-        
+
         // [PRECISE VIEWPORT OPTIMIZATION]
         // Calcular qué posts son visibles basados en el scroll actual
         let post_height_estimate = 120.0; // Altura estimada por post (imagen + texto + padding)
         let post_spacing = 8.0;
         let total_post_height = post_height_estimate + post_spacing;
-        
+
         // Calcular el rango de posts visibles
-        let start_index = ((self.scroll_offset / total_post_height).floor() as usize).saturating_sub(1); // Uno extra como buffer
+        let start_index =
+            ((self.scroll_offset / total_post_height).floor() as usize).saturating_sub(1); // Uno extra como buffer
         let visible_count = ((self.viewport_height / total_post_height).ceil() as usize) + 2; // 2 extra como buffer
-        
+
         let end_index = (start_index + visible_count).min(self.posts.len());
         let start_index = start_index.min(self.posts.len().saturating_sub(1));
-        
+
         let posts_to_render: Vec<&BlogPost> = if start_index < self.posts.len() {
             self.posts[start_index..end_index].iter().collect()
         } else {
             Vec::new()
         };
-        
+
         // Crear espacio vacío arriba para mantener la posición del scroll
-        let top_space = Space::new().width(Length::Fill).height(Length::Fixed(start_index as f32 * total_post_height));
-        
+        let top_space = Space::new()
+            .width(Length::Fill)
+            .height(Length::Fixed(start_index as f32 * total_post_height));
+
         // Crear espacio vacío abajo para permitir scroll completo
         let bottom_space = Space::new().width(Length::Fill).height(Length::Fixed(
-            (self.posts.len().saturating_sub(end_index)) as f32 * total_post_height
+            (self.posts.len().saturating_sub(end_index)) as f32 * total_post_height,
         ));
-        
+
         let posts_list = theme::magic_scrollable(
             scrollable(
                 column![
@@ -385,7 +381,7 @@ impl NewsSection {
             .into(),
             ctx,
         );
-        
+
         if self.error.is_some() {
             column![
                 posts_list,
@@ -464,12 +460,21 @@ impl NewsSection {
                             ctx
                         ),
                         // [OPTIMIZACIÓN] Usar theme::text para la fecha (vibración sí, derretimiento letra a letra no)
-                        theme::text(iced::widget::text(post.format_date()).size(10).color(palette.text_secondary), ctx)
+                        theme::text(
+                            iced::widget::text(post.format_date())
+                                .size(10)
+                                .color(palette.text_secondary),
+                            ctx
+                        )
                     ]
                     .spacing(4),
                     // [OPTIMIZACIÓN] Usar theme::text para el título (un solo widget SmoothTranslate)
-                    theme::text(iced::widget::text(&post.title).size(18).color(palette.accent), ctx),
-                    
+                    theme::text(
+                        iced::widget::text(&post.title)
+                            .size(18)
+                            .color(palette.accent),
+                        ctx
+                    ),
                     // [OPTIMIZACIÓN] Usar theme::text para el excerpt (un solo widget SmoothTranslate)
                     theme::text(
                         iced::widget::text(
@@ -524,11 +529,14 @@ fn header_section<'a>(
                     border: crate::theme::small_progress_bar(&palette),
                     ..Default::default()
                 }),
-            theme::text_micro(if loading {
-                loc.t("news.feed_loading")
-            } else {
-                loc.t("news.feed_latest")
-            }, ctx)
+            theme::text_micro(
+                if loading {
+                    loc.t("news.feed_loading")
+                } else {
+                    loc.t("news.feed_latest")
+                },
+                ctx
+            )
         ]
         .spacing(8)
         .padding(5)

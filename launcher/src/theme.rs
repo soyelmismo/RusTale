@@ -551,9 +551,9 @@ pub fn lsd_magic_text<'a, M: 'a>(
                 char_el.into(),
                 (off_x, off_y),
                 iced::Point::new(-1000.0, -1000.0), // Dummy mouse pos (no trackeo para efecto "dummy")
-                false, // Que se mueva siempre
-                1.0,   // Fuerza maxima
-                true,  // Forzar siempre activo para ESTE texto (el label "LSD" en settings)
+                false,                              // Que se mueva siempre
+                1.0,                                // Fuerza maxima
+                true, // Forzar siempre activo para ESTE texto (el label "LSD" en settings)
             )
             .resizing(ctx.is_resizing)
             .with_stillness(ctx.mouse_stillness),
@@ -1341,8 +1341,6 @@ pub fn menu_style(palette: &Palette, _t: &Theme) -> menu::Style {
     }
 }
 
-
-
 pub fn svg_muted(
     palette: &Palette,
     _t: &Theme,
@@ -1705,24 +1703,24 @@ fn get_seeded_disparity(offset: (f32, f32), seed: usize, intensity: f32) -> (f32
     let s = seed as f32;
     let hash_x = ((s * 12.9898).fract() * 43758.5453).fract();
     let hash_y = ((s * 78.233).fract() * 43758.5453).fract();
-    
+
     // 2. Componente caótico temporal con frecuencias reducidas para evitar temblor
-    let t1 = offset.0 * 0.4;  // Reducido de 1.3 a 0.4
-    let t2 = offset.1 * 0.7;  // Reducido de 2.7 a 0.7
-    let t3 = (offset.0 + offset.1) * 1.1;  // Reducido de 5.3 a 1.1
-    
+    let t1 = offset.0 * 0.4; // Reducido de 1.3 a 0.4
+    let t2 = offset.1 * 0.7; // Reducido de 2.7 a 0.7
+    let t3 = (offset.0 + offset.1) * 1.1; // Reducido de 5.3 a 1.1
+
     // 3. Mapa caótico no lineal (evita patrones predecibles)
     let chaos_x = (t1.sin() * 0.5 + t2.cos() * 0.3 + (t1 * t3).sin() * 0.2) * hash_x;
     let chaos_y = (t2.sin() * 0.4 + t3.cos() * 0.4 + (t2 * t1).cos() * 0.2) * hash_y;
-    
+
     // 4. Dispersión aleatoria individual por letra
     let scatter_x = (hash_x - 0.5) * 0.6;
     let scatter_y = (hash_y - 0.5) * 0.6;
-    
+
     // 5. Combinación final con entropía real
     let final_x = (chaos_x + scatter_x) * intensity;
     let final_y = (chaos_y + scatter_y) * intensity;
-    
+
     (final_x, final_y)
 }
 
@@ -1799,7 +1797,7 @@ pub fn text_lsd_letters_batched<'a, M: 'a>(
     for (batch_idx, batch) in chars.chunks(effective_batch_size).enumerate() {
         // Unir los caracteres del batch en un solo string
         let batch_string: String = batch.iter().collect();
-        
+
         // Crear texto para todo el batch
         let batch_text = iced_text(batch_string).size(size_px).color(color);
         let batch_element: Element<'a, M, Theme, Renderer> = batch_text.into();
@@ -2148,7 +2146,6 @@ where
     )
 }
 
-
 // --- NUEVOS ESTILOS PARA WINDOW FRAME & TITLE BAR ---
 
 pub fn window_frame_style(palette: &Palette, _t: &Theme, is_maximized: bool) -> container::Style {
@@ -2303,7 +2300,6 @@ pub fn window_control_button<'a, Message: Clone + 'a>(
     // SIEMPRE usamos magic_button para mantener estabilidad del arbol de widgets
     magic_button(btn.into(), ctx)
 }
-
 
 // --- FUNCIONES PARA COLORES Y ESTILOS CENTRALIZADOS ---
 

@@ -1,8 +1,8 @@
+use super::{GenericFile, GenericMod, ModProvider, ModRepository, SearchResults};
 use anyhow::Result;
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::env;
-use super::{GenericMod, GenericFile, ModRepository, SearchResults, ModProvider};
 
 const API_BASE: &str = "https://api.curseforge.com/v1";
 const GAME_ID: i32 = 70216;
@@ -22,8 +22,10 @@ fn get_api_keys() -> Result<Vec<String>> {
         let key = key.trim();
         if !key.is_empty() {
             // Remove surrounding quotes if present
-            if (key.starts_with('"') && key.ends_with('"')) || (key.starts_with('\'') && key.ends_with('\'')) {
-                key[1..key.len()-1].to_string()
+            if (key.starts_with('"') && key.ends_with('"'))
+                || (key.starts_with('\'') && key.ends_with('\''))
+            {
+                key[1..key.len() - 1].to_string()
             } else {
                 key.to_string()
             }
@@ -61,7 +63,12 @@ fn get_api_keys() -> Result<Vec<String>> {
     // Debug: Print the parsed keys
     println!("Parsed {} API keys from environment", keys.len());
     for (i, key) in keys.iter().enumerate() {
-        println!("Key {}: {}... (length: {})", i + 1, &key[..8.min(key.len())], key.len());
+        println!(
+            "Key {}: {}... (length: {})",
+            i + 1,
+            &key[..8.min(key.len())],
+            key.len()
+        );
     }
 
     if keys.is_empty() {
@@ -139,7 +146,11 @@ impl From<CfMod> for GenericMod {
             id: cf_mod.id.to_string(),
             name: cf_mod.name,
             summary: cf_mod.summary,
-            author: cf_mod.authors.first().map(|a| a.name.clone()).unwrap_or_default(),
+            author: cf_mod
+                .authors
+                .first()
+                .map(|a| a.name.clone())
+                .unwrap_or_default(),
             logo_url: cf_mod.logo.map(|l| l.thumbnail_url),
             downloads: cf_mod.download_count as u64,
             website_url: cf_mod.links.website_url,
@@ -200,8 +211,13 @@ impl ModRepository for CurseForgeRepository {
 
         // Try each API key until one succeeds
         for (i, api_key) in api_keys.iter().enumerate() {
-            println!("Trying CurseForge API key {}: {}...", i + 1, &api_key[..8.min(api_key.len())]);
-            let resp = self.client
+            println!(
+                "Trying CurseForge API key {}: {}...",
+                i + 1,
+                &api_key[..8.min(api_key.len())]
+            );
+            let resp = self
+                .client
                 .get(&url)
                 .header("x-api-key", api_key)
                 .header("Accept", "application/json")
@@ -219,7 +235,11 @@ impl ModRepository for CurseForgeRepository {
                             total_count: body.pagination.total_count,
                         });
                     } else {
-                        println!("API key {} failed with status: {}", i + 1, response.status());
+                        println!(
+                            "API key {} failed with status: {}",
+                            i + 1,
+                            response.status()
+                        );
                         if i == api_keys.len() - 1 {
                             anyhow::bail!("API Error: {}", response.status());
                         }
@@ -244,8 +264,13 @@ impl ModRepository for CurseForgeRepository {
         let url = format!("{}/mods/{}/files", API_BASE, mod_id);
 
         for (i, api_key) in api_keys.iter().enumerate() {
-            println!("Trying CurseForge API key {} for get_versions: {}...", i + 1, &api_key[..8.min(api_key.len())]);
-            let resp = self.client
+            println!(
+                "Trying CurseForge API key {} for get_versions: {}...",
+                i + 1,
+                &api_key[..8.min(api_key.len())]
+            );
+            let resp = self
+                .client
                 .get(&url)
                 .header("x-api-key", api_key)
                 .header("Accept", "application/json")
@@ -260,7 +285,11 @@ impl ModRepository for CurseForgeRepository {
                         let body: FilesResponse = response.json().await?;
                         return Ok(body.data.into_iter().map(|f| f.into()).collect());
                     } else {
-                        println!("API key {} failed for get_versions with status: {}", i + 1, response.status());
+                        println!(
+                            "API key {} failed for get_versions with status: {}",
+                            i + 1,
+                            response.status()
+                        );
                         if i == api_keys.len() - 1 {
                             anyhow::bail!("API Error: {}", response.status());
                         }
@@ -279,6 +308,4 @@ impl ModRepository for CurseForgeRepository {
 
         anyhow::bail!("No API keys available")
     }
-
 }
-

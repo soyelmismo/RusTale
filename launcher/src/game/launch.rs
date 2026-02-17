@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
-use tokio::process::{Child, Command};
 use std::sync::{Arc, atomic::AtomicBool};
+use tokio::process::{Child, Command};
 
 /// Launches the Hytale game client with async agent download
 /// This function launches the game immediately and downloads the dualauth-agent in background
@@ -16,9 +16,18 @@ pub fn launch_game_with_async_agent(
     env_vars: std::collections::HashMap<String, String>,
     client: reqwest::Client,
 ) -> Result<Child> {
-    launch_game_with_agent(player_name, player_uuid, executable_path, game_working_dir, user_data_dir, java_exec, extra_auth_args, env_vars, Some(client))
+    launch_game_with_agent(
+        player_name,
+        player_uuid,
+        executable_path,
+        game_working_dir,
+        user_data_dir,
+        java_exec,
+        extra_auth_args,
+        env_vars,
+        Some(client),
+    )
 }
-
 
 /// Launches the Hytale game client with optional async agent download
 /// Internal function that handles both the game launch and optional agent download
@@ -33,7 +42,7 @@ fn launch_game_with_agent(
     env_vars: std::collections::HashMap<String, String>,
     client: Option<reqwest::Client>,
 ) -> Result<Child> {
-    // SANITIZACION DE RUTAS: 
+    // SANITIZACION DE RUTAS:
     // Java y algunas librerías nativas fallan con rutas relativas o con rutas UNC de Windows (\\\\?\\C:\\\\...).
     // Convertimos todo a absoluto limpio.
     let clean_exec = crate::util::sanitize_path(executable_path);
@@ -51,10 +60,7 @@ fn launch_game_with_agent(
 
     // Verify client exists (final safety check)
     if !clean_exec.exists() {
-        anyhow::bail!(
-            "Game executable not found at: {}",
-            clean_exec.display()
-        );
+        anyhow::bail!("Game executable not found at: {}", clean_exec.display());
     }
 
     println!(
@@ -81,13 +87,12 @@ fn launch_game_with_agent(
     configure_linux_env(&mut cmd, &clean_exec, &clean_work_dir)?;
 
     cmd.kill_on_drop(true);
-    
+
     // Explicitamente setear el Current Directory al del juego para asegurar consistencia
     cmd.current_dir(&clean_work_dir);
-    
+
     // Spawn the game process
-    let child = cmd.spawn()
-        .context("Failed to start game process")?;
+    let child = cmd.spawn().context("Failed to start game process")?;
 
     spawn_agent_download(client);
 
@@ -111,7 +116,7 @@ fn build_game_command(
     {
         cmd.creation_flags(0x08000000);
     }
-    
+
     cmd.arg("--app-dir")
         .arg(game_working_dir)
         .arg("--user-dir")
@@ -136,7 +141,11 @@ fn build_game_command(
 
 /// Configure Linux-specific environment variables for game command
 #[cfg(target_os = "linux")]
-fn configure_linux_env(cmd: &mut Command, executable_path: &PathBuf, game_working_dir: &PathBuf) -> Result<()> {
+fn configure_linux_env(
+    cmd: &mut Command,
+    executable_path: &PathBuf,
+    game_working_dir: &PathBuf,
+) -> Result<()> {
     {
         // 1. SDL Video Driver (Wayland/X11)
         if is_wayland() {
@@ -148,7 +157,9 @@ fn configure_linux_env(cmd: &mut Command, executable_path: &PathBuf, game_workin
 
             // Usar rutas absolutas aquí también es crítico para Linux
             let parent_abs = parent.canonicalize().unwrap_or(parent.to_path_buf());
-            let work_abs = game_working_dir.canonicalize().unwrap_or(game_working_dir.to_path_buf());
+            let work_abs = game_working_dir
+                .canonicalize()
+                .unwrap_or(game_working_dir.to_path_buf());
 
             let new_ld_path = format!(
                 "{}:{}:{}",
@@ -161,7 +172,7 @@ fn configure_linux_env(cmd: &mut Command, executable_path: &PathBuf, game_workin
             println!("[Linux] Injected LD_LIBRARY_PATH fixes.");
         }
     }
-    
+
     Ok(())
 }
 
@@ -178,7 +189,9 @@ fn spawn_agent_download(client: Option<reqwest::Client>) {
                 &base_dir,
                 &progress_callback,
                 None::<Arc<AtomicBool>>,
-            ).await {
+            )
+            .await
+            {
                 eprintln!("[Agent] Background download failed: {}", e);
             }
         });

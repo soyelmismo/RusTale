@@ -3,14 +3,13 @@ use std::path::PathBuf;
 use std::sync::{Arc, atomic::AtomicBool};
 use tokio::io::AsyncBufReadExt;
 
+use crate::game::patch_api::get_butler_fallback_url;
 use crate::game::paths::GamePaths;
 use crate::util::make_executable;
-use crate::game::patch_api::get_butler_fallback_url;
 
 /// Installer for Butler using the new patch API system
 #[derive(Clone)]
-pub struct ButlerInstaller {
-}
+pub struct ButlerInstaller {}
 
 impl ButlerInstaller {
     pub fn new() -> Self {
@@ -33,7 +32,15 @@ impl ButlerInstaller {
         // Check if already installed
         if butler_path.exists() {
             let _ = make_executable(&butler_path).await;
-            progress_callback("butler", 100.0, "Butler already installed", 0, 0, None, None);
+            progress_callback(
+                "butler",
+                100.0,
+                "Butler already installed",
+                0,
+                0,
+                None,
+                None,
+            );
             return Ok(butler_path);
         }
 
@@ -51,20 +58,28 @@ impl ButlerInstaller {
         if zip_path.exists() {
             let file_name = url.split('/').last().unwrap_or("butler.zip");
             if !crate::game::patch_api::utils::looks_like_butler_file(file_name) {
-                progress_callback("butler", 5.0, &format!("Invalid cached file: {}", file_name), 0, 0, None, None);
+                progress_callback(
+                    "butler",
+                    5.0,
+                    &format!("Invalid cached file: {}", file_name),
+                    0,
+                    0,
+                    None,
+                    None,
+                );
                 tokio::fs::remove_file(&zip_path).await?;
             } else {
                 // Cached file is valid, proceed to extraction
                 progress_callback("butler", 70.0, "Extracting Butler...", 0, 0, None, None);
-                
+
                 let zip_path_clone = zip_path.clone();
                 let tools_dir_clone = tools_dir.clone();
-                
+
                 tokio::task::spawn_blocking(move || -> Result<()> {
                     let file = std::fs::File::open(&zip_path_clone)
                         .context("Failed to open Butler archive")?;
-                    let mut archive = zip::ZipArchive::new(file)
-                        .context("Failed to read Butler archive")?;
+                    let mut archive =
+                        zip::ZipArchive::new(file).context("Failed to read Butler archive")?;
                     archive
                         .extract(&tools_dir_clone)
                         .context("Failed to extract Butler")?;
@@ -72,12 +87,20 @@ impl ButlerInstaller {
                 })
                 .await
                 .context("Butler extraction task failed")??;
-                
+
                 // Make executable on Unix
                 let _ = make_executable(&butler_path).await;
-                
-                progress_callback("butler", 100.0, "Butler installed from cache", 0, 0, None, None);
-                
+
+                progress_callback(
+                    "butler",
+                    100.0,
+                    "Butler installed from cache",
+                    0,
+                    0,
+                    None,
+                    None,
+                );
+
                 return Ok(butler_path);
             }
         }
@@ -89,17 +112,18 @@ impl ButlerInstaller {
             &zip_path,
             |pct, speed, total, downloaded, eta| {
                 progress_callback(
-                    "butler", 
-                    pct as f64, 
-                    &format!("Downloading Butler... ({})", speed), 
-                    total, 
-                    downloaded, 
-                    eta, 
-                    None
+                    "butler",
+                    pct as f64,
+                    &format!("Downloading Butler... ({})", speed),
+                    total,
+                    downloaded,
+                    eta,
+                    None,
                 );
             },
             cancel_token,
-        ).await?;
+        )
+        .await?;
 
         progress_callback("butler", 70.0, "Extracting Butler...", 0, 0, None, None);
 
@@ -108,10 +132,10 @@ impl ButlerInstaller {
         let tools_dir_clone = tools_dir.clone();
 
         tokio::task::spawn_blocking(move || -> Result<()> {
-            let file = std::fs::File::open(&zip_path_clone)
-                .context("Failed to open Butler archive")?;
-            let mut archive = zip::ZipArchive::new(file)
-                .context("Failed to read Butler archive")?;
+            let file =
+                std::fs::File::open(&zip_path_clone).context("Failed to open Butler archive")?;
+            let mut archive =
+                zip::ZipArchive::new(file).context("Failed to read Butler archive")?;
             archive
                 .extract(&tools_dir_clone)
                 .context("Failed to extract Butler")?;
@@ -134,8 +158,7 @@ impl ButlerInstaller {
 
 /// Installer for JRE using the new patch API system
 #[derive(Clone)]
-pub struct JreInstaller {
-}
+pub struct JreInstaller {}
 
 impl JreInstaller {
     pub fn new() -> Self {
@@ -156,7 +179,8 @@ impl JreInstaller {
 
         let url = crate::game::patch_api::utils::get_java_adoptium_url(os, arch);
 
-        self.download_jre_from_url(client, &url, base_dir, &progress_callback, cancel_token).await
+        self.download_jre_from_url(client, &url, base_dir, &progress_callback, cancel_token)
+            .await
     }
 
     /// Downloads JRE from a specific URL
@@ -181,14 +205,28 @@ impl JreInstaller {
         // Validate cached file before using it
         if cache_file.exists() {
             if !crate::game::patch_api::utils::looks_like_jre_file(file_name) {
-                progress_callback("jre", 5.0, &format!("Invalid cached file: {}", file_name), 0, 0, None);
+                progress_callback(
+                    "jre",
+                    5.0,
+                    &format!("Invalid cached file: {}", file_name),
+                    0,
+                    0,
+                    None,
+                );
                 tokio::fs::remove_file(&cache_file).await?;
             }
         }
 
         // Download if not cached
         if !cache_file.exists() {
-            progress_callback("jre", 10.0, &format!("Downloading {}...", file_name), 0, 0, None);
+            progress_callback(
+                "jre",
+                10.0,
+                &format!("Downloading {}...", file_name),
+                0,
+                0,
+                None,
+            );
 
             crate::game::downloader::download_file(
                 client,
@@ -196,20 +234,21 @@ impl JreInstaller {
                 &cache_file,
                 |pct, speed, total, downloaded, eta| {
                     let size_info = if total > 0 {
-                        format!("{} / {}", 
-                            crate::game::patch_api::utils::format_bytes(downloaded), 
+                        format!(
+                            "{} / {}",
+                            crate::game::patch_api::utils::format_bytes(downloaded),
                             crate::game::patch_api::utils::format_bytes(total)
                         )
                     } else {
                         crate::game::patch_api::utils::format_bytes(downloaded)
                     };
-                    
+
                     let eta_info = if let Some(eta_str) = &eta {
                         format!(" • ETA: {}", eta_str)
                     } else {
                         String::new()
                     };
-                    
+
                     progress_callback(
                         "jre",
                         pct as f64,
@@ -220,7 +259,8 @@ impl JreInstaller {
                     );
                 },
                 cancel_token,
-            ).await?;
+            )
+            .await?;
         }
 
         progress_callback("jre", 70.0, "Extracting JRE...", 0, 0, None);
@@ -260,14 +300,11 @@ impl JreInstaller {
 fn extract_archive(archive_path: &PathBuf, dest_dir: &PathBuf) -> Result<()> {
     std::fs::create_dir_all(dest_dir)?;
 
-    let file = std::fs::File::open(archive_path)
-        .context("Failed to open archive")?;
+    let file = std::fs::File::open(archive_path).context("Failed to open archive")?;
 
     if archive_path.to_string_lossy().ends_with(".zip") {
-        let mut archive = zip::ZipArchive::new(file)
-            .context("Failed to read ZIP archive")?;
-        archive.extract(dest_dir)
-            .context("Failed to extract ZIP")?;
+        let mut archive = zip::ZipArchive::new(file).context("Failed to read ZIP archive")?;
+        archive.extract(dest_dir).context("Failed to extract ZIP")?;
         flatten_jre_directory(dest_dir)?;
     } else if archive_path.to_string_lossy().ends_with(".tar.gz") {
         let gz = flate2::read::GzDecoder::new(file);
@@ -290,27 +327,25 @@ fn flatten_jre_directory(dest_dir: &PathBuf) -> Result<()> {
             .map(|entry| entry.path())
             .filter(|path| path.is_dir())
             .collect();
-            
+
         // If there's exactly one subdirectory and it looks like a JRE directory
         if subdirs.len() == 1 {
             let subdir = &subdirs[0];
-            let subdir_name = subdir.file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("");
-                
+            let subdir_name = subdir.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
             // Common JRE directory patterns
-            if subdir_name.starts_with("jdk-") || 
-               subdir_name.contains("jre") || 
-               subdir_name.starts_with("java-") {
-                
+            if subdir_name.starts_with("jdk-")
+                || subdir_name.contains("jre")
+                || subdir_name.starts_with("java-")
+            {
                 println!("[JRE] Moving contents from subdirectory: {}", subdir_name);
-                
+
                 // Move all contents from subdirectory to dest_dir
                 if let Ok(entries) = std::fs::read_dir(subdir) {
                     for entry in entries.flatten() {
                         let src_path = entry.path();
                         let dest_path = dest_dir.join(entry.file_name());
-                        
+
                         if src_path.is_file() {
                             std::fs::rename(&src_path, &dest_path)
                                 .context(format!("Failed to move file {:?}", src_path))?;
@@ -320,11 +355,11 @@ fn flatten_jre_directory(dest_dir: &PathBuf) -> Result<()> {
                         }
                     }
                 }
-                
+
                 // Remove the now-empty subdirectory
                 std::fs::remove_dir_all(subdir)
                     .context(format!("Failed to remove subdirectory {:?}", subdir))?;
-                    
+
                 println!("[JRE] Successfully flattened JRE directory structure");
             }
         }

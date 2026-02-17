@@ -17,7 +17,6 @@ pub fn view<'a>(
     total_steps: Option<usize>,
     ctx: theme::UIContext,
 ) -> Element<'a, Message> {
-
     let palette = ctx.palette;
     let play_button_text = match status {
         LauncherStatus::Playing => localization.t("launcher.stop"),
@@ -36,11 +35,7 @@ pub fn view<'a>(
     };
 
     let is_long_text = play_button_text.len() > 9;
-    let (icon_size, spacing_val) = if is_long_text {
-        (16.0, 6)
-    } else {
-        (20.0, 10)
-    };
+    let (icon_size, spacing_val) = if is_long_text { (16.0, 6) } else { (20.0, 10) };
 
     let version_display = if settings.game_version == 0 {
         match resolved_version {
@@ -91,23 +86,23 @@ pub fn view<'a>(
     )
     .style(move |t, bs| match status {
         _ if is_disabled => theme::play_button_style(&palette, t, bs),
-        
+
         LauncherStatus::Checking | LauncherStatus::Busy => {
             theme::blocked_button_style(&palette, t, bs) // Nuevo estilo para estados intermedios
-        },
-        
+        }
+
         LauncherStatus::Playing => {
             theme::play_button_style_active(&palette, t, bs) // Ahora es dinamico-danger
-        },
-        
+        }
+
         LauncherStatus::Downloading | LauncherStatus::Migrating => {
             theme::play_button_style_active(&palette, t, bs)
-        },
-        
+        }
+
         LauncherStatus::NeedsUpdate => {
             theme::update_button_style(&palette, t, bs) // Ahora es dinamico-accent
-        },
-        
+        }
+
         _ => theme::play_button_style(&palette, t, bs),
     })
     .width(Length::Fill)
@@ -129,7 +124,7 @@ pub fn view<'a>(
                 .width(18)
                 .height(18)
                 .style(move |t, s| theme::svg_accent(&palette, t, s))
-                .opacity(ctx.palette.text_primary.a)
+                .opacity(ctx.palette.text_primary.a),
         )
         .width(Length::Fill)
         .height(Length::Fill)
@@ -152,7 +147,7 @@ pub fn view<'a>(
                 .width(18)
                 .height(18)
                 .style(move |t, s| theme::svg_accent(&palette, t, s))
-                .opacity(ctx.palette.text_primary.a)
+                .opacity(ctx.palette.text_primary.a),
         )
         .width(Length::Fill)
         .height(Length::Fill)
@@ -184,7 +179,13 @@ pub fn view<'a>(
     .height(90);
 
     // Progress bars container using ProgressPayload
-    let progress_bars_container = if matches!(status, LauncherStatus::Downloading | LauncherStatus::Migrating | LauncherStatus::Busy | LauncherStatus::Checking) {
+    let progress_bars_container = if matches!(
+        status,
+        LauncherStatus::Downloading
+            | LauncherStatus::Migrating
+            | LauncherStatus::Busy
+            | LauncherStatus::Checking
+    ) {
         if let Some(data) = progress_data {
             // Translate status text dynamically using message_key with arguments
             let status_msg = if !data.message_args.is_empty() {
@@ -193,14 +194,20 @@ pub fn view<'a>(
             } else {
                 localization.t(&data.message_key).to_string()
             };
-            
+
             // Extract download stats if available
-            let (total_bytes, downloaded_bytes, speed_str, eta_str) = if let Some(stats) = &data.stats {
-                (stats.total_bytes, stats.downloaded_bytes, stats.speed_str.clone(), stats.eta_str.clone())
-            } else {
-                (0, 0, String::new(), None)
-            };
-            
+            let (total_bytes, downloaded_bytes, speed_str, eta_str) =
+                if let Some(stats) = &data.stats {
+                    (
+                        stats.total_bytes,
+                        stats.downloaded_bytes,
+                        stats.speed_str.clone(),
+                        stats.eta_str.clone(),
+                    )
+                } else {
+                    (0, 0, String::new(), None)
+                };
+
             column![
                 // Status and progress info row
                 row![
@@ -213,32 +220,37 @@ pub fn view<'a>(
                         theme::text_micro(format!("{:.0}%", data.global_progress * 100.0), ctx)
                     }
                 ],
-                
                 // Primary progress bar (Global Progress)
                 container(
                     ProgressBar::new(0.0..=1.0, data.global_progress)
                         .style(move |t| theme::accent_bar_style(&palette, t))
-                ).height(6).width(Length::Fill),
-                
+                )
+                .height(6)
+                .width(Length::Fill),
                 // Secondary progress bar (Step Progress) - only show if significantly different
                 if (data.step_progress - data.global_progress).abs() > 0.05 {
                     Element::from(
                         container(
                             ProgressBar::new(0.0..=1.0, data.step_progress)
-                                .style(move |t| theme::sub_bar_style(&palette, t))
-                        ).height(2).width(Length::Fill)
+                                .style(move |t| theme::sub_bar_style(&palette, t)),
+                        )
+                        .height(2)
+                        .width(Length::Fill),
                     )
                 } else {
                     Element::from(Space::new().height(2))
                 },
-                
                 // Download statistics row
                 if total_bytes > 0 {
                     row![
-                        theme::text_micro(format!("{}/{}", 
-                            crate::game::patch_api::utils::format_bytes(downloaded_bytes), 
-                            crate::game::patch_api::utils::format_bytes(total_bytes)
-                        ), ctx),
+                        theme::text_micro(
+                            format!(
+                                "{}/{}",
+                                crate::game::patch_api::utils::format_bytes(downloaded_bytes),
+                                crate::game::patch_api::utils::format_bytes(total_bytes)
+                            ),
+                            ctx
+                        ),
                         Space::new().width(Length::Fill),
                         if !speed_str.is_empty() {
                             theme::text_micro(&speed_str, ctx)
@@ -260,16 +272,20 @@ pub fn view<'a>(
                 } else {
                     row![]
                 }
-            ].spacing(5)
+            ]
+            .spacing(5)
         } else {
             // Indeterminate state (initializing)
             column![
-               theme::text_micro(localization.t("launcher.status.initializing"), ctx),
-               container(
-                   ProgressBar::new(0.0..=1.0, 0.0)
-                       .style(move |t| theme::accent_bar_style(&palette, t))
-               ).height(4).width(Length::Fill)
-            ].spacing(5)
+                theme::text_micro(localization.t("launcher.status.initializing"), ctx),
+                container(
+                    ProgressBar::new(0.0..=1.0, 0.0)
+                        .style(move |t| theme::accent_bar_style(&palette, t))
+                )
+                .height(4)
+                .width(Length::Fill)
+            ]
+            .spacing(5)
         }
     } else {
         column![] // Empty when idle/ready
@@ -317,7 +333,7 @@ pub fn view<'a>(
             status_text_widget,
             actions
         ]
-        .spacing(15)
+        .spacing(15),
     )
     .width(Length::Fill)
     .height(Length::Shrink)

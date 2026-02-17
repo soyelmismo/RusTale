@@ -83,10 +83,11 @@ fn apply_patch_logic(
     logo_url: Option<String>,
 ) -> Result<()> {
     // Limpiar el nombre del mod al inicio para usarlo en todo el flujo
-    let clean_mod_name = mod_name.chars()
+    let clean_mod_name = mod_name
+        .chars()
         .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_' || *c == '.')
         .collect::<String>();
-    
+
     let file = fs::File::open(zip_path)?;
     let mut archive = ZipArchive::new(file)?;
 
@@ -178,7 +179,7 @@ fn apply_patch_logic(
     // =========================================================
     if is_hybrid {
         println!("[ZipMods] Hybrid detected - performing atomic sync to Mods folder");
-        
+
         // CORRECCIoN: Usar GamePaths pasado como argumento
         let mods_dir = paths.mods_dir(&channel, &version);
         let disabled_dir = paths.disabled_mods_dir(&channel, &version);
@@ -213,28 +214,36 @@ fn apply_patch_logic(
             ));
         }
         if let Ok(metadata) = fs::metadata(zip_path) {
-            println!("[ZipMods] DEBUG: Source file size: {} bytes", metadata.len());
+            println!(
+                "[ZipMods] DEBUG: Source file size: {} bytes",
+                metadata.len()
+            );
         }
 
         println!(
             "[ZipMods] DEBUG: Attempting to copy from {:?} to {:?}",
             zip_path, target_active
         );
-        
+
         match fs::copy(zip_path, &target_active) {
             Ok(bytes) => {
                 println!("[ZipMods] DEBUG: Successfully copied {} bytes", bytes);
-                
+
                 // Verificación inmediata
                 if target_active.exists() {
                     println!("[ZipMods] DEBUG: File exists at target location");
                     if let Ok(metadata) = fs::metadata(&target_active) {
                         println!("[ZipMods] DEBUG: File size: {} bytes", metadata.len());
                     }
-                    
+
                     // Registrar en mods_manifest.json para consistencia
-                    if let Err(e) = register_hybrid_zip_in_manifest(&mods_dir, &clean_mod_name, &manifest) {
-                        println!("[ZipMods] Warning: Failed to register hybrid in mods manifest: {}", e);
+                    if let Err(e) =
+                        register_hybrid_zip_in_manifest(&mods_dir, &clean_mod_name, &manifest)
+                    {
+                        println!(
+                            "[ZipMods] Warning: Failed to register hybrid in mods manifest: {}",
+                            e
+                        );
                         // No fallar la instalación por esto, solo advertir
                     } else {
                         println!("[ZipMods] Successfully registered hybrid in mods manifest");
@@ -249,18 +258,17 @@ fn apply_patch_logic(
             }
             Err(e) => {
                 println!("[ZipMods] ERROR: Failed to copy hybrid zip: {}", e);
-                return Err(e).with_context(|| {
-                    format!("Failed to copy hybrid zip to {:?}", target_active)
-                });
+                return Err(e)
+                    .with_context(|| format!("Failed to copy hybrid zip to {:?}", target_active));
             }
         }
-        
+
         println!("[ZipMods] Hybrid sync completed successfully as part of installation");
     } else {
         // CASO 2: NO es hibrido (Cliente puro). Limpieza.
         // Si el mod se actualizo y DEJo de ser hibrido, hay que borrar el archivo viejo de Mods/
         println!("[ZipMods] DEBUG: Not hybrid, cleaning up any leftovers");
-        
+
         let mods_dir = paths.mods_dir(&channel, &version);
         let disabled_dir = paths.disabled_mods_dir(&channel, &version);
         let zip_filename = format!("{}.zip", clean_mod_name);
@@ -294,7 +302,7 @@ fn register_hybrid_zip_in_manifest(
     patch_manifest: &PatchManifest,
 ) -> Result<()> {
     let manifest_path = mods_dir.join("mods_manifest.json");
-    
+
     // Leer manifest existente o crear uno nuevo
     let mut mods = if manifest_path.exists() {
         let content = fs::read_to_string(&manifest_path)?;
@@ -302,7 +310,7 @@ fn register_hybrid_zip_in_manifest(
     } else {
         Vec::new()
     };
-    
+
     // Crear entrada para el mod híbrido
     let hybrid_entry = serde_json::json!({
         "file_name": format!("{}.zip", mod_name),
@@ -317,7 +325,7 @@ fn register_hybrid_zip_in_manifest(
         "update_available": null,
         "is_hybrid": true
     });
-    
+
     // Agregar al manifest (evitando duplicados)
     if !mods.iter().any(|m| {
         m.get("file_name")
@@ -327,11 +335,11 @@ fn register_hybrid_zip_in_manifest(
     }) {
         mods.push(hybrid_entry);
     }
-    
+
     // Escribir manifest actualizado
     let json = serde_json::to_string_pretty(&mods)?;
     fs::write(manifest_path, json)?;
-    
+
     Ok(())
 }
 
@@ -493,11 +501,11 @@ pub fn uninstall_patch(
     let core_patches_root = paths.core_patches_dir(&channel, &version);
     let patch_dir = core_patches_root.join(mod_id);
     let manifest_path = patch_dir.join("manifest.json");
-    
+
     // Leer manifest ANTES de deshabilitar para poder usar la información
     let mut should_cleanup_mods = false;
     let mut mod_name = String::new();
-    
+
     if manifest_path.exists() {
         if let Ok(content) = fs::read_to_string(&manifest_path) {
             if let Ok(manifest) = serde_json::from_str::<PatchManifest>(&content) {
@@ -508,7 +516,7 @@ pub fn uninstall_patch(
             }
         }
     }
-    
+
     // 1. Deshabilitar primero (Esto ya restaura backups)
     disable_patch(paths, channel.clone(), version.clone(), mod_id)?;
 
@@ -525,15 +533,12 @@ pub fn uninstall_patch(
         if p2.exists() {
             let _ = fs::remove_file(p2);
         }
-        println!(
-            "[ZipMods] Cleaned up mod files for uninstall: {}",
-            zip_name
-        );
-        
+        println!("[ZipMods] Cleaned up mod files for uninstall: {}", zip_name);
+
         // 3. Remove from mods_manifest.json
         let mods_dir = paths.mods_dir(&channel, &version);
         let mods_manifest_path = mods_dir.join("mods_manifest.json");
-        
+
         if mods_manifest_path.exists() {
             if let Ok(content) = fs::read_to_string(&mods_manifest_path) {
                 if let Ok(mut mods) = serde_json::from_str::<Vec<serde_json::Value>>(&content) {
@@ -544,7 +549,7 @@ pub fn uninstall_patch(
                             .map(|f| f != zip_name)
                             .unwrap_or(true)
                     });
-                    
+
                     // Write updated manifest
                     let updated_json = serde_json::to_string_pretty(&mods)?;
                     fs::write(mods_manifest_path, updated_json)?;
@@ -564,7 +569,10 @@ pub fn uninstall_patch(
 /// Helper function to check if manifest has server content
 fn has_server_content_in_manifest(manifest: &PatchManifest) -> bool {
     // Check if any added files contain Server/ content
-    manifest.added_files.iter().any(|file| file.starts_with("Server/"))
+    manifest
+        .added_files
+        .iter()
+        .any(|file| file.starts_with("Server/"))
 }
 
 /// Verify integrity of all patches and sync with actual file system state
@@ -573,11 +581,14 @@ pub fn verify_patch_integrity(
     channel: &str,
     version: &str,
 ) -> Result<Vec<String>> {
-    println!("[ZipMods] Integrity check starting for channel={}, version={}", channel, version);
-    
+    println!(
+        "[ZipMods] Integrity check starting for channel={}, version={}",
+        channel, version
+    );
+
     let mut fixed_mods = Vec::new();
     let core_patches_root = paths.core_patches_dir(channel, version);
-    
+
     // Listar Mods directory antes de empezar
     let mods_dir = paths.mods_dir(channel, version);
     if mods_dir.exists() {
@@ -590,41 +601,52 @@ pub fn verify_patch_integrity(
     } else {
         println!("[ZipMods] Integrity: Mods directory does not exist");
     }
-    
+
     // Verificar integridad de mods_manifest.json
     let mods_manifest_path = mods_dir.join("mods_manifest.json");
     if mods_manifest_path.exists() {
         if let Ok(content) = fs::read_to_string(&mods_manifest_path) {
             if let Ok(manifests) = serde_json::from_str::<Vec<serde_json::Value>>(&content) {
                 let mut manifests_to_keep = Vec::new();
-                
+
                 for manifest in &manifests {
                     if let Some(file_name) = manifest.get("file_name").and_then(|v| v.as_str()) {
                         let file_path = mods_dir.join(file_name);
-                        
+
                         if file_path.exists() {
                             // El archivo existe, mantener en el manifest
                             manifests_to_keep.push(manifest.clone());
                         } else {
                             // El archivo no existe, remover del manifest
-                            if let Some(mod_name) = manifest.get("mod_name").and_then(|v| v.as_str()) {
-                                println!("[ZipMods] Integrity: Removing missing mod from manifest: {} ({})", mod_name, file_name);
-                                fixed_mods.push(format!("{}: Removed from manifest (file missing)", mod_name));
+                            if let Some(mod_name) =
+                                manifest.get("mod_name").and_then(|v| v.as_str())
+                            {
+                                println!(
+                                    "[ZipMods] Integrity: Removing missing mod from manifest: {} ({})",
+                                    mod_name, file_name
+                                );
+                                fixed_mods.push(format!(
+                                    "{}: Removed from manifest (file missing)",
+                                    mod_name
+                                ));
                             }
                         }
                     }
                 }
-                
+
                 // Escribir el manifest actualizado si hubo cambios
                 if manifests_to_keep.len() != manifests.len() {
-                    println!("[ZipMods] Integrity: Updating mods_manifest.json, removed {} entries", manifests.len() - manifests_to_keep.len());
+                    println!(
+                        "[ZipMods] Integrity: Updating mods_manifest.json, removed {} entries",
+                        manifests.len() - manifests_to_keep.len()
+                    );
                     let updated_json = serde_json::to_string_pretty(&manifests_to_keep)?;
                     fs::write(&mods_manifest_path, updated_json)?;
                 }
             }
         }
     }
-    
+
     if !core_patches_root.exists() {
         return Ok(fixed_mods);
     }
@@ -634,49 +656,65 @@ pub fn verify_patch_integrity(
         if entry.path().is_dir() {
             let patch_dir = entry.path();
             let manifest_path = patch_dir.join("manifest.json");
-            
+
             if manifest_path.exists() {
                 if let Ok(content) = fs::read_to_string(&manifest_path) {
                     if let Ok(manifest) = serde_json::from_str::<PatchManifest>(&content) {
-                        let mod_id = patch_dir.file_name()
+                        let mod_id = patch_dir
+                            .file_name()
                             .and_then(|n| n.to_str())
                             .unwrap_or("unknown");
 
                         // Check if this patch should have a ZIP in Mods/DisabledMods
-                        let should_have_zip = manifest.is_hybrid || has_server_content_in_manifest(&manifest);
-                        
+                        let should_have_zip =
+                            manifest.is_hybrid || has_server_content_in_manifest(&manifest);
+
                         if should_have_zip {
                             let mods_dir = paths.mods_dir(channel, version);
                             let disabled_dir = paths.disabled_mods_dir(channel, version);
                             let zip_filename = format!("{}.zip", manifest.mod_name);
-                            
+
                             let zip_in_mods = mods_dir.join(&zip_filename).exists();
                             let zip_in_disabled = disabled_dir.join(&zip_filename).exists();
-                            
+
                             // Verificar también el source.zip en corepatches
                             let source_zip = core_patches_root.join(mod_id).join("source.zip");
                             let source_exists = source_zip.exists();
-                            
-                            println!("[ZipMods] Integrity: {} - zip_in_mods: {}, zip_in_disabled: {}, source_exists: {}", 
-                                manifest.mod_name, zip_in_mods, zip_in_disabled, source_exists);
-                            
+
+                            println!(
+                                "[ZipMods] Integrity: {} - zip_in_mods: {}, zip_in_disabled: {}, source_exists: {}",
+                                manifest.mod_name, zip_in_mods, zip_in_disabled, source_exists
+                            );
+
                             // Si el ZIP no existe en ninguna ubicación PERO el source.zip sí existe
                             if !zip_in_mods && !zip_in_disabled && source_exists {
                                 // Restaurar el ZIP desde source.zip
-                                println!("[ZipMods] Integrity: Restoring missing ZIP from source.zip for {}", manifest.mod_name);
-                                fixed_mods.push(format!("{}: Restored ZIP from source.zip", manifest.mod_name));
-                                
+                                println!(
+                                    "[ZipMods] Integrity: Restoring missing ZIP from source.zip for {}",
+                                    manifest.mod_name
+                                );
+                                fixed_mods.push(format!(
+                                    "{}: Restored ZIP from source.zip",
+                                    manifest.mod_name
+                                ));
+
                                 let target = mods_dir.join(&zip_filename);
                                 if !mods_dir.exists() {
                                     let _ = fs::create_dir_all(&mods_dir);
                                 }
-                                
+
                                 match fs::copy(&source_zip, &target) {
                                     Ok(_) => {
-                                        println!("[ZipMods] Integrity: Successfully restored ZIP for {}", manifest.mod_name);
+                                        println!(
+                                            "[ZipMods] Integrity: Successfully restored ZIP for {}",
+                                            manifest.mod_name
+                                        );
                                     }
                                     Err(e) => {
-                                        println!("[ZipMods] Integrity: Failed to restore ZIP for {}: {}", manifest.mod_name, e);
+                                        println!(
+                                            "[ZipMods] Integrity: Failed to restore ZIP for {}: {}",
+                                            manifest.mod_name, e
+                                        );
                                         // Si falla la restauración, entonces sí eliminar del index
                                         let patch_dir = core_patches_root.join(mod_id);
                                         if patch_dir.exists() {
@@ -688,8 +726,11 @@ pub fn verify_patch_integrity(
                             // Si el ZIP no existe en ninguna ubicación Y tampoco el source.zip
                             else if !zip_in_mods && !zip_in_disabled && !source_exists {
                                 // El usuario eliminó completamente el mod - eliminar del index
-                                fixed_mods.push(format!("{}: Removed from index (completely missing)", manifest.mod_name));
-                                
+                                fixed_mods.push(format!(
+                                    "{}: Removed from index (completely missing)",
+                                    manifest.mod_name
+                                ));
+
                                 let patch_dir = core_patches_root.join(mod_id);
                                 if patch_dir.exists() {
                                     let _ = fs::remove_dir_all(patch_dir);
@@ -701,7 +742,7 @@ pub fn verify_patch_integrity(
             }
         }
     }
-    
+
     Ok(fixed_mods)
 }
 
@@ -785,4 +826,3 @@ pub fn is_patch_mod(zip_path: &Path) -> (bool, bool) {
     }
     (false, false)
 }
-

@@ -74,7 +74,6 @@ pub enum UpdateStatus {
     Error(String),
 }
 
-
 #[derive(Debug, Clone)]
 pub enum SettingsMessage {
     TabSelected(Tab),
@@ -226,7 +225,7 @@ impl SettingsState {
                 checkbox(self.temp_settings.enable_news)
                     .on_toggle(SettingsMessage::EnableNewsToggled)
                     .style(move |t, s| theme::checkbox_style(&palette, t, s))
-                    .into(), 
+                    .into(),
                 ctx
             ),
             theme::text_body(localization.t("settings.enable_news"), ctx),
@@ -699,7 +698,7 @@ impl SettingsState {
                 checkbox(self.temp_settings.enable_online_fix)
                     .on_toggle(SettingsMessage::EnableOnlineFixToggled)
                     .style(move |t, s| theme::checkbox_style(&palette, t, s))
-                    .into(), 
+                    .into(),
                 ctx
             ),
             column![
@@ -761,59 +760,57 @@ impl SettingsState {
                 let version_val = if is_latest { 0 } else { version as u32 };
 
                 list = list.push(
-                    container(
-                        theme::magic_row(
-                            vec![
-                                theme::text_small(label, ctx).into(),
-                                Space::new().width(Length::Fill).into(), // Espacio flexible para empujar a la derecha
-                                button(
-                                    container(theme::svg(
-                                        svg(util::icons::icon(util::icons::FOLDER))
-                                            .style(move |t, s| theme::svg_accent(&palette, t, s)),
-                                        ctx
-                                    ),)
-                                    .center_x(Length::Fill)
-                                    .center_y(Length::Fill)
-                                    .style(move |t| theme::container_style_transparent(&palette, t))
-                                )
-                                .on_press(SettingsMessage::OpenVersionFolder(version_val))
-                                .width(40) // Ancho especifico para el boton
-                                .style(move |t, s| theme::secondary_button_style(&palette, t, s))
-                                .into(),
-                                Space::new().width(5).into(),
-                                button(
-                                    container(theme::svg(
-                                        svg(util::icons::icon(util::icons::WRENCH))
-                                            .style(move |t, s| theme::svg_accent(&palette, t, s)),
-                                        ctx
-                                    ),)
-                                    .center_x(Length::Fill)
-                                    .center_y(Length::Fill)
-                                    .style(move |t| theme::container_style_transparent(&palette, t))
-                                )
-                                .on_press(SettingsMessage::RepairVersion(version_val))
-                                .width(40) // Ancho especifico para el boton
-                                .style(move |t, s| theme::secondary_button_style(&palette, t, s))
-                                .into(),
-                                Space::new().width(5).into(),
-                                button(
-                                    container(theme::svg(
-                                        svg(util::icons::icon(util::icons::TRASH))
-                                            .style(move |t, s| theme::svg_accent(&palette, t, s)),
-                                        ctx
-                                    ),)
-                                    .center_x(Length::Fill)
-                                    .center_y(Length::Fill)
-                                    .style(move |t| theme::container_style_transparent(&palette, t))
-                                )
-                                .on_press(SettingsMessage::DeleteVersion(version_val))
-                                .width(40) // Ancho especifico para el boton
-                                .style(move |t, s| theme::secondary_button_style(&palette, t, s))
-                                .into(),
-                            ],
-                            ctx
-                        )
-                    )
+                    container(theme::magic_row(
+                        vec![
+                            theme::text_small(label, ctx).into(),
+                            Space::new().width(Length::Fill).into(), // Espacio flexible para empujar a la derecha
+                            button(
+                                container(theme::svg(
+                                    svg(util::icons::icon(util::icons::FOLDER))
+                                        .style(move |t, s| theme::svg_accent(&palette, t, s)),
+                                    ctx,
+                                ))
+                                .center_x(Length::Fill)
+                                .center_y(Length::Fill)
+                                .style(move |t| theme::container_style_transparent(&palette, t)),
+                            )
+                            .on_press(SettingsMessage::OpenVersionFolder(version_val))
+                            .width(40) // Ancho especifico para el boton
+                            .style(move |t, s| theme::secondary_button_style(&palette, t, s))
+                            .into(),
+                            Space::new().width(5).into(),
+                            button(
+                                container(theme::svg(
+                                    svg(util::icons::icon(util::icons::WRENCH))
+                                        .style(move |t, s| theme::svg_accent(&palette, t, s)),
+                                    ctx,
+                                ))
+                                .center_x(Length::Fill)
+                                .center_y(Length::Fill)
+                                .style(move |t| theme::container_style_transparent(&palette, t)),
+                            )
+                            .on_press(SettingsMessage::RepairVersion(version_val))
+                            .width(40) // Ancho especifico para el boton
+                            .style(move |t, s| theme::secondary_button_style(&palette, t, s))
+                            .into(),
+                            Space::new().width(5).into(),
+                            button(
+                                container(theme::svg(
+                                    svg(util::icons::icon(util::icons::TRASH))
+                                        .style(move |t, s| theme::svg_accent(&palette, t, s)),
+                                    ctx,
+                                ))
+                                .center_x(Length::Fill)
+                                .center_y(Length::Fill)
+                                .style(move |t| theme::container_style_transparent(&palette, t)),
+                            )
+                            .on_press(SettingsMessage::DeleteVersion(version_val))
+                            .width(40) // Ancho especifico para el boton
+                            .style(move |t, s| theme::secondary_button_style(&palette, t, s))
+                            .into(),
+                        ],
+                        ctx,
+                    ))
                     .padding(5)
                     .style(move |t| theme::sidebar_style(&palette, t))
                     .width(Length::Fill)
@@ -1219,7 +1216,7 @@ impl SettingsState {
                                 .step(1.0)
                                 .style(move |t, s| theme::slider_style(&palette, t, s))
                                 .into(),
-                                ctx
+                                ctx,
                             ),
                             theme::text_body(
                                 &format!(
@@ -1238,7 +1235,7 @@ impl SettingsState {
                                 .step(1.0)
                                 .style(move |t, s| theme::slider_style(&palette, t, s))
                                 .into(),
-                                ctx
+                                ctx,
                             ),
                             section_title(localization.t("settings.jvm_args"), ctx),
                             theme::magic_text_area(

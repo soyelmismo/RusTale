@@ -9,11 +9,8 @@ pub struct Services {
 }
 
 impl Services {
-    pub fn new(
-        api_client: reqwest::Client, 
-        download_client: reqwest::Client
-    ) -> Self {
-        Self { 
+    pub fn new(api_client: reqwest::Client, download_client: reqwest::Client) -> Self {
+        Self {
             patcher: PatchApiFrontend::new(),
             api_client,
             download_client,

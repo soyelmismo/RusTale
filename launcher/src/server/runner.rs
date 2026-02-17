@@ -143,18 +143,25 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
 
     // 1. Tool Validation (JRE e Itch/Butler)
     println!("[1/5] Validating tools...");
-    let callback = |task: &str, pct: f64, msg: &str, total: u64, downloaded: u64, eta: Option<String>, _step: Option<usize>| {
+    let callback = |task: &str,
+                    pct: f64,
+                    msg: &str,
+                    total: u64,
+                    downloaded: u64,
+                    eta: Option<String>,
+                    _step: Option<usize>| {
         let eta_str = eta.map(|e| format!(" • ETA: {}", e)).unwrap_or_default();
         if pct == 0.0 || pct == 100.0 {
             let size_info = if total > 0 {
-                format!(" ({} / {})", 
-                    crate::game::patch_api::utils::format_bytes(downloaded), 
+                format!(
+                    " ({} / {})",
+                    crate::game::patch_api::utils::format_bytes(downloaded),
                     crate::game::patch_api::utils::format_bytes(total)
                 )
             } else {
                 String::new()
             };
-            
+
             println!("{}... {}% ({}{})", task, pct, msg, eta_str);
         }
     };
@@ -185,7 +192,9 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
 
     let _java_info = crate::java_detection::ensure_java_available(&root_dir).await?;
     let patch_frontend = PatchApiFrontend::get_instance();
-    let _butler_path = patch_frontend.install_butler(&client, &root_dir, callback, None).await?;
+    let _butler_path = patch_frontend
+        .install_butler(&client, &root_dir, callback, None)
+        .await?;
 
     // 3. Resolver Version y Descargar Servidor
     println!("[2/5] Checking Game Server files...");
@@ -198,7 +207,10 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     let target_ver_num = if config.game_version == "latest" || config.game_version == "0" {
         version_info.latest_remote
     } else {
-        config.game_version.parse::<i32>().context("Invalid version number")?
+        config
+            .game_version
+            .parse::<i32>()
+            .context("Invalid version number")?
     };
 
     let server_jar_raw = install_dir.join("Server").join("HytaleServer.jar");
@@ -244,8 +256,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
             let src_assets = src.join("Assets.zip");
             if config.use_direct_assets {
                 // Validate client version has required files
-                if let Err(e) =
-                    validate_client_version(&main_app_dir, &config.branch, &version_str)
+                if let Err(e) = validate_client_version(&main_app_dir, &config.branch, &version_str)
                 {
                     eprintln!("Client validation failed: {}", e);
                     eprintln!("Falling back to copying Assets.zip...");
@@ -358,8 +369,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
 
             if config.use_direct_assets {
                 // Validate client version has required files
-                if let Err(e) =
-                    validate_client_version(&main_app_dir, &config.branch, &version_str)
+                if let Err(e) = validate_client_version(&main_app_dir, &config.branch, &version_str)
                 {
                     eprintln!("Client validation failed: {}", e);
                     eprintln!("Falling back to copying Assets.zip...");
@@ -431,18 +441,23 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
 
     // Only download if NEITHER jar NOR original exists AND no assets are available anywhere
     if !jar_available && (!assets_exist_in_server && !assets_exist_in_client) {
-        println!("[Server] No assets found. Downloading version {}...", target_ver_num);
-        
+        println!(
+            "[Server] No assets found. Downloading version {}...",
+            target_ver_num
+        );
+
         let cache = crate::game::patch_api::get_shared_cache();
-        let patch_path = cache.get_or_download_patch(
-            &client,
-            &root_dir, // Download into server root
-            &config.branch,
-            0, 
-            target_ver_num,
-            callback,
-            None,
-        ).await?;
+        let patch_path = cache
+            .get_or_download_patch(
+                &client,
+                &root_dir, // Download into server root
+                &config.branch,
+                0,
+                target_ver_num,
+                callback,
+                None,
+            )
+            .await?;
 
         println!("[Server] Applying patch via Butler...");
         crate::game::patcher::apply_pwr(
@@ -452,7 +467,8 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
             &patch_path,
             callback,
             None,
-        ).await?;
+        )
+        .await?;
 
         // After patch application, update server args to use the extracted assets
         config.server_args =
@@ -615,10 +631,12 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     if agent_path.exists() {
         // Check if Java Agent is already present to avoid duplication
         let agent_arg = format!("-javaagent:{}", agent_path.to_string_lossy());
-        
+
         // Get current args from the command to check for duplication
         let current_args = cmd.as_std().get_args().collect::<Vec<&std::ffi::OsStr>>();
-        let already_present = current_args.iter().any(|a| a.to_string_lossy() == agent_arg);
+        let already_present = current_args
+            .iter()
+            .any(|a| a.to_string_lossy() == agent_arg);
 
         if !already_present {
             cmd.arg(agent_arg);
