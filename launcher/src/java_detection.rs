@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 /// Asegura que Java este disponible usando la logica existente del launcher
 pub async fn ensure_java_available(base_dir: &std::path::Path) -> anyhow::Result<JavaInfo> {
     // 1. Verificar si JRE ya esta instalado usando la logica existente
@@ -25,9 +27,9 @@ pub async fn ensure_java_available(base_dir: &std::path::Path) -> anyhow::Result
         .download_jre(
             &client,
             &base_dir.to_path_buf(),
-            |component, progress, status, _total, _downloaded, _eta| {
+            Arc::new(|component, progress, status, _total, _downloaded, _eta, _step| {
                 eprintln!("Java {}: {:.1}% - {}", component, progress, status);
-            },
+            }),
             None, // Sin token de cancelacion por ahora
         )
         .await?;

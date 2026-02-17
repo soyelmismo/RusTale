@@ -4,6 +4,19 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
+/// Request structure for mod installation operations
+/// This encapsulates all metadata needed to install a mod cleanly
+#[derive(Debug, Clone)]
+pub struct ModInstallationRequest {
+    pub mod_id: String,
+    pub mod_name: String,
+    pub remote_id: Option<String>,
+    pub file_id: Option<String>,
+    pub provider: Option<ModProvider>,
+    pub summary: Option<String>,
+    pub logo_url: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModInfo {
     pub name: String,

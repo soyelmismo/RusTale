@@ -249,11 +249,12 @@ impl IntegrityChecker {
                             0.0
                         };
 
-                        // Formatear porcentaje solo para el callback
-                        let pct_str = format!("{:.0}%", progress * 100.0);
-                        cb(progress, &format!("Calculating checksum... {}", pct_str));
+                        // DATA, NOT TEXT: Just pass the key identifier.
+                        // We remove the format!("{:.0}%", ...) part.
+                        cb(progress, "verifying_checksum"); 
                     }
                 }
+
             }
 
             let hash = hasher.finalize();

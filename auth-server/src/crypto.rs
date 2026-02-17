@@ -41,15 +41,28 @@ static REMOTE_JWKS_CACHE: RwLock<Option<JwkSet>> = RwLock::new(None);
 static IDENTITY_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 /// Initialize the identity directory path (must be called before using crypto functions)
-pub fn set_identity_dir(path: PathBuf) {
-    IDENTITY_DIR.get_or_init(|| path);
+pub fn set_identity_dir(path: PathBuf) -> Result<(), String> {
+    if let Some(existing) = IDENTITY_DIR.get() {
+        // If it's already set to the same path, it's fine (idempotent)
+        if existing == &path {
+            return Ok(());
+        }
+        return Err("Identity directory already set to a different path".to_string());
+    }
+    
+    // Create the directory if it doesn't exist
+    if let Err(e) = std::fs::create_dir_all(&path) {
+        return Err(format!("Failed to create identity directory: {}", e));
+    }
+    
+    IDENTITY_DIR.set(path).map_err(|_| "Failed to set identity directory".to_string())
 }
 
 pub fn get_identity_dir() -> PathBuf {
     IDENTITY_DIR
         .get()
+        .cloned()
         .expect("Identity directory not set. Call set_identity_dir() first.")
-        .clone()
 }
 
 /// Obtiene el JWKS publico actual (Host o Remoto).
@@ -149,8 +162,12 @@ fn get_key_file_path() -> PathBuf {
 /// 3. Si no, genera una nueva y la guarda.
 /// 4. PANIC si no tiene permisos de escritura (La seguridad es critica).
 pub fn initialize_constant_keys() {
+    // Asegurar que el directorio de identidad está establecido
+    let identity_dir = IDENTITY_DIR.get().expect("Identity directory not set. Call set_identity_dir() first.");
+    
     HOST_IDENTITY.get_or_init(|| {
-        let key_path = get_key_file_path();
+        let key_path = identity_dir.join("host.key");
+        println!("[Crypto] Key file path: {:?}", key_path);
 
         // A. INTENTO DE CARGA (Persistencia)
         if key_path.exists() {
@@ -185,10 +202,8 @@ pub fn initialize_constant_keys() {
         println!("[Crypto] Generating NEW Persistent Host Identity...");
 
         // Crear directorios si no existen
-        if let Some(parent) = key_path.parent() {
-            if !parent.exists() {
-                fs::create_dir_all(parent).expect("Failed to create identity directory");
-            }
+        if !identity_dir.exists() {
+            fs::create_dir_all(identity_dir).expect("Failed to create identity directory");
         }
 
         let mut bytes = [0u8; 32];

@@ -14,8 +14,8 @@
             "downloading_jre": "Downloading Java...",
             "downloading": "Downloading...",
             "verifying": "Verifying installation...",
+            "installing": "Installing...",
             "verifying_checksum": "Calculating checksum...",
-            "verifying_checksum_with_pct": "Calculating checksum... {0}%",
             "finishing_verification": "Finalizing verification...",
             "recovering": "Recovering installation...",
             "patching": "Patching...",
@@ -29,7 +29,8 @@
             "general": "General",
             "migrating": "Migrating...",
             "step": "Current step",
-            "verified": "Installation verified"
+            "verified": "Installation verified",
+            "working": "Working..."
         },
         "info": {
             "channel": "Channel",

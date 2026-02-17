@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::{fs, io};
 use zip::ZipArchive;
+use crate::game::mods::ModInstallationRequest;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PatchManifest {
@@ -27,17 +28,11 @@ pub fn install_new_patch(
     paths: &crate::game::GamePaths,
     channel: String, // "latest", "beta", etc.
     version: String, // version number
-    mod_id: String,  // ID del mod para nombre de carpeta
-    mod_name: String,
-    remote_id: Option<String>,
-    file_id: Option<String>,
-    provider: Option<crate::game::mods_api::ModProvider>,
-    summary: Option<String>,
-    logo_url: Option<String>,
+    request: ModInstallationRequest, // De 7 argumentos pasamos a 1
 ) -> Result<()> {
     let core_patches_root = paths.core_patches_dir(&channel, &version);
     // CORRECCIoN: Usar el mod_id proporcionado en lugar de generar UUID
-    let patch_dir = core_patches_root.join(&mod_id);
+    let patch_dir = core_patches_root.join(&request.mod_id);
     let backup_dir = patch_dir.join("backup");
     let stored_zip_path = patch_dir.join("source.zip");
 
@@ -54,13 +49,7 @@ pub fn install_new_patch(
         &patch_dir,
         channel,
         version,
-        mod_id,
-        mod_name,
-        remote_id,
-        file_id,
-        provider,
-        summary,
-        logo_url,
+        request,
     )?;
 
     Ok(())
@@ -74,16 +63,10 @@ fn apply_patch_logic(
     patch_dir: &Path,
     channel: String,
     version: String,
-    mod_id: String,
-    mod_name: String,
-    remote_id: Option<String>,
-    file_id: Option<String>,
-    provider: Option<crate::game::mods_api::ModProvider>,
-    summary: Option<String>,
-    logo_url: Option<String>,
+    request: ModInstallationRequest,
 ) -> Result<()> {
     // Limpiar el nombre del mod al inicio para usarlo en todo el flujo
-    let clean_mod_name = mod_name
+    let clean_mod_name = request.mod_name
         .chars()
         .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_' || *c == '.')
         .collect::<String>();
@@ -157,18 +140,18 @@ fn apply_patch_logic(
 
     // Save Manifest con el nombre limpio para consistencia
     let manifest = PatchManifest {
-        mod_id: mod_id.clone(),
+        mod_id: request.mod_id.clone(),
         mod_name: clean_mod_name.clone(), // Usar el nombre limpio
         install_date: chrono::Utc::now(),
         enabled: true,
         is_hybrid, // Guardamos el estado detectado
         backups,
         added_files,
-        remote_id,
-        file_id,
-        provider,
-        summary,
-        logo_url,
+        remote_id: request.remote_id.clone(),
+        file_id: request.file_id.clone(),
+        provider: request.provider.clone(),
+        summary: request.summary.clone(),
+        logo_url: request.logo_url.clone(),
     };
 
     let json = serde_json::to_string_pretty(&manifest)?;
@@ -472,6 +455,16 @@ pub fn enable_patch(
     fs::create_dir_all(&backup_dir)?;
 
     // Call internal logic (Esto validara archivos, regenerara backups y asegurara archivo en Mods)
+    let request = ModInstallationRequest {
+        mod_id: manifest.mod_id.clone(),
+        mod_name: manifest.mod_name.clone(),
+        remote_id: manifest.remote_id.clone(),
+        file_id: manifest.file_id.clone(),
+        provider: manifest.provider.clone(),
+        summary: manifest.summary.clone(),
+        logo_url: manifest.logo_url.clone(),
+    };
+    
     apply_patch_logic(
         &source_zip,
         paths,
@@ -479,13 +472,7 @@ pub fn enable_patch(
         &patch_dir,
         channel,
         version,
-        manifest.mod_id.clone(),
-        manifest.mod_name.clone(),
-        manifest.remote_id.clone(),
-        manifest.file_id.clone(),
-        manifest.provider.clone(),
-        manifest.summary.clone(),
-        manifest.logo_url.clone(),
+        request,
     )?;
 
     Ok(())

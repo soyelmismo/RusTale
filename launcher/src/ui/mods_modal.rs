@@ -1,5 +1,5 @@
 use crate::config::GameSettings;
-use crate::game::mods::{InstalledModMetadata, ModInfo};
+use crate::game::mods::{InstalledModMetadata, ModInfo, ModInstallationRequest};
 use crate::game::mods_api::curseforge::CurseForgeRepository;
 use crate::game::mods_api::{GenericMod, ModProvider, ModRepository, SearchResults};
 use crate::game::zip_mods::PatchManifest;
@@ -700,19 +700,24 @@ impl ModsState {
                             .unwrap_or_default()
                             .to_string_lossy()
                             .to_string();
+                        
+                        let request = ModInstallationRequest {
+                            mod_id: nm.clone(), // mod_id basado en el nombre del archivo
+                            mod_name: nm,
+                            remote_id: meta.as_ref().map(|m| m.mod_id.clone()),
+                            file_id: meta.as_ref().map(|m| m.file_id.clone()),
+                            provider: meta.as_ref().map(|m| m.provider),
+                            summary: meta.as_ref().map(|m| m.summary.clone()).flatten(),
+                            logo_url: meta.as_ref().map(|m| m.logo_url.clone()).flatten(),
+                        };
+                        
                         tokio::task::spawn_blocking(move || {
                             crate::game::zip_mods::install_new_patch(
                                 zp,
                                 &p,
                                 c.clone(),
                                 v.clone(),
-                                nm.clone(), // mod_id basado en el nombre del archivo
-                                nm,
-                                meta.as_ref().map(|m| m.mod_id.clone()),
-                                meta.as_ref().map(|m| m.file_id.clone()),
-                                meta.as_ref().map(|m| m.provider),
-                                meta.as_ref().map(|m| m.summary.clone()).flatten(),
-                                meta.as_ref().map(|m| m.logo_url.clone()).flatten(),
+                                request,
                             )
                         })
                         .await

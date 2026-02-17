@@ -4,11 +4,12 @@ use crate::server::assets::{
 use crate::server::config::ServerConfig;
 use anyhow::{Context, Result};
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
-// Import patch_api for shared cache functionality
 use crate::game::patch_api::PatchApiFrontend;
+use crate::game::progress::ProgressCallback;
 
 pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     println!("--- RusTale Dedicated Server ---");
@@ -38,6 +39,8 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     // 1. Definir Rutas (Unificadas a root_dir para evitar OS Error 3)
     let root_dir = crate::config::get_server_root_dir();
     let _ = tokio::fs::create_dir_all(&root_dir).await;
+
+    let _ = auth_server::crypto::set_identity_dir(crate::config::get_identity_dir());
 
     // -----------------------------------------------------------------------
     // INICIAR SERVIDOR WEB LOCAL (Si es necesario)
@@ -143,7 +146,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
 
     // 1. Tool Validation (JRE e Itch/Butler)
     println!("[1/5] Validating tools...");
-    let callback = |task: &str,
+    let callback: ProgressCallback = Arc::new(|task: &str,
                     pct: f64,
                     msg: &str,
                     total: u64,
@@ -157,7 +160,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         } else {
             println!("[{}] {:.1}% - {}{}", task, pct, msg, eta_str);
         }
-    };
+    });
 
     // --- OPTIMIZATION: REUSE MAIN INSTALLATION TOOLS ---
     let main_app_dir = crate::config::get_app_dir();
@@ -186,8 +189,11 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     let java_info = crate::java_detection::ensure_java_available(&root_dir).await?;
     println!("[Server] Environment verified: Java {}", java_info.version);
     let patch_frontend = PatchApiFrontend::get_instance();
+    let callback_clone = callback.clone();
     let _butler_path = patch_frontend
-        .install_butler(&client, &root_dir, callback, None)
+        .install_butler(&client, &root_dir, Arc::new(move |task, pct, msg, total, downloaded, eta, step| {
+            callback_clone(task, pct, msg, total, downloaded, eta, step)
+        }), None)
         .await?;
 
     // 3. Resolver Version y Descargar Servidor
@@ -441,6 +447,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         );
 
         let cache = crate::game::patch_api::get_shared_cache();
+        let callback_for_pwr = callback.clone();
         let patch_path = cache
             .get_or_download_patch(
                 &client,
@@ -453,12 +460,13 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
             .await?;
 
         println!("[Server] Applying patch via Butler...");
+        
         crate::game::patcher::apply_pwr(
             &root_dir,
             &config.branch,
             &version_dir_name,
             &patch_path,
-            callback,
+            callback_for_pwr,
             None,
         )
         .await?;

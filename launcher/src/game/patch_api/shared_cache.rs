@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, atomic::AtomicBool};
 
 use super::PatchDownloader;
+use crate::game::progress::ProgressCallback;
 
 /// Shared cache manager for patch downloads
 /// This ensures both client and server use the same cache files
@@ -20,7 +21,7 @@ impl SharedCacheManager {
         channel: &str,
         from_version: i32,
         to_version: i32,
-        progress_callback: impl Fn(&str, f64, &str, u64, u64, Option<String>, Option<usize>),
+        progress_callback: ProgressCallback,
         cancel_token: Option<Arc<AtomicBool>>,
     ) -> Result<PathBuf> {
         // Use the downloader's built-in check

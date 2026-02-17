@@ -25,6 +25,7 @@ pub fn view<'a>(
         LauncherStatus::Migrating => localization.t("launcher.status.cancel"),
         LauncherStatus::NeedsInstall => localization.t("launcher.play"),
         LauncherStatus::NeedsUpdate => localization.t("launcher.update"),
+        LauncherStatus::Busy => localization.t("launcher.status.busy"),
         _ => localization.t("launcher.play"),
     };
 
@@ -36,6 +37,15 @@ pub fn view<'a>(
 
     let is_long_text = play_button_text.len() > 9;
     let (icon_size, spacing_val) = if is_long_text { (16.0, 6) } else { (20.0, 10) };
+
+    // Determinar si estamos en un estado critico que requiere bloqueo de interfaz
+    let is_busy = matches!(
+        status,
+        LauncherStatus::Checking | LauncherStatus::Busy | LauncherStatus::Downloading | LauncherStatus::Migrating
+    );
+    
+    // Bloqueo estricto para botones de navegacion
+    let navigation_locked = is_disabled || is_busy;
 
     let version_display = if settings.game_version == 0 {
         match resolved_version {
@@ -132,10 +142,15 @@ pub fn view<'a>(
         .center_y(Length::Fill)
         .style(move |t| theme::container_style_transparent(&palette, t)),
     )
-    .style(move |t, s| theme::secondary_button_style(&palette, t, s))
+    .style(move |t, s| if navigation_locked { 
+        theme::blocked_button_style(&palette, t, s) 
+    } else { 
+        theme::secondary_button_style(&palette, t, s) 
+    })
     .width(Length::Fill)
     .height(Length::Fill);
-    let settings_btn = if !is_disabled {
+    
+    let settings_btn = if !navigation_locked {
         settings_btn.on_press(Message::OpenSettings)
     } else {
         settings_btn
@@ -155,10 +170,15 @@ pub fn view<'a>(
         .center_y(Length::Fill)
         .style(move |t| theme::container_style_transparent(&palette, t)),
     )
-    .style(move |t, s| theme::secondary_button_style(&palette, t, s))
+    .style(move |t, s| if navigation_locked { 
+        theme::blocked_button_style(&palette, t, s) 
+    } else { 
+        theme::secondary_button_style(&palette, t, s) 
+    })
     .width(Length::Fill)
     .height(Length::Fill);
-    let mods_btn = if !is_disabled {
+    
+    let mods_btn = if !navigation_locked {
         mods_btn.on_press(Message::Mods(
             crate::ui::mods_modal::ModsMessage::RefreshLocal,
         ))
@@ -213,13 +233,25 @@ pub fn view<'a>(
                 row![
                     theme::text_micro(status_msg, ctx),
                     Space::new().width(Length::Fill),
-                    // Show step information if available
+                    // PROFESSIONAL PROGRESS DISPLAY
+                    // If we have step info, show it clearly: "Step 2/5 • 45%"
                     if let (Some(step), Some(total)) = (current_step, total_steps) {
-                        theme::text_micro(format!("Step {}/{}", step, total), ctx)
+                        Element::from(
+                            row![
+                                theme::text_micro(format!("Step {}/{}", step, total), ctx),
+                                theme::text_micro(" • ", ctx),
+                                // Show step percentage explicitly
+                                theme::text_micro(format!("{:.0}%", data.step_progress * 100.0), ctx)
+                            ].spacing(0)
+                        )
                     } else {
-                        theme::text_micro(format!("{:.0}%", data.global_progress * 100.0), ctx)
+                        // Fallback to global percentage
+                        Element::from(
+                            theme::text_micro(format!("{:.0}%", data.global_progress * 100.0), ctx)
+                        )
                     }
                 ],
+                
                 // Primary progress bar (Global Progress)
                 container(
                     ProgressBar::new(0.0..=1.0, data.global_progress)
@@ -227,15 +259,17 @@ pub fn view<'a>(
                 )
                 .height(6)
                 .width(Length::Fill),
-                // Secondary progress bar (Step Progress) - only show if significantly different
-                if (data.step_progress - data.global_progress).abs() > 0.05 {
+
+                // Secondary progress bar (Step Progress) - Show clearly when distinct
+                // Used for things like checksums, individual file downloads, or extraction steps
+                if (data.step_progress - data.global_progress).abs() > 0.01 && data.step_progress > 0.0 {
                     Element::from(
                         container(
                             ProgressBar::new(0.0..=1.0, data.step_progress)
                                 .style(move |t| theme::sub_bar_style(&palette, t)),
                         )
-                        .height(2)
-                        .width(Length::Fill),
+                        .height(2) // Thinner, subtle sub-bar
+                        .width(Length::Fill)
                     )
                 } else {
                     Element::from(Space::new().height(2))

@@ -4,6 +4,7 @@ use std::sync::{Arc, atomic::AtomicBool};
 
 use super::PatchApiManager;
 use super::utils::*;
+use crate::game::progress::ProgressCallback;
 
 /// Downloader for game patches using the new patch API system
 #[derive(Clone)]
@@ -21,7 +22,7 @@ impl PatchDownloader {
         channel: &str,
         from_version: i32,
         to_version: i32,
-        progress_callback: impl Fn(&str, f64, &str, u64, u64, Option<String>, Option<usize>),
+        progress_callback: ProgressCallback,
         cancel_token: Option<Arc<AtomicBool>>,
     ) -> Result<PathBuf> {
         let cache_dir = crate::config::get_cache_dir("patches").await;
@@ -103,8 +104,26 @@ impl PatchDownloader {
                 println!("[Downloader] Verified patch format: {:?}", format_res.format);
             }
             
-            let integrity_callback = |p: f64, m: &str| {
-                println!("[Integrity] {:.0}% - {}", p * 100.0, m);
+            let progress_callback_clone = progress_callback.clone();
+            let integrity_callback = move |p: f64, m: &str| {
+                // Bridge integrity progress to main progress callback
+                // Map integrity messages to proper phase and status
+                let phase = "verify"; // Use verify phase for integrity checks
+                let status = if m == "verifying_checksum" { 
+                    "Verifying integrity..." 
+                } else { 
+                    m 
+                };
+                
+                progress_callback_clone(
+                    phase,
+                    p * 100.0, // Convert to percentage for compatibility
+                    status,
+                    0,
+                    0,
+                    None,
+                    Some(1), // Step 1 of integrity verification
+                );
             };
             let integrity_res = checker.verify_download_integrity(
                 &patch_path, 
@@ -139,7 +158,7 @@ impl PatchDownloader {
         client: &reqwest::Client,
         channel: &str,
         target_version: i32,
-        progress_callback: impl Fn(&str, f64, &str, u64, u64, Option<String>, Option<usize>),
+        progress_callback: ProgressCallback,
         cancel_token: Option<Arc<AtomicBool>>,
     ) -> Result<PathBuf> {
         self.download_patch(

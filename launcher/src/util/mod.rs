@@ -255,8 +255,13 @@ pub fn run_java_proxy_logic(online_mode: OnlineFixMode) -> anyhow::Result<()> {
 
     // --- NEW: JAVA AGENT INJECTION (SMART CHECK) ---
     // Use GamePaths with the proper data_dir
-    // Always use the main app directory's tools for the agent
-    let agent_path = {
+    // Check if we're in server mode to use server tools path
+    let agent_path = if std::env::var("RUSTALE_IS_SERVER").is_ok() {
+        // Server mode: use server tools directory
+        let paths = crate::game::paths::GamePaths::new(crate::config::get_server_root_dir());
+        paths.dualauth_agent()
+    } else {
+        // Client mode: use main app directory's tools
         let paths = crate::game::paths::GamePaths::new(crate::config::get_app_dir());
         paths.dualauth_agent()
     };

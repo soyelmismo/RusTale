@@ -3,51 +3,41 @@ use std::path::PathBuf;
 use std::sync::{Arc, atomic::AtomicBool};
 use tokio::process::{Child, Command};
 
+/// Context structure for game launch operations
+/// This encapsulates all parameters needed to launch the game cleanly
+#[derive(Debug, Clone)]
+pub struct LaunchContext {
+    pub player_name: String,
+    pub player_uuid: String,
+    pub exec_path: PathBuf,
+    pub working_dir: PathBuf,
+    pub user_data_dir: PathBuf,
+    pub java_path: String,
+    pub auth_args: Vec<String>,
+    pub env_vars: std::collections::HashMap<String, String>,
+}
+
 /// Launches the Hytale game client with async agent download
 /// This function launches the game immediately and downloads the dualauth-agent in background
 pub fn launch_game_with_async_agent(
-    player_name: &str,
-    player_uuid: &str,
-    executable_path: &PathBuf,  // Absolute path to HytaleClient.exe
-    game_working_dir: &PathBuf, // Absolute path to the version directory
-    user_data_dir: &PathBuf,    // Absolute path to UserData directory
-    java_exec: &str,            // Path to java executable
-    extra_auth_args: Vec<String>,
-    env_vars: std::collections::HashMap<String, String>,
+    ctx: LaunchContext,
     client: reqwest::Client,
 ) -> Result<Child> {
-    launch_game_with_agent(
-        player_name,
-        player_uuid,
-        executable_path,
-        game_working_dir,
-        user_data_dir,
-        java_exec,
-        extra_auth_args,
-        env_vars,
-        Some(client),
-    )
+    launch_game_with_agent(ctx, Some(client))
 }
 
 /// Launches the Hytale game client with optional async agent download
 /// Internal function that handles both the game launch and optional agent download
 fn launch_game_with_agent(
-    player_name: &str,
-    player_uuid: &str,
-    executable_path: &PathBuf,  // Absolute path to HytaleClient.exe
-    game_working_dir: &PathBuf, // Absolute path to the version directory
-    user_data_dir: &PathBuf,    // Absolute path to UserData directory
-    java_exec: &str,            // Path to java executable
-    extra_auth_args: Vec<String>,
-    env_vars: std::collections::HashMap<String, String>,
+    ctx: LaunchContext,
     client: Option<reqwest::Client>,
 ) -> Result<Child> {
     // SANITIZACION DE RUTAS:
-    // Java y algunas librerías nativas fallan con rutas relativas o con rutas UNC de Windows (\\\\?\\C:\\\\...).
+    // Java y algunas librerías nativas fallan con rutas relativas o con rutas UNC de Windows (\\?\C:\\...).
     // Convertimos todo a absoluto limpio.
-    let clean_exec = crate::util::sanitize_path(executable_path);
-    let clean_work_dir = crate::util::sanitize_path(game_working_dir);
-    let clean_user_dir = crate::util::sanitize_path(user_data_dir);
+    let clean_exec = crate::util::sanitize_path(&ctx.exec_path);
+    let clean_work_dir = crate::util::sanitize_path(&ctx.working_dir);
+    let clean_user_dir = crate::util::sanitize_path(&ctx.user_data_dir);
 
     // Logs para debugging de rutas (muy útil para reportes de usuario)
     println!("[Launch] Path Sanitation:");
@@ -65,26 +55,21 @@ fn launch_game_with_agent(
 
     println!(
         "Launching {} with UUID {} from {}",
-        player_name,
-        player_uuid,
+        ctx.player_name,
+        ctx.player_uuid,
         clean_exec.display()
     );
 
     // Build command
-    let mut cmd = build_game_command(
-        &clean_exec,
-        &clean_work_dir,
-        &clean_user_dir,
-        java_exec,
-        player_uuid,
-        player_name,
-        extra_auth_args,
-        env_vars,
-    );
+    let mut cmd = build_game_command(ctx);
 
     // Configure Linux-specific environment
     #[cfg(target_os = "linux")]
-    configure_linux_env(&mut cmd, &clean_exec, &clean_work_dir)?;
+    {
+        let exec_path_for_linux = PathBuf::from(cmd.as_std().get_program());
+        let working_dir_for_linux = clean_work_dir.clone();
+        configure_linux_env(&mut cmd, &exec_path_for_linux, &working_dir_for_linux)?;
+    }
 
     cmd.kill_on_drop(true);
 
@@ -100,17 +85,8 @@ fn launch_game_with_agent(
 }
 
 /// Build base game command with common arguments
-fn build_game_command(
-    executable_path: &PathBuf,
-    game_working_dir: &PathBuf,
-    user_data_dir: &PathBuf,
-    java_exec: &str,
-    player_uuid: &str,
-    player_name: &str,
-    extra_auth_args: Vec<String>,
-    env_vars: std::collections::HashMap<String, String>,
-) -> Command {
-    let mut cmd = Command::new(executable_path);
+fn build_game_command(ctx: LaunchContext) -> Command {
+    let mut cmd = Command::new(&ctx.exec_path);
 
     #[cfg(target_os = "windows")]
     {
@@ -118,21 +94,21 @@ fn build_game_command(
     }
 
     cmd.arg("--app-dir")
-        .arg(game_working_dir)
+        .arg(&ctx.working_dir)
         .arg("--user-dir")
-        .arg(user_data_dir)
+        .arg(&ctx.user_data_dir)
         .arg("--java-exec")
-        .arg(java_exec)
+        .arg(&ctx.java_path)
         .arg("--uuid")
-        .arg(player_uuid)
+        .arg(&ctx.player_uuid)
         .arg("--name")
-        .arg(player_name);
+        .arg(&ctx.player_name);
 
-    for arg in extra_auth_args {
+    for arg in ctx.auth_args {
         cmd.arg(arg);
     }
 
-    for (key, value) in env_vars {
+    for (key, value) in ctx.env_vars {
         cmd.env(key, value);
     }
 
@@ -143,8 +119,8 @@ fn build_game_command(
 #[cfg(target_os = "linux")]
 fn configure_linux_env(
     cmd: &mut Command,
-    executable_path: &PathBuf,
-    game_working_dir: &PathBuf,
+    exec_path: &PathBuf,
+    working_dir: &PathBuf,
 ) -> Result<()> {
     {
         // 1. SDL Video Driver (Wayland/X11)
@@ -152,14 +128,14 @@ fn configure_linux_env(
             cmd.env("SDL_VIDEODRIVER", "wayland");
         }
 
-        if let Some(parent) = executable_path.parent() {
+        if let Some(parent) = exec_path.parent() {
             let current_ld_path = std::env::var("LD_LIBRARY_PATH").unwrap_or_default();
 
             // Usar rutas absolutas aquí también es crítico para Linux
             let parent_abs = parent.canonicalize().unwrap_or(parent.to_path_buf());
-            let work_abs = game_working_dir
+            let work_abs = working_dir
                 .canonicalize()
-                .unwrap_or(game_working_dir.to_path_buf());
+                .unwrap_or(working_dir.to_path_buf());
 
             let new_ld_path = format!(
                 "{}:{}:{}",

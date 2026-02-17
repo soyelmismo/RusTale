@@ -60,8 +60,14 @@ pub async fn start_server(
     // 0. Initialize crypto keys
     println!("Initializing constant JWKS...");
     println!("[Server] Identity directory: {:?}", identity_dir);
-    crypto::set_identity_dir(identity_dir.clone());
+    
+    if let Err(e) = crypto::set_identity_dir(identity_dir.clone()) {
+        // Only log warning, don't return Err if it was already set
+        println!("[Server] Identity directory was already initialized by caller.");
+    }
+    
     crypto::initialize_constant_keys();
+
 
     // 1. Load skins from disk
     let mut skins = load_skins_from_disk(&identity_dir).await;

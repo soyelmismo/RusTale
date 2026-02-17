@@ -5,6 +5,7 @@ use std::sync::{Arc, atomic::AtomicBool};
 use crate::game::patch_api::get_butler_fallback_url;
 use crate::game::paths::GamePaths;
 use crate::util::make_executable;
+use crate::game::progress::ProgressCallback;
 
 /// Installer for Butler using the new patch API system
 #[derive(Clone)]
@@ -20,7 +21,7 @@ impl ButlerInstaller {
         &self,
         client: &reqwest::Client,
         base_dir: &PathBuf,
-        progress_callback: impl Fn(&str, f64, &str, u64, u64, Option<String>, Option<usize>),
+        progress_callback: ProgressCallback,
         cancel_token: Option<Arc<AtomicBool>>,
     ) -> Result<PathBuf> {
         let paths = GamePaths::new(base_dir.clone());
@@ -169,7 +170,7 @@ impl JreInstaller {
         &self,
         client: &reqwest::Client,
         base_dir: &PathBuf,
-        progress_callback: impl Fn(&str, f64, &str, u64, u64, Option<String>),
+        progress_callback: ProgressCallback,
         cancel_token: Option<Arc<AtomicBool>>,
     ) -> Result<()> {
         // Get JRE URL using the patch API system
@@ -178,7 +179,7 @@ impl JreInstaller {
 
         let url = crate::game::patch_api::utils::get_java_adoptium_url(os, arch);
 
-        self.download_jre_from_url(client, &url, base_dir, &progress_callback, cancel_token)
+        self.download_jre_from_url(client, &url, base_dir, progress_callback.clone(), cancel_token)
             .await
     }
 
@@ -188,7 +189,7 @@ impl JreInstaller {
         client: &reqwest::Client,
         jre_url: &str,
         base_dir: &PathBuf,
-        progress_callback: &impl Fn(&str, f64, &str, u64, u64, Option<String>),
+        progress_callback: ProgressCallback,
         cancel_token: Option<Arc<AtomicBool>>,
     ) -> Result<()> {
         let paths = GamePaths::new(base_dir.clone());
@@ -211,6 +212,7 @@ impl JreInstaller {
                     0,
                     0,
                     None,
+                    None,
                 );
                 tokio::fs::remove_file(&cache_file).await?;
             }
@@ -224,6 +226,7 @@ impl JreInstaller {
                 &format!("Downloading {}...", file_name),
                 0,
                 0,
+                None,
                 None,
             );
 
@@ -255,6 +258,7 @@ impl JreInstaller {
                         total,
                         downloaded,
                         eta,
+                        None,
                     );
                 },
                 cancel_token,
@@ -262,7 +266,7 @@ impl JreInstaller {
             .await?;
         }
 
-        progress_callback("jre", 70.0, "Extracting JRE...", 0, 0, None);
+        progress_callback("jre", 70.0, "Extracting JRE...", 0, 0, None, None);
 
         // Only clean up if the directory exists but doesn't contain a valid JRE
         let should_clean = if latest_dir.exists() {
@@ -289,7 +293,7 @@ impl JreInstaller {
         .await
         .context("JRE extraction task failed")??;
 
-        progress_callback("jre", 100.0, "JRE installed", 0, 0, None);
+        progress_callback("jre", 100.0, "JRE installed", 0, 0, None, None);
 
         Ok(())
     }

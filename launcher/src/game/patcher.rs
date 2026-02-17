@@ -8,6 +8,7 @@ use std::sync::{
 use tokio::io::BufReader;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufWriter};
 use tokio::process::Command;
+use crate::game::progress::ProgressCallback;
 
 /// Game version information structure
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -27,7 +28,7 @@ pub async fn apply_pwr(
     channel: &str,
     install_dir_name: &str,
     pwr_path: &PathBuf,
-    progress_callback: impl Fn(&str, f64, &str, u64, u64, Option<String>, Option<usize>),
+    progress_callback: ProgressCallback,
     cancel_token: Option<Arc<AtomicBool>>,
 ) -> anyhow::Result<()> {
     let paths = crate::game::paths::GamePaths::new(root_dir.clone());
@@ -59,6 +60,14 @@ pub async fn apply_pwr(
     // Final verification right before Butler command
     // This prevents the "OutputFolder must exist" error from Butler
     for attempt in 0..5 {
+        // Force creation if missing (Critical Fix)
+        if !game_dir.exists() {
+            let _ = std::fs::create_dir_all(&game_dir);
+        }
+        if !staging_dir.exists() {
+            let _ = std::fs::create_dir_all(&staging_dir);
+        }
+
         if game_dir.exists() && staging_dir.exists() {
             println!(
                 "[PATHS] Final directory verification passed on attempt {}",
@@ -86,7 +95,8 @@ pub async fn apply_pwr(
         std::fs::canonicalize(pwr_path).context("Failed to canonicalize PWR path")?;
 
     // Validate patch file integrity before attempting to apply
-    progress_callback("install", 2.0, "Validating patch file...", 0, 0, None, None);
+    // Pass step 1/4
+    progress_callback("install", 2.0, "Validating patch file...", 0, 0, None, Some(1));
 
     // Create IntegrityChecker instance
     let integrity_checker = crate::game::patch_api::IntegrityChecker::new();
@@ -109,7 +119,7 @@ pub async fn apply_pwr(
                 0,
                 0,
                 None,
-                None,
+                Some(2),
             );
 
             // Clean up game directory for retry
@@ -131,8 +141,13 @@ pub async fn apply_pwr(
                 0,
                 0,
                 None,
-                None,
+                Some(2),
             );
+        }
+
+        // LAST LINE OF DEFENSE: Ensure directory exists immediately before command
+        if !game_dir.exists() {
+             let _ = std::fs::create_dir_all(&game_dir);
         }
 
         let mut cmd = Command::new(&butler_path);
@@ -141,7 +156,7 @@ pub async fn apply_pwr(
             .arg(&pwr_path_absolute)
             .arg(&game_dir);
 
-        progress_callback("install", 10.0, "Extracting patch...", 0, 0, None, None);
+        progress_callback("install", 10.0, "Extracting patch...", 0, 0, None, Some(3));
 
         let mut child = cmd
             .stdout(Stdio::piped())
@@ -218,12 +233,14 @@ pub async fn apply_pwr(
                     if let Some(pct) = parse_butler_line(line) {
                         current_pct = pct as f64;
                         let file = line.split('%').last().unwrap_or("").trim();
+                        
+                        // Pass ONLY the filename/status, no percentage number
                         let status = if attempt > 1 {
-                            format!("Retry {} - Extracting: {}", attempt, file)
+                            format!("Retry - {}", file)
                         } else {
                             file.to_string()
                         };
-                        progress_callback("install", current_pct, &status, 0, 0, None, None);
+                        progress_callback("install", current_pct, &status, 0, 0, None, Some(3));
                     }
                 } else {
                     if line.len() < 100 && !line.starts_with("\u{2590}") {
@@ -232,7 +249,7 @@ pub async fn apply_pwr(
                         } else {
                             line.to_string()
                         };
-                        progress_callback("install", current_pct, &status, 0, 0, None, None);
+                        progress_callback("install", current_pct, &status, 0, 0, None, Some(3));
                     }
                 }
             }
@@ -249,7 +266,7 @@ pub async fn apply_pwr(
                 0,
                 0,
                 None,
-                None,
+                Some(4),
             );
 
             match integrity_checker
@@ -264,7 +281,7 @@ pub async fn apply_pwr(
                         0,
                         0,
                         None,
-                        None,
+                        Some(4),
                     );
                     println!(
                         "[SUCCESS] Patch application and verification completed on attempt {}",

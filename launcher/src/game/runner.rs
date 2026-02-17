@@ -135,6 +135,7 @@ pub fn run(
     target_version: Option<i32>,
     install_policy: InstallPolicy,
     cancel_token: Arc<AtomicBool>,
+    localization: crate::lang::Localization,
 ) -> Subscription<Message> {
     subscription::from_recipe(Runner {
         settings,
@@ -144,6 +145,7 @@ pub fn run(
         target_version,
         install_policy,
         cancel_token,
+        localization,
     })
 }
 
@@ -155,6 +157,7 @@ struct Runner {
     target_version: Option<i32>,
     install_policy: InstallPolicy,
     cancel_token: Arc<AtomicBool>,
+    localization: crate::lang::Localization,
 }
 
 impl Recipe for Runner {
@@ -180,6 +183,7 @@ impl Recipe for Runner {
         let client = self.client;
         let install_policy = self.install_policy;
         let cancel_token = self.cancel_token;
+        let localization = self.localization;
 
         let s = stream::channel::<Message>(
             100,
@@ -198,7 +202,6 @@ impl Recipe for Runner {
 
                 tokio::spawn(async move {
                     let progress_tx = tx.clone();
-                    let progress_tx_for_steps = tx.clone(); // Clone extra para UpdateTotalSteps
                     let progress_tx_for_error = tx.clone(); // Clone extra para DownloadError
 
                     // Create the unified progress reporter
@@ -220,15 +223,13 @@ impl Recipe for Runner {
                             install_policy,
                             progress_reporter,
                             Some(cancel_token),
+                            &localization,
                         )
                         .await;
 
                     match result {
-                        Ok((total_steps, ())) => {
-                            // Update UI with step information
-                            let _ = progress_tx_for_steps.try_send(Message::UpdateTotalSteps {
-                                total_steps: Some(total_steps),
-                            });
+                        Ok(()) => {
+                            // Installation completed successfully
                         }
                         Err(ref e) => {
                             println!("[Install] Installation failed: {}", e);
@@ -379,6 +380,14 @@ impl Recipe for Runner {
                 }
 
                 if settings.enable_online_fix {
+
+                    // Even if we attach to an existing server, this process needs to know 
+                    // where keys are located for local token generation or validation.
+                    let identity_dir = crate::config::get_identity_dir();
+                    // We ignore the error because if it's already set, that's fine.
+                    let _ = auth_server::crypto::set_identity_dir(identity_dir);
+
+
                     auth_mode = "authenticated".to_string();
 
                     // 1. Guardar el puerto actual en RAM inmediatamente
@@ -793,15 +802,19 @@ impl Recipe for Runner {
                     }
                 }
 
-                if let Ok(mut child) = crate::game::launch_game_with_async_agent(
-                    &player_name,
-                    &player_uuid,
-                    &executable_path,
-                    &game_working_dir,
-                    &user_data_dir,
-                    &java_exec_for_client, // <--- USE THE PROXY PATH HERE
+                let launch_ctx = crate::game::launch::LaunchContext {
+                    player_name: player_name.clone(),
+                    player_uuid: player_uuid.clone(),
+                    exec_path: executable_path.clone(),
+                    working_dir: game_working_dir.clone(),
+                    user_data_dir: user_data_dir.clone(),
+                    java_path: java_exec_for_client.clone(),
                     auth_args,
-                    envs,
+                    env_vars: envs,
+                };
+
+                if let Ok(mut child) = crate::game::launch_game_with_async_agent(
+                    launch_ctx,
                     client.clone(),
                 ) {
                     // Wait for the game to close

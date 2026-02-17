@@ -158,6 +158,7 @@ impl RusTale {
         let client = self.services.download_client.clone();
         let frontend = self.services.patcher.clone();
         let cancel_token = self.cancellation_token.clone();
+        let localization = self.localization.clone();
 
         // Change status to Downloading immediately so cancel button appears
         self.status = LauncherStatus::Downloading;
@@ -198,6 +199,7 @@ impl RusTale {
                             );
                         },
                         Some(cancel_token),
+                        &localization,
                     )
                     .await;
 

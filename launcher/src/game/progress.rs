@@ -1,6 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
+/// Standard signature for progress reporting across the app
+/// This encapsulates the thread safety requirements for async operations
+pub type ProgressCallback = Arc<dyn Fn(&str, f64, &str, u64, u64, Option<String>, Option<usize>) + Send + Sync + 'static>;
+
 /// Information about a specific file transfer
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DownloadStats {

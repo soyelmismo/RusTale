@@ -947,6 +947,7 @@ impl RusTale {
                     *target_ver,
                     policy,
                     self.cancellation_token.clone(),
+                    self.localization.clone(),
                 )
             } else {
                 Subscription::none()
@@ -1337,6 +1338,17 @@ impl RusTale {
                 }
                 Some(Task::none())
             }
+            Message::CloseRequested => {
+                println!("[Window] Close requested by user");
+                // Check if game is running before allowing close
+                if self.status == LauncherStatus::Playing || self.running_game.is_some() {
+                    println!("[Window] Cannot close while game is running");
+                    self.error = Some("Cannot close launcher while game is running. Please stop the game first.".to_string());
+                    Some(Task::none())
+                } else {
+                    Some(self.save_and_exit())
+                }
+            }
             _ => None,
         }
     }
@@ -1364,7 +1376,6 @@ impl RusTale {
                 | Message::RequestRepairVersion(_)
                 | Message::RepairFinished(_)
                 | Message::OpenVersionFolder(_)
-                | Message::CloseRequested
                 | Message::WindowResized(_)
                 | Message::AppExit
                 | Message::CopyUUID(_)
@@ -1380,7 +1391,6 @@ impl RusTale {
                 | Message::News(_)
                 | Message::LoadJavaInfo
                 | Message::JavaInfoLoaded
-                | Message::WindowEvent(_)
                 | Message::NextShader
                 | Message::NextShaderManual
                 | Message::ToggleFullscreen => {}
@@ -1400,14 +1410,35 @@ impl RusTale {
             | Message::WindowResized(..) 
             | Message::WindowResizedWithMaximized(..) 
             | Message::ToggleFullscreen 
-            | Message::WindowEvent(..) 
-            | Message::CloseRequested 
             | Message::ToggleWindowVisibility 
             | Message::ToggleProfileDropdown
-            | Message::AppExit => {
+            | Message::AppExit
+            | Message::CloseRequested => {
                 // No logic needed here; handle_ui_message returned Some(Task::none()) 
                 // or the specific logic for these already executed.
                 Task::none()
+            }
+
+            // Handle window events
+            Message::WindowEvent(event) => {
+                match event {
+                    window::Event::CloseRequested => {
+                        Task::done(Message::CloseRequested)
+                    }
+                    window::Event::Resized(size) => {
+                        self.window_size = size.clone();
+                        Task::none()
+                    }
+                    window::Event::Focused => {
+                        self.is_focused = true;
+                        Task::none()
+                    }
+                    window::Event::Unfocused => {
+                        self.is_focused = false;
+                        Task::none()
+                    }
+                    _ => Task::none(),
+                }
             }
 
             // 2. Business Logic Messages (Carry on with your existing code)
@@ -1766,6 +1797,47 @@ impl RusTale {
                 }
                 Task::none()
             }
+            Message::GameStopped => {
+                println!("[Game] GameStopped received");
+                // CRITICAL: Ensure complete state cleanup
+                
+                // Reset game state
+                self.status = LauncherStatus::Ready;
+                self.status_text = self.localization.t("launcher.status.ready").to_string();
+                
+                // Clear any residual progress state that might interfere
+                self.current_progress_payload = None;
+                self.last_download_progress = 0.0;
+                self.download_progress = 0.0;
+                
+                // Clear running game reference
+                self.running_game = None;
+                
+                // Reset status change timer to prevent false stuck detection
+                self.last_status_change = std::time::Instant::now();
+                
+                // Rebuild tray menu to show "Start Game"
+                self.rebuild_tray_menu();
+                
+                // If in quickplay mode, exit after game ends
+                if self.is_quickplay_mode && !self.is_window_visible {
+                    return self.save_and_exit();
+                }
+                
+                // Show window if it was hidden for minimize_on_play
+                if self.settings.minimize_on_play && !self.is_window_visible {
+                    self.is_window_visible = true;
+                    return window::oldest().and_then(|id| {
+                        Task::batch(vec![
+                            window::set_mode(id, window::Mode::Windowed),
+                            window::gain_focus(id),
+                        ])
+                    });
+                }
+                
+                println!("[Game] State reset to Ready with complete cleanup");
+                Task::none()
+            }
             Message::WatchdogCheck => {
                 // Watchdog: Check for stuck states and auto-recover
 
@@ -1849,22 +1921,6 @@ impl RusTale {
                 if self.memory_stats.auto_trims % 6 == 0 {
                     println!("[MONITOR] {}", self.memory_stats.format_status());
                 }
-                Task::none()
-            }
-            Message::GameStopped => {
-                println!("[Game] GameStopped received");
-                // CRITICAL: Ensure complete state cleanup
-
-                self.status = LauncherStatus::Ready;
-
-                self.status_text = self.localization.t("launcher.status.ready").to_string();
-
-                self.running_game = None;
-
-                self.error = None; // Clear any errors
-
-                self.last_status_change = std::time::Instant::now();
-                println!("[Game] State reset to Ready");
                 // Rebuild tray menu to show "Start Game"
 
                 self.rebuild_tray_menu();
