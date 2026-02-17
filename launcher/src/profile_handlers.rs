@@ -33,7 +33,7 @@ impl RusTale {
 
             Message::AddProfile => {
                 self.editing_profile = Some((None, String::new()));
-                self.profile_dropdown_open = false;
+                // self.profile_dropdown_open = false; // Removido para mantener dropdown abierto
                 Task::none()
             }
 
@@ -41,7 +41,7 @@ impl RusTale {
                 if let Some(profile) = self.profiles.profiles.iter().find(|p| p.id == id) {
                     self.editing_profile = Some((Some(id), profile.name.clone()));
                 }
-                self.profile_dropdown_open = false;
+                // self.profile_dropdown_open = false; // Removido para mantener dropdown abierto
                 Task::none()
             }
 
@@ -136,7 +136,7 @@ impl RusTale {
                 if let Some(profile) = self.profiles.profiles.iter().find(|p| p.id == id) {
                     self.editing_uuid = Some((id, profile.id.to_string()));
                 }
-                self.profile_dropdown_open = false;
+                // self.profile_dropdown_open = false; // Removido para mantener dropdown abierto
                 Task::none()
             }
 

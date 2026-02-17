@@ -110,6 +110,15 @@ pub async fn apply_pwr(
     let mut last_error = None;
 
     for attempt in 1..=2 {
+        // ALWAYS clean staging dir before any attempt to avoid resume panics
+        // Butler's resumable apply is prone to "slice bounds out of range" if staging is dirty
+        if staging_dir.exists() {
+            println!("[CLEANUP] Cleaning staging directory for attempt {}", attempt);
+            let _ = tokio::fs::remove_dir_all(&staging_dir).await;
+        }
+        // Re-ensure staging exists (this will create it and log via GamePaths)
+        let _ = paths.staging();
+
         if attempt > 1 {
             println!("[RETRY] Retrying patch application (attempt {})", attempt);
             progress_callback(
@@ -121,18 +130,6 @@ pub async fn apply_pwr(
                 None,
                 Some(2),
             );
-
-            // Clean up game directory for retry
-            if game_dir.exists() {
-                println!("[CLEANUP] Removing corrupted game directory for retry");
-                let _ = tokio::fs::remove_dir_all(&game_dir).await;
-                // Recreate directories using the path methods (they auto-create)
-                let _ = paths.version_dir(channel, install_dir_name);
-            }
-            if staging_dir.exists() {
-                let _ = tokio::fs::remove_dir_all(&staging_dir).await;
-                let _ = paths.staging();
-            }
         } else {
             progress_callback(
                 "install",
@@ -145,7 +142,10 @@ pub async fn apply_pwr(
             );
         }
 
-        // LAST LINE OF DEFENSE: Ensure directory exists immediately before command
+        // LAST LINE OF DEFENSE: Ensure game directory exists immediately before command
+        // Note: We DO NOT remove game_dir here anymore. For incremental patches, 
+        // removing it would guarantee failure. If it's corrupted, Butler will 
+        // either fix it or fail, and we'll handle full recovery in the outer layer.
         if !game_dir.exists() {
              let _ = std::fs::create_dir_all(&game_dir);
         }
@@ -179,17 +179,33 @@ pub async fn apply_pwr(
         let stdout = child.stdout.take().unwrap();
         let stderr = child.stderr.take().unwrap();
 
-        // Spawn a task to handle stderr
+        // Create a shared log writer or just write to stderr
+        let log_path_stderr = log_path.clone();
+        
+        // Spawn a task to handle stderr and log it
         tokio::spawn(async move {
             use tokio::io::AsyncBufReadExt;
             let mut stderr_reader = BufReader::new(stderr);
             let mut line = String::new();
+            
+            // Try to open log for appending
+            let mut log_file = tokio::fs::OpenOptions::new()
+                .append(true)
+                .open(&log_path_stderr)
+                .await;
+
             loop {
                 line.clear();
                 match stderr_reader.read_line(&mut line).await {
                     Ok(0) => break, // EOF
                     Ok(_) => {
-                        eprintln!("[Butler Error] {}", line.trim());
+                        let trimmed = line.trim();
+                        eprintln!("[Butler Error] {}", trimmed);
+                        
+                        // Also append to log file if possible
+                        if let Ok(ref mut file) = log_file {
+                            let _ = file.write_all(format!("[STDERR] {}\n", trimmed).as_bytes()).await;
+                        }
                     }
                     Err(e) => {
                         eprintln!("[Butler Error reading stderr] {}", e);
@@ -256,6 +272,11 @@ pub async fn apply_pwr(
             line_buf.clear();
         }
 
+        // Store stderr output for error checking AND for next retry attempt
+        let stderr_output: String = tokio::fs::read_to_string(&log_path)
+            .await
+            .unwrap_or_default();
+
         let status = child.wait().await?;
         if status.success() {
             // SUCCESS: Verify extraction integrity before reporting success
@@ -313,10 +334,6 @@ pub async fn apply_pwr(
             }
         } else {
             // Butler failed
-            let stderr_output: String = tokio::fs::read_to_string(&log_path)
-                .await
-                .unwrap_or_default();
-
             if stderr_output.contains("already up to date") {
                 println!("Game is already up to date");
                 return Ok(());
@@ -333,10 +350,7 @@ pub async fn apply_pwr(
             );
         }
 
-        // Clean up for retry
-        if game_dir.exists() {
-            let _ = tokio::fs::remove_dir_all(&game_dir).await;
-        }
+        // Note: Manual cleanup for retry moved to beginning of loop or handled by outer recovery
     }
 
     // All attempts failed

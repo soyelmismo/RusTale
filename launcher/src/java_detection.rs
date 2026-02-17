@@ -69,10 +69,16 @@ fn get_java_version_sync(jre_dir: &std::path::Path) -> anyhow::Result<String> {
     }
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    if let Some(line) = stderr.lines().next() {
-        if let Some(start) = line.find('"') {
-            if let Some(end) = line[start + 1..].find('"') {
-                return Ok(line[start + 1..start + 1 + end].to_string());
+    
+    // Look for the line containing the actual Java version
+    // The version line typically starts with "openjdk version" or contains version in quotes
+    for line in stderr.lines() {
+        if line.contains("openjdk version") || line.contains("java version") {
+            // Extract version from quotes
+            if let Some(start) = line.find('"') {
+                if let Some(end) = line[start + 1..].find('"') {
+                    return Ok(line[start + 1..start + 1 + end].to_string());
+                }
             }
         }
     }

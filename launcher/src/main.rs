@@ -1377,7 +1377,6 @@ impl RusTale {
                 | Message::RepairFinished(_)
                 | Message::OpenVersionFolder(_)
                 | Message::WindowResized(_)
-                | Message::AppExit
                 | Message::CopyUUID(_)
                 | Message::GenerateRandomUUID
                 | Message::RequestMoveData(_)
@@ -1410,9 +1409,14 @@ impl RusTale {
             | Message::WindowResized(..) 
             | Message::WindowResizedWithMaximized(..) 
             | Message::ToggleFullscreen 
-            | Message::ToggleWindowVisibility 
-            | Message::ToggleProfileDropdown
-            | Message::AppExit
+            | Message::ToggleWindowVisibility => {
+                // No logic needed here; handle_ui_message returned Some(Task::none()) 
+                // or the specific logic for these already executed.
+                Task::none()
+            }
+            Message::AppExit => {
+                self.save_and_exit()
+            }
             | Message::CloseRequested => {
                 // No logic needed here; handle_ui_message returned Some(Task::none()) 
                 // or the specific logic for these already executed.
@@ -2529,7 +2533,8 @@ impl RusTale {
             | Message::DeleteProfile(_)
             | Message::ProfileNameChanged(_)
             | Message::SaveProfileName
-            | Message::CancelProfileEdit => self.handle_profile_message_ext(message),
+            | Message::CancelProfileEdit
+            | Message::ToggleProfileDropdown => self.handle_profile_message_ext(message),
             Message::TrayEvent(evt) => {
                 if let tray_icon::TrayIconEvent::Click {
                     button: tray_icon::MouseButton::Left,

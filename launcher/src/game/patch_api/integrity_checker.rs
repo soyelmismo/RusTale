@@ -72,8 +72,7 @@ impl IntegrityChecker {
             "Client",              // Main game client directory
             "Client/HytaleClient", // Main executable (Linux/Mac)
             "Client/HytaleClient.exe", // Main executable (Windows)
-                                   // Note: Libraries are directly in Client/, not in Client/libs/
-                                   // We'll check for common library patterns instead
+            "Assets.zip",           // Main assets archive
         ];
 
         let mut missing_files: Vec<&str> = Vec::new();
@@ -140,10 +139,11 @@ impl IntegrityChecker {
                 );
             }
 
-            if file_count < 5 || total_size < 10_000_000 {
-                // Less than 10MB seems suspicious
+            if file_count < 5 || total_size < 20_000_000 {
+                // Check for at least 20MB. Assets.zip alone is usually > 100MB, 
+                // but we use a lower threshold to avoid false positives on minimal installs.
                 anyhow::bail!(
-                    "Installation appears incomplete: {} files, {} bytes total. Expected at least 5 files and 10MB.",
+                    "Installation appears incomplete: {} files, {} bytes total. Expected at least 5 files and 40MB.",
                     file_count,
                     total_size
                 );

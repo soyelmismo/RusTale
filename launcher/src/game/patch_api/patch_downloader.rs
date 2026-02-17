@@ -49,10 +49,22 @@ impl PatchDownloader {
         );
         let patch_path = cache_dir.join(&filename);
 
-        // Download if not cached
-        if !patch_path.exists() {
-            let cancel_token_clone = cancel_token.clone(); // Clone before first use
-            
+        // Download if not cached or if cached and potentially corrupted
+        let should_download = if !patch_path.exists() {
+            true
+        } else {
+            // Quick check: if file is 0 bytes, it's definitely corrupted
+            let meta = std::fs::metadata(&patch_path)?;
+            if meta.len() == 0 {
+                println!("[Downloader] Cached patch is empty, re-downloading...");
+                let _ = tokio::fs::remove_file(&patch_path).await;
+                true
+            } else {
+                false
+            }
+        };
+
+        if should_download {
             progress_callback(
                 "patch",
                 0.0,
@@ -78,7 +90,7 @@ impl PatchDownloader {
                         Some(0),
                     );
                 },
-                cancel_token,
+                cancel_token.clone(),
             )
             .await?;
 
@@ -91,62 +103,68 @@ impl PatchDownloader {
                 None,
                 Some(0),
             );
-
-            // Validate downloaded patch integrity with high-fidelity checks
-            let checker = super::integrity_checker::IntegrityChecker::new();
-            
-            // First, validate patch format
-            if let Ok(format_res) = checker.validate_patch_format(&patch_path) {
-                if !format_res.is_valid() {
-                    let _ = tokio::fs::remove_file(&patch_path).await;
-                    anyhow::bail!("Downloaded file is not a valid PWR/ZIP patch");
-                }
-                println!("[Downloader] Verified patch format: {:?}", format_res.format);
-            }
-            
-            let progress_callback_clone = progress_callback.clone();
-            let integrity_callback = move |p: f64, m: &str| {
-                // Bridge integrity progress to main progress callback
-                // Map integrity messages to proper phase and status
-                let phase = "verify"; // Use verify phase for integrity checks
-                let status = if m == "verifying_checksum" { 
-                    "Verifying integrity..." 
-                } else { 
-                    m 
-                };
-                
-                progress_callback_clone(
-                    phase,
-                    p * 100.0, // Convert to percentage for compatibility
-                    status,
-                    0,
-                    0,
-                    None,
-                    Some(1), // Step 1 of integrity verification
-                );
-            };
-            let integrity_res = checker.verify_download_integrity(
-                &patch_path, 
-                None, // Add signature path if available in future
-                None, 
-                Some(integrity_callback),
-                cancel_token_clone
-            ).await?;
-
-            if !integrity_res.is_valid() {
-                let _err = tokio::fs::remove_file(&patch_path).await;
-                anyhow::bail!("Integrity check failed: {:?}", integrity_res.errors);
-            }
         } else {
             progress_callback(
                 "patch",
-                100.0,
-                &format!("Patch {}→{} found in cache", from_version, to_version),
+                10.0,
+                &format!("Verifying cached patch {}→{}...", from_version, to_version),
                 0,
                 0,
                 None,
                 Some(0),
             );
+        }
+
+        // ALWAYS validate patch integrity (either newly downloaded or from cache)
+        let checker = super::integrity_checker::IntegrityChecker::new();
+        
+        // First, validate patch format
+        if let Ok(format_res) = checker.validate_patch_format(&patch_path) {
+            if !format_res.is_valid() {
+                println!("[Downloader] Cached patch has invalid format, deleting: {:?}", format_res.errors);
+                let _ = tokio::fs::remove_file(&patch_path).await;
+                anyhow::bail!("Patch file is not a valid PWR/ZIP format");
+            }
+            println!("[Downloader] Verified patch format: {:?}", format_res.format);
+        }
+        
+        let progress_callback_clone = progress_callback.clone();
+        let cancel_token_clone = cancel_token.clone();
+        
+        let integrity_callback = move |p: f64, m: &str| {
+            // Bridge integrity progress to main progress callback
+            let status = if m == "verifying_checksum" { 
+                "Verifying integrity..." 
+            } else { 
+                m 
+            };
+            
+            progress_callback_clone(
+                "verify",
+                p * 100.0,
+                status,
+                0,
+                0,
+                None,
+                Some(1),
+            );
+        };
+
+        match checker.verify_download_integrity(
+            &patch_path, 
+            None, 
+            None, 
+            Some(integrity_callback),
+            cancel_token_clone
+        ).await? {
+            integrity_res if integrity_res.is_valid() => {
+                println!("[Downloader] Patch integrity verified successfully");
+            },
+            integrity_res => {
+                println!("[Downloader] Patch integrity check failed: {:?}", integrity_res.errors);
+                let _ = tokio::fs::remove_file(&patch_path).await;
+                anyhow::bail!("Integrity check failed for cached/downloaded patch: {:?}", integrity_res.errors);
+            }
         }
 
         Ok(patch_path)
