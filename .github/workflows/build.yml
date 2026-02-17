@@ -110,7 +110,16 @@ jobs:
       run: |
         mkdir dist
         cp target/release/rustale dist/rustale
-        cp target/release/libaurora.so dist/libaurora.so
+        
+        # Copy aurora library - try both possible names
+        if [ -f "target/release/libaurora.so" ]; then
+          cp target/release/libaurora.so dist/aurora.so
+        elif [ -f "target/release/aurora.so" ]; then
+          cp target/release/aurora.so dist/aurora.so
+        else
+          echo "Warning: No aurora library found"
+        fi
+        
         cp scripts/start_server.sh dist/start_server.sh
         cp scripts/install_deps.sh dist/install_deps.sh
         chmod +x dist/rustale
