@@ -146,7 +146,7 @@ impl PatchApiFrontend {
 
         // Phase 1: Checking
         WeightedProgressTracker::set_phase(&tracker, "check");
-        WeightedProgressTracker::report(&tracker, 0.0, "launcher.status.checking", vec![], None);
+        WeightedProgressTracker::report_simple(&tracker, 0.0, "launcher.status.checking", None);
 
         // Fast offline path - only if game is actually installed
         if policy == crate::game::install::InstallPolicy::OfflineVerify {
@@ -181,8 +181,8 @@ impl PatchApiFrontend {
         );
 
         // Bridge the legacy JRE callback to our new system
-        let tracker_clone = tracker.clone();
-        let _java_info = crate::java_detection::ensure_java_available(base_dir).await?;
+        let java_info = crate::java_detection::ensure_java_available(base_dir).await?;
+        println!("[JRE] Detected Java version: {}", java_info.version); // Usage instead of ignore
 
         // Phase 3: Butler
         WeightedProgressTracker::set_phase(&tracker, "butler");
@@ -196,7 +196,7 @@ impl PatchApiFrontend {
 
         // Bridge the legacy Butler callback
         let tracker_clone = tracker.clone();
-        let _butler_path = self
+        let butler_path = self
             .butler_installer
             .install(
                 client,
@@ -232,9 +232,11 @@ impl PatchApiFrontend {
             )
             .await?;
 
+        println!("[Butler] Binary verified at: {:?}", butler_path);
+
         // Phase 4: Version Check
         WeightedProgressTracker::set_phase(&tracker, "version");
-        WeightedProgressTracker::report(&tracker, 0.5, "launcher.status.checking", vec![], None);
+        WeightedProgressTracker::report_simple(&tracker, 0.5, "launcher.status.checking", None);
 
         let version_info = self
             .version_manager
@@ -280,7 +282,6 @@ impl PatchApiFrontend {
                 .patch_downloader
                 .download_patch(
                     client,
-                    base_dir,
                     channel,
                     start_version,
                     target_ver_val,
@@ -422,7 +423,6 @@ impl PatchApiFrontend {
                         .patch_downloader
                         .download_complete_version(
                             client,
-                            base_dir,
                             channel,
                             target_version.unwrap_or(0),
                             |phase, pct, status, total, downloaded, eta, step| {
@@ -587,7 +587,7 @@ impl PatchApiFrontend {
         }
 
         if verification_passed {
-            WeightedProgressTracker::report(&tracker, 1.0, "launcher.status.ready", vec![], None);
+            WeightedProgressTracker::report_simple(&tracker, 1.0, "launcher.status.ready", None);
             println!("[SUCCESS] Installation completed successfully");
         } else {
             anyhow::bail!(

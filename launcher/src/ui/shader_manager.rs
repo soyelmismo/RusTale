@@ -93,9 +93,6 @@ fn load_all_shaders() -> Vec<String> {
     shaders
 }
 
-pub fn build_uber_shader() -> String {
-    build_uber_shader_with_index(0)
-}
 
 pub fn build_uber_shader_with_index(shader_index: usize) -> String {
     // Inicializar el cache si no está cargado

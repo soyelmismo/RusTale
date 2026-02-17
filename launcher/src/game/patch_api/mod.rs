@@ -14,7 +14,7 @@ pub use frontend::PatchApiFrontend;
 pub use installer::{ButlerInstaller, JreInstaller};
 pub use integrity_checker::IntegrityChecker;
 pub use patch_downloader::PatchDownloader;
-pub use shared_cache::get_shared_cache;
+pub use shared_cache::{get_shared_cache, init_shared_cache};
 pub use shipofyarn::ShipOfYarnProvider;
 pub use traits::PatchProvider;
 pub use utils::*;

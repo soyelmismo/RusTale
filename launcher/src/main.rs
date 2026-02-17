@@ -7,11 +7,11 @@ use clap::Parser;
 
 use futures::SinkExt;
 
-use iced::widget::{Space, column, container, image, mouse_area, row, shader, stack};
+use iced::widget::{Space, column, container, mouse_area, row, shader, stack};
 
 use iced::{
-    Alignment, Color, ContentFit, Element, Length, Padding, Point, Size, Subscription, Task, Theme,
-    clipboard, event::Event, mouse, mouse::Interaction, window,
+    Color, Element, Length, Size, Subscription, Task, Theme,
+    clipboard, event::Event, mouse, window,
 };
 
 use single_instance::SingleInstance;
@@ -292,22 +292,6 @@ pub fn main() -> std::process::ExitCode {
         let (width, height) = config::load_width_height();
 
         let is_quickplay = args.quickplay || config_initialization_mode.quickplay;
-        // Detectar Wayland para desactivar módulos custom
-
-        //#[cfg(target_os = "linux")]
-
-        //let is_wayland = util::is_wayland();
-
-        //#[cfg(not(target_os = "linux"))]
-
-        let is_wayland = true;
-        //#[cfg(target_os = "linux")]
-
-        //if is_wayland {
-
-        //    println!("[Wayland] Detectado - usando decoraciones nativas y desactivando redimensionamiento custom");
-
-        //}
         let res = iced::application(
             move || RusTale::new(is_quickplay),
             RusTale::update,
@@ -325,14 +309,12 @@ pub fn main() -> std::process::ExitCode {
 
             icon: iced::window::icon::from_file_data(include_bytes!("../assets/icon.png"), None)
                 .ok(),
-            // --- CAMBIOS PARA CUSTOM TITLEBAR ---
             visible: !is_quickplay,
 
-            decorations: if is_wayland { true } else { false }, // Forzar decoraciones nativas en Wayland
+            decorations: true,
 
-            transparent: !is_wayland, // En Wayland: transparent=false, en X11: transparent=true
+            transparent: false,
 
-            // ------------------------------------
             position: iced::window::Position::Centered,
 
             exit_on_close_request: false,
@@ -353,25 +335,6 @@ pub fn main() -> std::process::ExitCode {
             Err(_) => std::process::ExitCode::FAILURE,
         }
     }
-}
-#[derive(Debug, Clone, Copy, PartialEq)]
-
-pub enum ResizeDirection {
-    North,
-
-    South,
-
-    East,
-
-    West,
-
-    NorthEast,
-
-    NorthWest,
-
-    SouthEast,
-
-    SouthWest,
 }
 #[derive(Debug, Clone)]
 
@@ -506,21 +469,12 @@ pub enum Message {
 
     JavaInfoLoaded,
 
-    WindowDrag,
-
-    MinimizeWindow,
-
-    MaximizeWindow,
-
-    ToggleFullscreen, // Nuevo mensaje específico para F11
-    // --- NUEVOS MENSAJES PARA REDIMENSIoN MANUAL ---
-    ResizePressed(ResizeDirection),
-
-    ResizeReleased,
     // --- MENSAJE PARA CONTROL DE MOUSE EN LSD MODE ---
     MousePressed,
 
     MouseReleased, // Nuevo mensaje para cuando se suelta el mouse
+
+    ToggleFullscreen, // Nuevo mensaje específico para F11
 
     WindowEvent(window::Event),
 
@@ -626,9 +580,6 @@ pub struct RusTale {
     // Window and display state
     window_size: Size,
 
-    current_window_size: Size,
-
-    current_window_pos: Point,
 
     is_window_visible: bool,
 
@@ -639,8 +590,6 @@ pub struct RusTale {
     is_focused: bool,
 
     is_fullscreen: bool,
-
-    is_wayland: bool,
 
     is_cursor_hidden: bool,
     // Mouse and interaction tracking
@@ -657,14 +606,6 @@ pub struct RusTale {
     is_mouse_pressed: bool,
 
     last_mouse_release_time: std::time::Instant,
-    // Resize and drag state
-    resizing_direction: Option<ResizeDirection>,
-
-    drag_start_window_pos: Point,
-
-    drag_start_window_size: Size,
-
-    drag_start_mouse_screen_pos: Point,
     // === VISUAL EFFECTS STATE ===
 
     // Theme and styling
@@ -702,8 +643,6 @@ pub struct RusTale {
     // === SYSTEM STATE ===
 
     // Timing and monitoring
-    last_title_click: std::time::Instant,
-
     last_status_change: std::time::Instant,
 
     last_download_progress: f32,
@@ -743,15 +682,6 @@ impl RusTale {
 
         let paths = GamePaths::new(base_dir);
         let (width, height) = config::load_width_height();
-        // Detectar Wayland para desactivar módulos custom
-
-        //#[cfg(target_os = "linux")]
-
-        //let is_wayland = util::is_wayland();
-
-        //#[cfg(not(target_os = "linux"))]
-
-        let is_wayland = true;
         // 1. API CLIENT: Fast, fails quickly if no response
 
         let api_client = reqwest::Client::builder()
@@ -887,9 +817,6 @@ impl RusTale {
                 // === VISUAL STATE ===
                 window_size: Size::new(width, height),
 
-                current_window_size: Size::new(width, height),
-
-                current_window_pos: Point::ORIGIN,
 
                 is_window_visible: !quickplay,
 
@@ -900,8 +827,6 @@ impl RusTale {
                 is_focused: true,
 
                 is_fullscreen: false,
-
-                is_wayland,
 
                 is_cursor_hidden: false,
                 // Mouse and interaction tracking
@@ -918,14 +843,6 @@ impl RusTale {
                 is_mouse_pressed: false,
 
                 last_mouse_release_time: std::time::Instant::now(),
-                // Resize and drag state
-                resizing_direction: None,
-
-                drag_start_window_pos: Point::ORIGIN,
-
-                drag_start_window_size: Size::new(width, height),
-
-                drag_start_mouse_screen_pos: Point::ORIGIN,
                 // === VISUAL EFFECTS STATE ===
                 palette: theme::generate_palette(&initial_settings.theme),
                 // LSD and shader effects
@@ -976,8 +893,6 @@ impl RusTale {
                 // Background effects
                 background_blur: initial_bg_bytes.map(background_blur::BackgroundBlur::new),
                 // === SYSTEM STATE ===
-                last_title_click: std::time::Instant::now(),
-
                 last_status_change: std::time::Instant::now(),
 
                 last_download_progress: 0.0,
@@ -1079,8 +994,6 @@ impl RusTale {
             } else if !lsd_active && !is_modal_active {
                 Some(std::time::Duration::from_millis(1000)) // 1 FPS housekeeping
             } else if !is_focused {
-                None
-            } else if self.resizing_direction.is_some() {
                 None
             } else {
                 Some(std::time::Duration::from_millis(16)) // 60 FPS normal (for real LSD or dummy label)
@@ -1352,9 +1265,6 @@ impl RusTale {
                         }
                     }
                 }
-                if self.resizing_direction.is_some() {
-                    return Some(Task::none());
-                }
                 let dt = 0.016;
 
                 let fade_speed = 1.5;
@@ -1368,7 +1278,6 @@ impl RusTale {
 
                 let elapsed_idle = self.last_mouse_move_time.elapsed().as_secs_f32();
                 let is_modal_active = self.views.settings.is_open || self.views.mods.is_open;
-                let tasks = Vec::new();
                 if is_modal_active {
                     self.ui_opacity_accumulator =
                         (self.ui_opacity_accumulator + dt * reveal_speed).min(1.0);
@@ -1426,293 +1335,7 @@ impl RusTale {
                         crate::ui::lsd_shader::set_global_wgsl(new_shader_code);
                     }
                 }
-                if tasks.is_empty() {
-                    Some(Task::none())
-                } else {
-                    Some(Task::batch(tasks))
-                }
-            }
-            Message::ShaderClicked => {
-                self.shader_click_intensity = 2.0;
-
-                self.shader_click_time = std::time::Instant::now();
-
-                self.last_mouse_move_time = std::time::Instant::now();
-
                 Some(Task::none())
-            }
-            Message::ResizePressed(dir) => {
-                if self.is_wayland {
-                    return Some(Task::none());
-                }
-                self.resizing_direction = Some(*dir);
-                self.drag_start_window_pos = self.current_window_pos;
-
-                self.drag_start_window_size = self.current_window_size;
-                self.drag_start_mouse_screen_pos = Point::new(
-                    self.current_window_pos.x + self.cursor_position.x,
-                    self.current_window_pos.y + self.cursor_position.y,
-                );
-                Some(Task::none())
-            }
-            Message::ResizeReleased => {
-                if self.is_wayland {
-                    return Some(Task::none());
-                }
-                self.resizing_direction = None;
-
-                self.is_mouse_pressed = false;
-
-                self.last_mouse_release_time = std::time::Instant::now();
-
-                Some(Task::none())
-            }
-            Message::NextShader => {
-                if self.settings.theme.lsd_mode && self.shader_transition <= 0.0 {
-                    self.next_shader_idx =
-                        (self.active_shader_idx + 1) % self.total_shaders_available;
-                    self.shader_transition = 0.01;
-                    self.shader_change_timer = 0.0;
-
-                    // Actualizar el shader global con el nuevo índice
-                    let new_shader_code = crate::ui::shader_manager::build_uber_shader_with_index(
-                        self.next_shader_idx as usize,
-                    );
-                    crate::ui::lsd_shader::set_global_wgsl(new_shader_code);
-                }
-                Some(Task::none())
-            }
-            Message::NextShaderManual => {
-                if self.settings.theme.lsd_mode {
-                    // Forzar cambio inmediato sin esperar a que termine la transición
-                    self.active_shader_idx = self.next_shader_idx;
-                    self.next_shader_idx =
-                        (self.active_shader_idx + 1) % self.total_shaders_available;
-                    self.shader_transition = 0.01;
-                    self.shader_change_timer = 0.0;
-
-                    // Actualizar el shader global con el nuevo índice
-                    let new_shader_code = crate::ui::shader_manager::build_uber_shader_with_index(
-                        self.next_shader_idx as usize,
-                    );
-                    crate::ui::lsd_shader::set_global_wgsl(new_shader_code);
-                }
-                Some(Task::none())
-            }
-            Message::WindowResized(size) => {
-                self.current_window_size = *size;
-
-                self.window_size = *size;
-
-                self.views.news.update_viewport_height(size.height);
-
-                self.settings.width = size.width as u32;
-
-                self.settings.height = size.height as u32;
-                if self.resizing_direction.is_none() {
-                    let size_captured = *size;
-
-                    Some(window::oldest().and_then(move |id| {
-                        Task::batch(vec![
-                            window::gain_focus(id),
-                            window::is_maximized(id).map(move |max| {
-                                Message::WindowResizedWithMaximized(size_captured, max)
-                            }),
-                        ])
-                    }))
-                } else {
-                    Some(Task::none())
-                }
-            }
-            Message::WindowResizedWithMaximized(size, is_maximized) => {
-                self.window_size = *size;
-
-                self.is_maximized = *is_maximized;
-
-                self.settings.width = size.width as u32;
-
-                self.settings.height = size.height as u32;
-
-                self.views.settings.temp_settings.width = size.width as u32;
-
-                self.views.settings.temp_settings.height = size.height as u32;
-
-                Some(Task::none())
-            }
-            Message::WindowDrag => {
-                if self.is_wayland {
-                    return Some(Task::none());
-                }
-                let now = std::time::Instant::now();
-
-                let duration = now.duration_since(self.last_title_click);
-
-                self.last_title_click = now;
-                if duration < std::time::Duration::from_millis(300) {
-                    self.is_maximized = !self.is_maximized;
-
-                    Some(window::oldest().and_then(|id| window::toggle_maximize(id)))
-                } else {
-                    Some(window::oldest().and_then(|id| window::drag(id)))
-                }
-            }
-            Message::MinimizeWindow => {
-                if self.is_wayland {
-                    return Some(Task::none());
-                }
-                self.is_minimized = true;
-
-                self.views.news.images.clear();
-
-                Some(window::oldest().and_then(|id| {
-                    Task::batch(vec![
-                        window::minimize(id, true),
-                        Task::perform(async {}, |_| {
-                            crate::util::trim_memory_with_level(crate::util::TrimLevel::Aggressive);
-
-                            Message::None
-                        }),
-                    ])
-                }))
-            }
-            Message::MaximizeWindow => {
-                self.is_maximized = !self.is_maximized;
-
-                if self.is_minimized {
-                    self.is_minimized = false;
-
-                    let mut tasks =
-                        vec![window::oldest().and_then(|id| window::toggle_maximize(id))];
-
-                    if self.settings.enable_news {
-                        tasks.push(Task::done(Message::News(NewsMessage::ReloadImages)));
-                    }
-                    Some(Task::batch(tasks))
-                } else {
-                    Some(window::oldest().and_then(|id| window::toggle_maximize(id)))
-                }
-            }
-            Message::ToggleFullscreen => {
-                let entering_fullscreen = !self.is_fullscreen;
-
-                self.is_fullscreen = entering_fullscreen;
-
-                if entering_fullscreen {
-                    self.is_maximized = false;
-                }
-                Some(window::oldest().and_then(move |id| {
-                    if entering_fullscreen {
-                        Task::batch(vec![
-                            window::set_mode(id, window::Mode::Windowed),
-                            window::set_mode(id, window::Mode::Fullscreen),
-                        ])
-                    } else {
-                        window::set_mode(id, window::Mode::Windowed)
-                    }
-                }))
-            }
-            Message::WindowEvent(event) => match event {
-                window::Event::Resized(size) => {
-                    let delta_w = (size.width - self.current_window_size.width).abs();
-
-                    let delta_h = (size.height - self.current_window_size.height).abs();
-                    if self.resizing_direction.is_some() && delta_w < 5.0 && delta_h < 5.0 {
-                        return Some(Task::none());
-                    }
-                    self.current_window_size = *size;
-
-                    self.window_size = *size;
-                    self.settings.width = size.width as u32;
-
-                    self.settings.height = size.height as u32;
-
-                    self.views.settings.temp_settings.width = size.width as u32;
-
-                    self.views.settings.temp_settings.height = size.height as u32;
-                    let size_clone = *size;
-
-                    Some(window::oldest().and_then(move |id| {
-                        Task::batch(vec![window::is_maximized(id).map(move |is_maximized| {
-                            Message::WindowResizedWithMaximized(size_clone, is_maximized)
-                        })])
-                    }))
-                }
-                window::Event::Moved(point) => {
-                    self.current_window_pos = *point;
-
-                    Some(Task::none())
-                }
-                window::Event::CloseRequested => Some(Task::done(Message::CloseRequested)),
-                window::Event::Focused => {
-                    self.is_focused = true;
-
-                    if self.settings.enable_news
-                        && !self.views.news.posts.is_empty()
-                        && self.views.news.images.is_empty()
-                    {
-                        return Some(Task::done(Message::News(NewsMessage::ReloadImages)));
-                    }
-                    Some(Task::none())
-                }
-                window::Event::Unfocused => {
-                    self.is_focused = false;
-
-                    Some(Task::none())
-                }
-                _ => Some(Task::none()),
-            },
-            Message::CloseRequested => {
-                if self.settings.minimize_to_tray {
-                    // Si el icono existe...
-
-                    if self.tray_icon.is_some() {
-                        // [LINUX FIX] En Linux/Wayland, 'Hidden' congela la ventana.
-
-                        // Usamos 'Minimize' que es seguro. La ventana se queda en barra de tareas
-
-                        // pero no se congela y el icono del tray sigue funcionando.
-
-                        #[cfg(target_os = "linux")]
-                        {
-                            self.is_window_visible = true; // Mantener logica de visible para que Iced siga dibujando
-
-                            Some(window::oldest().and_then(|id| window::minimize(id, true)))
-                        }
-                        // [WINDOWS] En Windows 'Hidden' funciona perfecto para Tray real.
-
-                        #[cfg(not(target_os = "linux"))]
-                        {
-                            self.is_window_visible = false;
-
-                            Some(
-                                window::oldest()
-                                    .and_then(|id| window::set_mode(id, window::Mode::Hidden)),
-                            )
-                        }
-                    } else {
-                        // Si no hay icono, salimos para no atrapar al usuario
-
-                        Some(self.save_and_exit())
-                    }
-                } else {
-                    Some(self.save_and_exit())
-                }
-            }
-            Message::ToggleWindowVisibility => {
-                self.is_window_visible = !self.is_window_visible;
-
-                let visible = self.is_window_visible;
-
-                Some(window::oldest().and_then(move |id| {
-                    if visible {
-                        window::set_mode(id, window::Mode::Windowed)
-                    } else {
-                        window::set_mode(id, window::Mode::Hidden)
-                    }
-                }))
-            }
-            Message::ToggleProfileDropdown => {
-                Some(self.handle_profile_message_ext(Message::ToggleProfileDropdown))
             }
             _ => None,
         }
@@ -1757,34 +1380,37 @@ impl RusTale {
                 | Message::News(_)
                 | Message::LoadJavaInfo
                 | Message::JavaInfoLoaded
-                | Message::WindowDrag
-                | Message::MinimizeWindow
-                | Message::MaximizeWindow => {}
+                | Message::WindowEvent(_)
+                | Message::NextShader
+                | Message::NextShaderManual
+                | Message::ToggleFullscreen => {}
                 _ => return Task::none(),
             }
         }
         match message {
-            // These messages are handled by handle_ui_message, so we ignore them here
-            Message::CursorMoved(_)
-            | Message::MousePressed
-            | Message::MouseReleased
-            | Message::Tick(_)
-            | Message::ShaderClicked
-            | Message::ResizePressed(_)
-            | Message::ResizeReleased
-            | Message::NextShader
-            | Message::NextShaderManual
-            | Message::WindowResized(_)
-            | Message::WindowResizedWithMaximized(_, _)
-            | Message::WindowDrag
-            | Message::MinimizeWindow
-            | Message::MaximizeWindow
-            | Message::ToggleFullscreen
-            | Message::WindowEvent(_)
-            | Message::CloseRequested
-            | Message::ToggleWindowVisibility
+            // 1. Acknowledge UI/Visual messages already handled by handle_ui_message.
+            // We use (..) to ignore the data in these variants so they can be grouped safely.
+            Message::Tick(..) 
+            | Message::CursorMoved(..) 
+            | Message::ShaderClicked 
+            | Message::MousePressed 
+            | Message::MouseReleased 
+            | Message::NextShader 
+            | Message::NextShaderManual 
+            | Message::WindowResized(..) 
+            | Message::WindowResizedWithMaximized(..) 
+            | Message::ToggleFullscreen 
+            | Message::WindowEvent(..) 
+            | Message::CloseRequested 
+            | Message::ToggleWindowVisibility 
             | Message::ToggleProfileDropdown
-            | Message::AppExit => Task::none(),
+            | Message::AppExit => {
+                // No logic needed here; handle_ui_message returned Some(Task::none()) 
+                // or the specific logic for these already executed.
+                Task::none()
+            }
+
+            // 2. Business Logic Messages (Carry on with your existing code)
             Message::UpdateTotalSteps { total_steps } => {
                 self.total_steps = total_steps;
 
@@ -2878,7 +2504,6 @@ impl RusTale {
             | Message::DeleteProfile(_)
             | Message::ProfileNameChanged(_)
             | Message::SaveProfileName
-            | Message::CancelProfileEdit
             | Message::CancelProfileEdit => self.handle_profile_message_ext(message),
             Message::TrayEvent(evt) => {
                 if let tray_icon::TrayIconEvent::Click {
@@ -2965,7 +2590,7 @@ impl RusTale {
             Message::None => Task::none(),
         }
     }
-    fn view(&self) -> Element<'_, Message> {
+    fn view(&self) -> iced::Element<'_, Message> {
         let palette = &self.palette;
 
         // === CALCULAR QUIETUD ===
@@ -3071,7 +2696,7 @@ impl RusTale {
 
             mouse_stillness: stillness,
 
-            is_resizing: self.resizing_direction.is_some(),
+            is_resizing: false,
         };
         let tint_color = theme::background_tint_color(palette);
         // 2. Creamos la capa de tinte (un contenedor vacio con color de fondo)
@@ -3236,11 +2861,7 @@ impl RusTale {
 
             let shader_base_alpha = ramp_alpha;
 
-            let resize_multiplier = if self.resizing_direction.is_some() {
-                0.0
-            } else {
-                1.0
-            };
+            let resize_multiplier = 1.0;
             let shader_instance = if let Some(ref mut shader) = *shader_opt {
                 shader.update_mouse_position(self.cursor_position);
 
@@ -3257,11 +2878,8 @@ impl RusTale {
                 shader
             } else {
                 *shader_opt = Some(lsd_shader::LsdShader::new(
-                    self.start_time,
                     self.cursor_position,
                     palette.accent,
-                    self.active_shader_idx,
-                    shader_base_alpha,
                     effect_intensity,
                 ));
 
@@ -3292,95 +2910,12 @@ impl RusTale {
         } else {
             bg_layer
         };
-        // --- CONSTRUCCIoN DE LA BARRA DE TiTULO ---
+        // Estructura principal visual (Fondo + Contenido)
 
-        let title_bar_palette = ctx.palette.clone(); // Clonar completamente para evitar error de prestamo
-
-        let title_bar_visual_inner = container(
-            row![
-                // Icono PNG
-                container(theme::magic_image(
-                    image(crate::util::icons::load_window_icon_handle())
-                        .width(20)
-                        .height(20)
-                        .content_fit(ContentFit::Contain)
-                        .opacity(ctx.palette.text_primary.a) // <--- Agrega esto para desvanecer imagenes
-                        .into(),
-                    ctx,
-                ))
-                .padding(Padding::new(0.0).left(10.0).right(10.0)), // Padding lateral
-                // Titulo
-                container(theme::text_small(self.title(), ctx))
-                    .width(Length::Fill)
-                    .align_y(Alignment::Center),
-                // Botones de control
-                row![
-                    // Minimizar
-                    theme::window_control_button(
-                        crate::util::icons::MINUS,
-                        Message::MinimizeWindow,
-                        false,
-                        title_bar_palette,
-                        ctx
-                    ),
-                    // Maximizar / Restaurar
-                    theme::window_control_button(
-                        if self.is_maximized {
-                            crate::util::icons::RESTORE
-                        } else {
-                            crate::util::icons::SQUARE
-                        },
-                        Message::MaximizeWindow,
-                        false,
-                        title_bar_palette,
-                        ctx
-                    ),
-                    // Cerrar (Rojo)
-                    theme::window_control_button(
-                        crate::util::icons::X,
-                        Message::CloseRequested,
-                        true, // is_close
-                        title_bar_palette,
-                        ctx
-                    ),
-                ]
-            ]
-            .align_y(Alignment::Center)
-            .height(32), // Altura de la barra de titulo
-        )
-        .style(move |t| {
-            theme::title_bar_style(&title_bar_palette, t, &self.settings.theme.base_mode)
-        })
-        .width(Length::Fill);
-        let title_bar_magic = theme::magic_container(title_bar_visual_inner.into(), ctx);
-        let title_bar = mouse_area(title_bar_magic)
-            .on_press(Message::WindowDrag)
-            .interaction(Interaction::Grab);
-        // [OPTIMIZATION] Only track mouse move if LSD is active to save 90% CPU
-
-        let title_bar = if self.settings.theme.lsd_mode || self.lsd_preview {
-            title_bar.on_move(Message::CursorMoved)
-        } else {
-            title_bar
-        };
-        // Estructura principal visual (Fondo + Barra + Contenido)
-
-        let visual_content: Element<'_, Message> = if self.is_wayland {
-            // En Wayland, no mostrar title bar personalizado, solo el contenido
-
-            container(main_content)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into()
-        } else {
-            column![
-                title_bar,
-                container(main_content)
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-            ]
-            .into()
-        };
+        let visual_content: iced::Element<'_, Message> = container(main_content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into();
         let final_view = stack![bg, tint_overlay, visual_content];
         // Contenido principal del modal (El cuadro gris con botones)
 
@@ -3436,147 +2971,17 @@ impl RusTale {
             .style(move |t| {
                 theme::window_frame_style(&palette, t, self.is_maximized || self.is_fullscreen)
             });
-        // --- SISTEMA DE REDIMENSIONAMIENTO (8 LADOS) ---
+        // --- WINDOW FRAME CON MOUSE INTERACTION ---
 
-        if self.is_maximized || self.is_fullscreen || self.is_wayland {
-            // Aplicar cursor segun estado de ocultamiento incluso cuando está maximizado, en fullscreen o en Wayland
+        let window_frame_area = mouse_area(window_frame)
+            .interaction(self.get_cursor_interaction())
+            .on_press(Message::MousePressed);
+        // [OPTIMIZATION] Only track mouse move if LSD is active to save 90+ CPU
 
-            let window_frame_area = mouse_area(window_frame)
-                .interaction(self.get_cursor_interaction())
-                .on_press(Message::MousePressed);
-            // [OPTIMIZATION] Only track mouse move if LSD is active to save 90+ CPU
-
-            if self.settings.theme.lsd_mode || self.lsd_preview {
-                window_frame_area.on_move(Message::CursorMoved).into()
-            } else {
-                window_frame_area.into()
-            }
+        if self.settings.theme.lsd_mode || self.lsd_preview {
+            window_frame_area.on_move(Message::CursorMoved).into()
         } else {
-            let b = 10.0; // Grosor del borde para arrastrar
-
-            let c = 20.0; // Tamano de la zona de las esquinas
-            // Helper para crear una capa de redimension alineada
-
-            // Envuelve la zona sensible en un contenedor de pantalla completa para posicionarla
-
-            let handle = |dir: ResizeDirection,
-
-                          interaction: Interaction,
-
-                          w: Length,
-
-                          h: Length,
-
-                          align_x: Alignment,
-
-                          align_y: Alignment| {
-                container(
-                    mouse_area(
-                        container(Space::new())
-                            .width(w)
-                            .height(h)
-                            .style(|_| container::Style::default()), // Transparente
-                    )
-                    .on_press(Message::ResizePressed(dir))
-                    .on_release(Message::ResizeReleased)
-                    .interaction(interaction),
-                )
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .align_x(align_x)
-                .align_y(align_y)
-            };
-            let resize_handles = stack![
-                // 1. Bordes (Lados) - Ocupan todo el largo/ancho correspondiente
-                handle(
-                    ResizeDirection::North,
-                    Interaction::ResizingVertically,
-                    Length::Fill,
-                    Length::Fixed(b),
-                    Alignment::Center,
-                    Alignment::Start
-                ),
-                handle(
-                    ResizeDirection::South,
-                    Interaction::ResizingVertically,
-                    Length::Fill,
-                    Length::Fixed(b),
-                    Alignment::Center,
-                    Alignment::End
-                ),
-                handle(
-                    ResizeDirection::West,
-                    Interaction::ResizingHorizontally,
-                    Length::Fixed(b),
-                    Length::Fill,
-                    Alignment::Start,
-                    Alignment::Center
-                ),
-                handle(
-                    ResizeDirection::East,
-                    Interaction::ResizingHorizontally,
-                    Length::Fixed(b),
-                    Length::Fill,
-                    Alignment::End,
-                    Alignment::Center
-                ),
-                // 2. Esquinas - Prioridad sobre los bordes (por estar despues en el stack)
-
-                // NW (Arriba-Izquierda) -> Cursor \
-                handle(
-                    ResizeDirection::NorthWest,
-                    Interaction::ResizingDiagonallyDown,
-                    Length::Fixed(c),
-                    Length::Fixed(c),
-                    Alignment::Start,
-                    Alignment::Start
-                ),
-                // NE (Arriba-Derecha)   -> Cursor /
-                handle(
-                    ResizeDirection::NorthEast,
-                    Interaction::ResizingDiagonallyUp,
-                    Length::Fixed(c),
-                    Length::Fixed(c),
-                    Alignment::End,
-                    Alignment::Start
-                ),
-                // SW (Abajo-Izquierda)  -> Cursor /
-                handle(
-                    ResizeDirection::SouthWest,
-                    Interaction::ResizingDiagonallyUp,
-                    Length::Fixed(c),
-                    Length::Fixed(c),
-                    Alignment::Start,
-                    Alignment::End
-                ),
-                // SE (Abajo-Derecha)    -> Cursor \
-                handle(
-                    ResizeDirection::SouthEast,
-                    Interaction::ResizingDiagonallyDown,
-                    Length::Fixed(c),
-                    Length::Fixed(c),
-                    Alignment::End,
-                    Alignment::End
-                ),
-            ];
-            // STACK FINAL: resize_handles DEBE ser el ultimo elemento para capturar eventos
-
-            let final_stack = stack![
-                window_frame,   // Contenido visual abajo
-                resize_handles  // Capa invisible de control arriba
-            ];
-            // Aplicar cursor segun estado de ocultamiento
-
-            let final_mouse_area = mouse_area(final_stack)
-                .interaction(self.get_cursor_interaction())
-                .on_press(Message::MousePressed);
-            // [OPTIMIZATION] Only track mouse move if LSD is active to save 90+ CPU
-
-            if self.settings.theme.lsd_mode || self.lsd_preview {
-                final_mouse_area.on_move(Message::CursorMoved).into()
-            } else {
-                final_mouse_area.into()
-            }
+            window_frame_area.into()
         }
     }
     /// Creates a tray icon with the appropriate menu based on game state

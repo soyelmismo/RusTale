@@ -50,11 +50,8 @@ pub struct LsdShader {
 
 impl LsdShader {
     pub fn new(
-        _start_time: Instant,
         mouse_pos: Point,
         accent: Color,
-        _shader_id: u32, // Ignoramos IDs, solo existe Uno.
-        _alpha: f32,
         intensity: f32,
     ) -> Self {
         use rand::Rng; // Importante: usar 'rand' para acceder al Kernel PRNG

@@ -23,7 +23,6 @@ pub enum LauncherStatus {
 ///
 /// Returns: (Status, Optional<remote_version>)
 pub async fn calculate_status(
-    client: &reqwest::Client,
     settings: &GameSettings,
     paths: &GamePaths,
     cached_remote_latest: Option<i32>,

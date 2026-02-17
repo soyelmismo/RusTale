@@ -13,10 +13,12 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
 /// Security guard to clean up temporary files when exiting the scope via Drop.
+#[cfg(target_os = "windows")]
 struct FileCleanupGuard {
     path: PathBuf,
 }
 
+#[cfg(target_os = "windows")]
 impl Drop for FileCleanupGuard {
     fn drop(&mut self) {
         if self.path.exists() {
@@ -191,7 +193,6 @@ impl Recipe for Runner {
                 let install_settings = settings.clone();
                 let install_client = client.clone();
                 let install_base = base_dir.clone();
-                let install_client_clone = install_client.clone();
                 let install_base_clone = install_base.clone();
                 let install_channel_clone = install_settings.channel.clone();
 
@@ -372,8 +373,6 @@ impl Recipe for Runner {
                 // Variable to decide what value to send to the DLL
                 let mut aurora_env_value = "local".to_string();
 
-                let mut _cleanup_guard: Option<FileCleanupGuard> = None;
-
                 let mut server_port = crate::util::get_saved_port();
                 if !auth_server::is_server_alive(server_port).await {
                     server_port = crate::util::find_free_port();
@@ -532,7 +531,6 @@ impl Recipe for Runner {
 
                 // Aurora ya está disponible en tools/aurora{DLL_SUFFIX}
                 // En Windows se copia a la carpeta del cliente como Secur32.dll
-                let mut _cleanup_guard: Option<FileCleanupGuard> = None;
                 if settings.enable_online_fix {
                     let tools_aurora_path = crate::config::get_app_dir()
                         .join("tools")
@@ -560,7 +558,10 @@ impl Recipe for Runner {
                         }
 
                         // Initialize the guard
-                        _cleanup_guard = Some(FileCleanupGuard { path: dll_path });
+                        let security_cleanup_guard = FileCleanupGuard { path: dll_path };
+                        println!("[Runner] Security cleanup guard initialized for {:?}", security_cleanup_guard.path);
+                        // Store it in a variable that lasts the scope
+                        let _active_guard = security_cleanup_guard;
                         println!("[Runner] Aurora copied to Secur32.dll");
                     }
 

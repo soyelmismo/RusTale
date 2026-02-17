@@ -4,7 +4,6 @@ use std::sync::{Arc, atomic::AtomicBool};
 
 use super::PatchApiManager;
 use super::utils::*;
-use crate::game::paths::GamePaths;
 
 /// Downloader for game patches using the new patch API system
 #[derive(Clone)]
@@ -19,14 +18,12 @@ impl PatchDownloader {
     pub async fn download_patch(
         &self,
         client: &reqwest::Client,
-        base_dir: &PathBuf,
         channel: &str,
         from_version: i32,
         to_version: i32,
         progress_callback: impl Fn(&str, f64, &str, u64, u64, Option<String>, Option<usize>),
         cancel_token: Option<Arc<AtomicBool>>,
     ) -> Result<PathBuf> {
-        let paths = GamePaths::new(base_dir.clone());
         let cache_dir = crate::config::get_cache_dir("patches").await;
         tokio::fs::create_dir_all(&cache_dir).await?;
 
@@ -53,6 +50,8 @@ impl PatchDownloader {
 
         // Download if not cached
         if !patch_path.exists() {
+            let cancel_token_clone = cancel_token.clone(); // Clone before first use
+            
             progress_callback(
                 "patch",
                 0.0,
@@ -91,6 +90,34 @@ impl PatchDownloader {
                 None,
                 Some(0),
             );
+
+            // Validate downloaded patch integrity with high-fidelity checks
+            let checker = super::integrity_checker::IntegrityChecker::new();
+            
+            // First, validate patch format
+            if let Ok(format_res) = checker.validate_patch_format(&patch_path) {
+                if !format_res.is_valid() {
+                    let _ = tokio::fs::remove_file(&patch_path).await;
+                    anyhow::bail!("Downloaded file is not a valid PWR/ZIP patch");
+                }
+                println!("[Downloader] Verified patch format: {:?}", format_res.format);
+            }
+            
+            let integrity_callback = |p: f64, m: &str| {
+                println!("[Integrity] {:.0}% - {}", p * 100.0, m);
+            };
+            let integrity_res = checker.verify_download_integrity(
+                &patch_path, 
+                None, // Add signature path if available in future
+                None, 
+                Some(integrity_callback),
+                cancel_token_clone
+            ).await?;
+
+            if !integrity_res.is_valid() {
+                let _err = tokio::fs::remove_file(&patch_path).await;
+                anyhow::bail!("Integrity check failed: {:?}", integrity_res.errors);
+            }
         } else {
             progress_callback(
                 "patch",
@@ -110,7 +137,6 @@ impl PatchDownloader {
     pub async fn download_complete_version(
         &self,
         client: &reqwest::Client,
-        base_dir: &PathBuf,
         channel: &str,
         target_version: i32,
         progress_callback: impl Fn(&str, f64, &str, u64, u64, Option<String>, Option<usize>),
@@ -118,7 +144,6 @@ impl PatchDownloader {
     ) -> Result<PathBuf> {
         self.download_patch(
             client,
-            base_dir,
             channel,
             0,
             target_version,
@@ -131,7 +156,6 @@ impl PatchDownloader {
     /// Checks if patch is cached
     pub async fn is_patch_cached(
         &self,
-        base_dir: &PathBuf,
         from_version: i32,
         to_version: i32,
     ) -> Result<bool> {
@@ -145,29 +169,5 @@ impl PatchDownloader {
         );
         let patch_path = cache_dir.join(&filename);
         Ok(patch_path.exists())
-    }
-
-    /// Gets cached patch path if exists
-    pub async fn get_cached_patch_path(
-        &self,
-        base_dir: &PathBuf,
-        from_version: i32,
-        to_version: i32,
-    ) -> Result<Option<PathBuf>> {
-        let cache_dir = crate::config::get_cache_dir("patches").await;
-        let filename = format!(
-            "{}~{}-{}-{}.pwr",
-            from_version,
-            to_version,
-            std::env::consts::OS,
-            get_arch_name()
-        );
-        let patch_path = cache_dir.join(&filename);
-
-        if patch_path.exists() {
-            Ok(Some(patch_path))
-        } else {
-            Ok(None)
-        }
     }
 }

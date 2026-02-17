@@ -7,7 +7,7 @@ use iced::event::Event;
 use iced::overlay::menu;
 use iced::widget::{
     Space, button, checkbox, column, container, pick_list, progress_bar, row as iced_row,
-    scrollable, slider, svg as iced_svg, text as iced_text, text_input,
+    scrollable, slider, text as iced_text, text_input,
 };
 use iced::{
     Background, Border, Color, Element, Length, Point, Rectangle, Renderer, Shadow, Size, Theme,
@@ -2182,123 +2182,6 @@ pub fn window_frame_style(palette: &Palette, _t: &Theme, is_maximized: bool) -> 
         },
         ..Default::default()
     }
-}
-
-pub fn title_bar_style(
-    palette: &Palette,
-    _t: &Theme,
-    base_mode: &crate::config::BaseThemeMode,
-) -> container::Style {
-    use crate::config::BaseThemeMode;
-
-    // Obtenemos el multiplicador de desvanecimiento desde la paleta
-    let ui_a = palette.background.a;
-
-    let background_color = match base_mode {
-        BaseThemeMode::Light => Color {
-            a: 0.95 * ui_a,
-            ..Color::from_rgb(0.95, 0.95, 0.97)
-        },
-        BaseThemeMode::Grey => Color {
-            a: 0.9 * ui_a,
-            ..Color::from_rgb(0.15, 0.15, 0.18)
-        },
-        BaseThemeMode::Black => Color {
-            a: 0.9 * ui_a,
-            ..Color::from_rgb(0.05, 0.05, 0.08)
-        },
-    };
-
-    container::Style {
-        background: Some(Background::Color(background_color)),
-        text_color: Some(palette.text_primary),
-        ..Default::default()
-    }
-}
-
-// Boton de control de ventana (Min/Max/Close)
-pub fn window_control_button_style(
-    palette: &Palette,
-    _t: &Theme,
-    status: button::Status,
-    is_close: bool,
-) -> button::Style {
-    let ui_a = palette.background.a;
-    let base = button::Style {
-        background: None,
-        text_color: palette.text_secondary,
-        ..Default::default()
-    };
-
-    match status {
-        button::Status::Hovered | button::Status::Pressed => {
-            if is_close {
-                button::Style {
-                    // El rojo del boton cerrar tambien debe desvanecerse
-                    background: Some(Background::Color(Color {
-                        a: 0.9 * ui_a,
-                        ..Color::from_rgb(0.9, 0.2, 0.2)
-                    })),
-                    text_color: Color {
-                        a: 1.0 * ui_a,
-                        ..Color::WHITE
-                    },
-                    ..base
-                }
-            } else {
-                button::Style {
-                    background: Some(Background::Color(Color {
-                        a: 0.1 * ui_a,
-                        ..Color::WHITE
-                    })),
-                    text_color: palette.text_primary,
-                    ..base
-                }
-            }
-        }
-        _ => base,
-    }
-}
-
-// Helper widget para botones de ventana
-pub fn window_control_button<'a, Message: Clone + 'a>(
-    icon_svg: &'static str,
-    msg: Message,
-    is_close: bool,
-    palette: Palette,
-    ctx: UIContext,
-) -> Element<'a, Message, Theme, Renderer> {
-    let btn = button(
-        container(
-            iced_svg(crate::util::icons::icon(icon_svg))
-                .width(12)
-                .height(12)
-                .opacity(ctx.palette.text_primary.a) // <--- CRiTICO: Opacidad dinamica para SVGs
-                .style(move |_t, _s| iced::widget::svg::Style {
-                    color: Some(if is_close {
-                        if palette.background.r > 0.5 {
-                            Color::BLACK // Icono negro para tema claro
-                        } else {
-                            Color::WHITE // Icono blanco para tema oscuro
-                        }
-                    } else {
-                        palette.text_primary
-                    }),
-                }),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .center_x(Length::Fill)
-        .center_y(Length::Fill),
-    )
-    .on_press(msg)
-    .width(45) // Ancho estandar de boton de ventana
-    .height(32) // Altura completa de la barra
-    .style(move |t, s| window_control_button_style(&palette, t, s, is_close));
-
-    // Aplicar LSD sutil (solo movimiento, no "derretimiento" excesivo para que sean clickeables)
-    // SIEMPRE usamos magic_button para mantener estabilidad del arbol de widgets
-    magic_button(btn.into(), ctx)
 }
 
 // --- FUNCIONES PARA COLORES Y ESTILOS CENTRALIZADOS ---

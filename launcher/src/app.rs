@@ -8,7 +8,7 @@ use crate::config;
 /// Equivalente a startup() y env.CreateFolders() en Go.
 pub async fn initialize() -> Result<()> {
     // Initialize the new patch API system
-    crate::game::patch_api::PatchApiFrontend::get_instance();
+    crate::game::patch_api::init_shared_cache();
 
     let base_dir = config::get_app_dir();
 
@@ -54,6 +54,21 @@ async fn cleanup_launcher(base_dir: &PathBuf) {
     // Rotacion basica de logs (Placeholder para logica mas compleja)
     let logs_dir = base_dir.join("logs");
     cleanup_old_files(&logs_dir, 7).await; // Borrar logs de mas de 7 dias
+
+    // NEW: Use the shared cache cleanup logic
+    let cleanup_result = crate::game::patch_api::get_shared_cache().cleanup_old_patches().await;
+    if let Ok(count) = cleanup_result {
+        println!("[Cache] Purged {} old patches", count);
+    }
+
+    // Inside cleanup_launcher
+    let cleanup_task = crate::game::patcher::clean_patches_cache(|p, msg, _, _, _, _| {
+        println!("[Cleanup] {}% - {}", p, msg);
+    }).await;
+
+    if let Err(e) = cleanup_task {
+        eprintln!("Cache cleanup failed: {}", e);
+    }
 }
 
 // Funcion auxiliar nueva

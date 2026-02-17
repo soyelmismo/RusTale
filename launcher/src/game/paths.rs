@@ -179,11 +179,7 @@ impl GamePaths {
         path
     }
 
-    /// Game directory (root for all game installations)
-    pub fn game_dir(&self) -> PathBuf {
-        self.root.clone()
-    }
-
+    
     /// Logs directory
     /// Automatically creates directory if it doesn't exist
     pub fn logs(&self) -> PathBuf {

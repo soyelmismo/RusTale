@@ -1,7 +1,6 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::sync::{Arc, atomic::AtomicBool};
-use tokio::io::AsyncBufReadExt;
 
 use crate::game::patch_api::get_butler_fallback_url;
 use crate::game::paths::GamePaths;

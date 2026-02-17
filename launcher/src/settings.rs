@@ -216,7 +216,7 @@ impl SettingsState {
     fn view_launcher_tab<'a>(
         &'a self,
         localization: &'a crate::lang::Localization,
-        _is_compact: bool, // Recibimos el parametro
+        is_compact: bool, // Recibimos el parametro
         ctx: theme::UIContext,
     ) -> Element<'a, SettingsMessage> {
         let palette = ctx.palette;
@@ -434,7 +434,7 @@ impl SettingsState {
                 Space::new().height(10).into(),
                 news_checkbox.into(),
                 auto_update_chk.into(),
-                self.view_update_check_button(localization, _is_compact, ctx),
+                self.view_update_check_button(localization, is_compact, ctx),
                 minimize_tray_chk.into(),
                 minimize_play_chk.into(),
                 quickplay_chk.into(),

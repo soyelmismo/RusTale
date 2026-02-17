@@ -88,32 +88,4 @@ impl VersionManager {
         PatchApiManager::get_latest_version_static(channel, os, arch).await
     }
 
-    /// Gets all available versions for a channel
-    pub async fn get_available_versions(&self, channel: &str) -> Result<Vec<i32>> {
-        let os = std::env::consts::OS;
-        let arch = get_arch_name();
-
-        PatchApiManager::get_available_versions_static(channel, os, arch).await
-    }
-
-    /// Checks if a specific version exists
-    pub async fn version_exists(&self, channel: &str, version: i32) -> bool {
-        let os = std::env::consts::OS;
-        let arch = get_arch_name();
-
-        PatchApiManager::has_complete_version_static(channel, os, arch, version).await
-    }
-
-    /// Gets patch download URL for a version range
-    pub async fn get_patch_url(
-        &self,
-        channel: &str,
-        from_version: i32,
-        to_version: i32,
-    ) -> Result<String> {
-        let os = std::env::consts::OS;
-        let arch = get_arch_name();
-
-        PatchApiManager::get_patch_url_static(channel, os, arch, from_version, to_version).await
-    }
 }

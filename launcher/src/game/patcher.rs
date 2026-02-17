@@ -1,6 +1,4 @@
 use anyhow::{Context, Result};
-use futures::StreamExt;
-use futures::io::AsyncBufReadExt as FuturesAsyncBufReadExt;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::{
@@ -8,7 +6,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 use tokio::io::BufReader;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufWriter};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufWriter};
 use tokio::process::Command;
 
 /// Game version information structure
@@ -345,7 +343,6 @@ fn parse_butler_line(line: &str) -> Option<f32> {
 pub async fn clean_patches_cache(
     progress_callback: impl Fn(f32, &str, u64, u64, Option<String>, Option<usize>),
 ) -> Result<()> {
-    let base_dir = crate::config::get_app_dir();
 
     progress_callback(0.0, "Cleaning patches cache...", 0, 0, None, None);
 

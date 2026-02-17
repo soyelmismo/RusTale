@@ -1,4 +1,4 @@
-// Not being used since the endpoint now requires authentication
+// Temporally not being used since the endpoint now requires authentication. Keep this.
 
 use async_trait::async_trait;
 use reqwest::Client;

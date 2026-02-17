@@ -102,13 +102,27 @@ impl RusTale {
         let settings = self.settings.clone();
         let settings_for_closure = settings.clone();
         let paths = self.paths.clone();
-        let client = self.services.api_client.clone();
 
         // CAMBIO: Pasamos el latest_version que ya tenemos en memoria (si existe)
         let cached_version = self.latest_version;
 
         Task::perform(
-            async move { game::calculate_status(&client, &settings, &paths, cached_version).await },
+            async move {
+                // Log cache stats during status check
+                if let Ok(stats) = crate::game::patch_api::get_shared_cache().get_cache_stats().await {
+                    if stats.file_count > 0 {
+                        println!(
+                            "[Cache] {} files, {} (oldest: {} days, newest: {} days)",
+                            stats.file_count,
+                            stats.size_formatted(),
+                            stats.oldest_age_days,
+                            stats.newest_age_days
+                        );
+                    }
+                }
+                
+                game::calculate_status(&settings, &paths, cached_version).await
+            },
             move |(status, latest)| Message::DryRunFinished(settings_for_closure, status, latest),
         )
     }
@@ -152,6 +166,13 @@ impl RusTale {
 
         Task::perform(
             async move {
+                // Validate version exists before starting network task
+                let os = std::env::consts::OS;
+                let arch = crate::game::patch_api::utils::get_arch_name();
+                if !crate::game::patch_api::PatchApiManager::has_complete_version_static(&channel, os, arch, version as i32).await {
+                    return Message::RepairFinished(Err("Version no longer exists on remote".to_string()));
+                }
+
                 let _version_str = if version == 0 {
                     "latest".to_string()
                 } else {

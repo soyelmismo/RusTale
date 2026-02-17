@@ -24,7 +24,7 @@ pub async fn download_file(
     }
 
     let mut total_size = 0u64;
-    let _download_start_time = std::time::Instant::now();
+    let download_start_time = std::time::Instant::now();
 
     if let Ok(resp) = client.head(url).send().await {
         if resp.status().is_success() {
@@ -207,5 +207,9 @@ pub async fn download_file(
 
     tokio::fs::rename(&temp_destination, destination).await?;
     progress_callback(100.0, "Complete".to_string(), total_size, total_size, None);
+    
+    let duration = download_start_time.elapsed();
+    println!("[Downloader] Finished {} in {:.2}s", url, duration.as_secs_f32());
+    
     Ok(())
 }

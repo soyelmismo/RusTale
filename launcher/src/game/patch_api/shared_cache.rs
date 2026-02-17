@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::sync::{Arc, atomic::AtomicBool};
 
-use super::{PatchApiManager, PatchDownloader};
+use super::PatchDownloader;
 
 /// Shared cache manager for patch downloads
 /// This ensures both client and server use the same cache files
@@ -17,30 +17,26 @@ impl SharedCacheManager {
     pub async fn get_or_download_patch(
         &self,
         client: &reqwest::Client,
-        base_dir: &PathBuf,
         channel: &str,
         from_version: i32,
         to_version: i32,
         progress_callback: impl Fn(&str, f64, &str, u64, u64, Option<String>, Option<usize>),
         cancel_token: Option<Arc<AtomicBool>>,
     ) -> Result<PathBuf> {
-        // Check if patch is already cached
-        if let Some(cached_path) = self
-            .get_cached_patch_path(base_dir, from_version, to_version)
-            .await?
-        {
-            if cached_path.exists() {
+        // Use the downloader's built-in check
+        let downloader = PatchDownloader::new();
+        if downloader.is_patch_cached(from_version, to_version).await.unwrap_or(false) {
+            let cached_path = self.get_cached_patch_path(from_version, to_version).await?;
+            if let Some(path) = cached_path {
                 progress_callback("cache", 100.0, "Using cached patch", 0, 0, None, Some(0));
-                return Ok(cached_path);
+                return Ok(path);
             }
         }
 
         // Download patch using the new patch API system
-        let downloader = PatchDownloader::new();
         downloader
             .download_patch(
                 client,
-                base_dir,
                 channel,
                 from_version,
                 to_version,
@@ -53,7 +49,6 @@ impl SharedCacheManager {
     /// Get cached patch path if exists
     pub async fn get_cached_patch_path(
         &self,
-        base_dir: &PathBuf,
         from_version: i32,
         to_version: i32,
     ) -> Result<Option<PathBuf>> {

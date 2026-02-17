@@ -178,27 +178,6 @@ impl IntegrityChecker {
         Ok(())
     }
 
-    /// Verifies the installation directory structure
-    /// Checks if critical game files exist in the installation directory
-    pub async fn verify_install_dir(&self, game_dir: &PathBuf) -> anyhow::Result<()> {
-        let critical_paths = vec![
-            "Client",
-            if cfg!(windows) {
-                "Client/HytaleClient.exe"
-            } else {
-                "Client/HytaleClient"
-            },
-        ];
-
-        for path in &critical_paths {
-            if !game_dir.join(path).exists() {
-                anyhow::bail!("Missing critical file: {}", path);
-            }
-        }
-
-        Ok(())
-    }
-
     /// Verifies patch file integrity using SHA256 (Offloaded to Blocking Thread)
     pub async fn verify_patch_integrity<F>(
         &self,
@@ -504,22 +483,10 @@ impl IntegrityChecker {
             }
         }
 
+        // Note: warnings field and has_warnings() method were removed from IntegrityResult
+        // This section is no longer needed as warnings are not tracked
+
         Ok(result)
-    }
-
-    /// Performs quick integrity check (size and existence only)
-    pub async fn quick_integrity_check(&self, patch_path: &PathBuf) -> Result<bool> {
-        if !patch_path.exists() {
-            return Ok(false);
-        }
-
-        let metadata = fs::metadata(patch_path)
-            .await
-            .context("Failed to get patch metadata")?;
-
-        // Check if file has reasonable size (> 0 and < 10GB)
-        let size = metadata.len();
-        Ok(size > 0 && size < 10_000_000_000)
     }
 
     /// Validates patch file format
@@ -576,7 +543,6 @@ pub struct IntegrityResult {
     pub checksum_valid: bool,
     pub signature_valid: bool,
     pub errors: Vec<String>,
-    pub warnings: Vec<String>,
 }
 
 impl IntegrityResult {
@@ -588,16 +554,11 @@ impl IntegrityResult {
             checksum_valid: false,
             signature_valid: false,
             errors: Vec::new(),
-            warnings: Vec::new(),
         }
     }
 
     pub fn is_valid(&self) -> bool {
         self.valid && self.errors.is_empty()
-    }
-
-    pub fn has_warnings(&self) -> bool {
-        !self.warnings.is_empty()
     }
 }
 
@@ -607,7 +568,6 @@ pub struct FormatValidationResult {
     pub valid: bool,
     pub format: Option<String>,
     pub errors: Vec<String>,
-    pub warnings: Vec<String>,
 }
 
 impl FormatValidationResult {
@@ -616,7 +576,6 @@ impl FormatValidationResult {
             valid: true,
             format: None,
             errors: Vec::new(),
-            warnings: Vec::new(),
         }
     }
 

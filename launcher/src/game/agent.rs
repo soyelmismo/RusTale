@@ -8,7 +8,7 @@ pub async fn ensure_agent(
     client: &reqwest::Client,
     root_dir: &PathBuf,
     progress_callback: &impl Fn(&str, f64, &str),
-    _cancel_token: Option<Arc<AtomicBool>>,
+    cancel_token: Option<Arc<AtomicBool>>,
 ) -> anyhow::Result<PathBuf> {
     let paths = crate::game::paths::GamePaths::new(root_dir.clone());
     let agent_path = paths.dualauth_agent();
@@ -63,7 +63,7 @@ pub async fn ensure_agent(
             client,
             AGENT_URL,
             &agent_path,
-            |pct, speed, total, downloaded, eta| {
+            |pct, speed, total, downloaded, estimated_time| {
                 let size_info = if total > 0 {
                     format!(
                         "{} / {}",
@@ -74,8 +74,8 @@ pub async fn ensure_agent(
                     crate::game::patch_api::utils::format_bytes(downloaded)
                 };
 
-                let eta_info = if let Some(eta_str) = &eta {
-                    format!(" • ETA: {}", eta_str)
+                let eta_info = if let Some(estimated_time) = &estimated_time {
+                    format!(" • ETA: {}", estimated_time)
                 } else {
                     String::new()
                 };
@@ -89,7 +89,7 @@ pub async fn ensure_agent(
                     ),
                 );
             },
-            _cancel_token,
+            cancel_token,
         )
         .await?;
 

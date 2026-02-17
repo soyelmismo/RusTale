@@ -86,13 +86,12 @@ impl ShipOfYarnProvider {
         }
     }
 
-    fn get_files_for_current_os(channel_data: &PlatformData) -> Result<&HashMap<String, String>> {
-        let os_name = std::env::consts::OS;
-        match os_name {
+    fn get_files_for_current_os<'a>(channel_data: &'a PlatformData, os: &str) -> Result<&'a HashMap<String, String>> {
+        match os {
             "linux" => Ok(&channel_data.linux.files),
             "windows" => Ok(&channel_data.windows.files),
             "macos" => Ok(&channel_data.mac.files),
-            _ => anyhow::bail!("Unsupported OS: {}", os_name),
+            _ => anyhow::bail!("Unsupported OS: {}", os),
         }
     }
 
@@ -114,10 +113,10 @@ impl ShipOfYarnProvider {
     ) -> Result<String> {
         let data = self.fetch_data().await?;
         let channel_data = self.get_channel(&data, channel)?;
-        let os_data = Self::get_files_for_current_os(channel_data)?;
+        let os_data = Self::get_files_for_current_os(channel_data, os)?;
 
         // Try different filename patterns
-        let possible_filenames = vec![
+        let possible_filenames: Vec<String> = vec![
             // Complete version: "v8-linux-amd64.pwr"
             format!("v{}-{}-{}.pwr", target_version, os, arch),
             // Incremental: "v7~8-linux-amd64.pwr"
@@ -154,22 +153,26 @@ impl PatchProvider for ShipOfYarnProvider {
         }
     }
 
-    async fn get_latest_version(&self, channel: &str, os: &str, _arch: &str) -> Result<i32> {
+    async fn get_latest_version(&self, channel: &str, os: &str, arch: &str) -> Result<i32> {
         let data = self.fetch_data().await?;
         let channel_data = self.get_channel(&data, channel)?;
-        let os_data = Self::get_files_for_current_os(channel_data)?;
+        let os_data = Self::get_files_for_current_os(channel_data, os)?;
 
         let mut max_version = 0;
+        let arch_pattern = format!("-{}.", arch);
         for filename in os_data.keys() {
-            if let Some(version) = Self::extract_version_from_filename(filename) {
-                if version > max_version {
-                    max_version = version;
+            // Filter files by architecture
+            if filename.contains(&arch_pattern) {
+                if let Some(version) = Self::extract_version_from_filename(filename) {
+                    if version > max_version {
+                        max_version = version;
+                    }
                 }
             }
         }
 
         if max_version == 0 {
-            anyhow::bail!("No versions found for channel {} on {}", channel, os);
+            anyhow::bail!("No versions found for channel {} on {}-{}", channel, os, arch);
         }
 
         Ok(max_version)
@@ -179,11 +182,11 @@ impl PatchProvider for ShipOfYarnProvider {
         &self,
         channel: &str,
         os: &str,
-        _arch: &str,
+        arch: &str,
     ) -> Result<Vec<i32>> {
         let data = self.fetch_data().await?;
         let channel_data = self.get_channel(&data, channel)?;
-        let os_data = Self::get_files_for_current_os(channel_data)?;
+        let os_data = Self::get_files_for_current_os(channel_data, os)?;
 
         let mut complete_versions = std::collections::HashSet::new();
         let mut incremental_versions = std::collections::HashSet::new();
@@ -192,21 +195,25 @@ impl PatchProvider for ShipOfYarnProvider {
         complete_versions.insert(0);
 
         // Extract version numbers from filenames
+        let arch_pattern = format!("-{}.", arch);
         for filename in os_data.keys() {
-            if let Some((from_ver, to_ver)) = extract_versions_from_filename(filename) {
-                if from_ver == 0 {
-                    // Complete version: v6-linux-amd64.pwr (extracted as 0->6)
-                    complete_versions.insert(to_ver);
-                } else {
-                    // Incremental: v5~6-linux-amd64.pwr
-                    incremental_versions.insert(from_ver);
-                    incremental_versions.insert(to_ver);
+            // Filter files by architecture
+            if filename.contains(&arch_pattern) {
+                if let Some((from_ver, to_ver)) = extract_versions_from_filename(filename) {
+                    if from_ver == 0 {
+                        // Complete version: v6-linux-amd64.pwr (extracted as 0->6)
+                        complete_versions.insert(to_ver);
+                    } else {
+                        // Incremental: v5~6-linux-amd64.pwr
+                        incremental_versions.insert(from_ver);
+                        incremental_versions.insert(to_ver);
+                    }
                 }
             }
         }
 
         if complete_versions.is_empty() && incremental_versions.is_empty() {
-            anyhow::bail!("No versions found for channel {} on {}", channel, os);
+            anyhow::bail!("No versions found for channel {} on {}-{}", channel, os, arch);
         }
 
         // For pre-release channels, we need to include all incremental versions
@@ -245,7 +252,7 @@ impl PatchProvider for ShipOfYarnProvider {
     ) -> Result<bool> {
         let data = self.fetch_data().await?;
         let channel_data = self.get_channel(&data, channel)?;
-        let os_data = Self::get_files_for_current_os(channel_data)?;
+        let os_data = Self::get_files_for_current_os(channel_data, os)?;
 
         let expected_filename = format!("v{}-{}-{}.pwr", version, os, arch);
         Ok(os_data.contains_key(&expected_filename))

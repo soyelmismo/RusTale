@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
-use std::sync::atomic;
 
 pub mod proxy;
 

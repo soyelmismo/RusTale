@@ -8,7 +8,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 // Import patch_api for shared cache functionality
-use crate::game::patch_api::{PatchApiFrontend, get_shared_cache};
+use crate::game::patch_api::PatchApiFrontend;
 
 pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     println!("--- RusTale Dedicated Server ---");
@@ -150,19 +150,12 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
                     downloaded: u64,
                     eta: Option<String>,
                     _step: Option<usize>| {
-        let eta_str = eta.map(|e| format!(" • ETA: {}", e)).unwrap_or_default();
-        if pct == 0.0 || pct == 100.0 {
-            let size_info = if total > 0 {
-                format!(
-                    " ({} / {})",
-                    crate::game::patch_api::utils::format_bytes(downloaded),
-                    crate::game::patch_api::utils::format_bytes(total)
-                )
-            } else {
-                String::new()
-            };
-
-            println!("{}... {}% ({}{})", task, pct, msg, eta_str);
+        let eta_str = eta.as_ref().map(|e| format!(" • ETA: {}", e)).unwrap_or_default();
+        if total > 0 {
+            let size_info = format!("{}/{}", crate::game::patch_api::utils::format_bytes(downloaded), crate::game::patch_api::utils::format_bytes(total));
+            println!("[{}] {:.1}% - {} ({}){}", task, pct, msg, size_info, eta_str);
+        } else {
+            println!("[{}] {:.1}% - {}{}", task, pct, msg, eta_str);
         }
     };
 
@@ -190,7 +183,8 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         tokio::task::spawn_blocking(move || crate::util::copy_recursive_sync(mt, st)).await??;
     }
 
-    let _java_info = crate::java_detection::ensure_java_available(&root_dir).await?;
+    let java_info = crate::java_detection::ensure_java_available(&root_dir).await?;
+    println!("[Server] Environment verified: Java {}", java_info.version);
     let patch_frontend = PatchApiFrontend::get_instance();
     let _butler_path = patch_frontend
         .install_butler(&client, &root_dir, callback, None)
@@ -450,7 +444,6 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         let patch_path = cache
             .get_or_download_patch(
                 &client,
-                &root_dir, // Download into server root
                 &config.branch,
                 0,
                 target_ver_num,

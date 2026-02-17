@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
-use std::sync::atomic;
 use tokio::fs;
 
 /// Installation policy - defines the intent of the installation operation
@@ -104,28 +103,4 @@ pub async fn get_installed_versions(base_dir: &PathBuf, channel: &str) -> Vec<(i
 
     installed.sort_by(|a, b| b.0.cmp(&a.0));
     installed
-}
-
-/// Deletes a specific version
-pub async fn delete_version(base_dir: &PathBuf, channel: &str, version: i32) -> Result<()> {
-    let version_dir = base_dir.join(channel).join(version.to_string());
-
-    if version_dir.exists() {
-        fs::remove_dir_all(&version_dir).await?;
-    }
-
-    if let Ok(local_ver) = get_local_version(base_dir, channel).await {
-        if local_ver == version {
-            let latest_dir = base_dir.join(channel).join("latest");
-            if latest_dir.exists() {
-                fs::remove_dir_all(&latest_dir).await?;
-            }
-            let version_file = base_dir.join(channel).join("version.json");
-            if version_file.exists() {
-                let _ = fs::remove_file(version_file).await;
-            }
-        }
-    }
-
-    Ok(())
 }
