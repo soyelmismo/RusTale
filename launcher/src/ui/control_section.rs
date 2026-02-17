@@ -4,16 +4,6 @@ use crate::{Message, theme, util};
 use iced::widget::{ProgressBar, Space, button, column, container, row, svg};
 use iced::{Alignment, Element, Length};
 
-fn format_bytes(bytes: u64) -> String {
-    if bytes > 1_000_000 {
-        format!("{:.1} MB", bytes as f64 / 1_000_000.0)
-    } else if bytes > 1_000 {
-        format!("{:.1} KB", bytes as f64 / 1_000.0)
-    } else {
-        format!("{} B", bytes)
-    }
-}
-
 pub fn view<'a>(
     status: &'a LauncherStatus,
     settings: &'a GameSettings,
@@ -239,8 +229,8 @@ pub fn view<'a>(
                 if total_bytes > 0 {
                     row![
                         theme::text_micro(format!("{}/{}", 
-                            format_bytes(downloaded_bytes), 
-                            format_bytes(total_bytes)
+                            crate::game::patch_api::utils::format_bytes(downloaded_bytes), 
+                            crate::game::patch_api::utils::format_bytes(total_bytes)
                         ), ctx),
                         Space::new().width(Length::Fill),
                         if !speed_str.is_empty() {

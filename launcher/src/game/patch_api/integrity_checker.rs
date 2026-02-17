@@ -1,23 +1,182 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::{Arc, atomic::AtomicBool};
 use std::fs::File;
 use std::io::Read;
+use tokio::fs;
+use tokio::io::AsyncReadExt;
 use ed25519_dalek::VerifyingKey;
 use tokio::task;
 
-use super::PatchApiManager;
 use sha2::{Sha256, Digest};
 
 /// Integrity checker for patches and downloads using the new patch API system
 #[derive(Clone)]
 pub struct IntegrityChecker {
-    api_manager: Arc<PatchApiManager>,
+    // No api_manager field needed for integrity checks
 }
 
 impl IntegrityChecker {
-    pub fn new(api_manager: Arc<PatchApiManager>) -> Self {
-        Self { api_manager }
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    /// Validates the integrity of a PWR patch file
+    /// Checks if the file exists, is readable, and has valid content
+    pub async fn validate_patch_file(&self, pwr_path: &PathBuf) -> anyhow::Result<()> {
+        use tokio::fs;
+        
+        // Check if file exists
+        if !pwr_path.exists() {
+            anyhow::bail!("Patch file does not exist: {}", pwr_path.display());
+        }
+        
+        // Check file size (should be greater than 0)
+        let metadata = fs::metadata(pwr_path).await
+            .context("Failed to read patch file metadata")?;
+        
+        if metadata.len() == 0 {
+            anyhow::bail!("Patch file is empty: {}", pwr_path.display());
+        }
+        
+        // Try to read first few bytes to verify it's a valid file
+        let mut file = fs::File::open(pwr_path).await
+            .context("Failed to open patch file")?;
+        
+        let mut buffer = [0u8; 1024];
+        let bytes_read = file.read(&mut buffer).await
+            .context("Failed to read patch file")?;
+        
+        if bytes_read == 0 {
+            anyhow::bail!("Patch file appears to be corrupted (cannot read): {}", pwr_path.display());
+        }
+        
+        println!("Patch file validation passed: {} ({} bytes)", pwr_path.display(), metadata.len());
+        Ok(())
+    }
+
+    /// Verifies the integrity of the extracted game files
+    /// This ensures that critical game files exist and are not empty
+    pub async fn verify_extraction_integrity(&self, game_dir: &PathBuf) -> anyhow::Result<()> {
+        use tokio::fs;
+        
+        // List of critical files/directories that must exist after extraction
+        let critical_paths = vec![
+            "Client", // Main game client directory
+            "Client/HytaleClient", // Main executable (Linux/Mac)
+            "Client/HytaleClient.exe", // Main executable (Windows)
+            // Note: Libraries are directly in Client/, not in Client/libs/
+            // We'll check for common library patterns instead
+        ];
+        
+        let mut missing_files: Vec<&str> = Vec::new();
+        let mut empty_files: Vec<&str> = Vec::new();
+        
+        for path in &critical_paths {
+            let full_path = game_dir.join(path);
+            
+            if !full_path.exists() {
+                // Skip platform-specific executables that don't apply
+                if path.contains("HytaleClient.exe") && !cfg!(windows) {
+                    continue;
+                }
+                if path.contains("HytaleClient") && cfg!(windows) {
+                    continue;
+                }
+                missing_files.push(path);
+                continue;
+            }
+            
+            // For files, check they're not empty
+            if full_path.is_file() {
+                let metadata = fs::metadata(&full_path).await?;
+                if metadata.len() == 0 {
+                    empty_files.push(path);
+                }
+            }
+        }
+        
+        // Additional check: ensure Client directory has substantial content
+        let client_dir = game_dir.join("Client");
+        if client_dir.exists() {
+            let mut entries = fs::read_dir(&client_dir).await?;
+            let mut file_count = 0;
+            let mut total_size = 0u64;
+            let mut has_libraries = false;
+            
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                if let Ok(metadata) = entry.metadata().await {
+                    let path = entry.path();
+                    if metadata.is_file() {
+                        file_count += 1;
+                        total_size += metadata.len();
+                        
+                        // Check for library files directly in Client/
+                        if let Some(extension) = path.extension() {
+                            if let Some(ext_str) = extension.to_str() {
+                                match ext_str {
+                                    "jar" | "so" | "dll" | "dylib" => {
+                                        has_libraries = true;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Verify we have libraries and substantial content
+            if !has_libraries {
+                anyhow::bail!("No library files found in Client/ directory. Expected .jar, .so, .dll, or .dylib files.");
+            }
+            
+            if file_count < 5 || total_size < 10_000_000 { // Less than 10MB seems suspicious
+                anyhow::bail!(
+                    "Installation appears incomplete: {} files, {} bytes total. Expected at least 5 files and 10MB.",
+                    file_count, total_size
+                );
+            }
+            
+            println!("Client directory verification passed: {} files, {} bytes, libraries found: {}", 
+                     file_count, total_size, has_libraries);
+        } else {
+            missing_files.push("Client");
+        }
+        
+        if !missing_files.is_empty() || !empty_files.is_empty() {
+            let mut error_msg = "Critical game files are missing or corrupted:".to_string();
+            
+            if !missing_files.is_empty() {
+                error_msg.push_str(&format!("\n  Missing: {}", missing_files.join(", ")));
+            }
+            
+            if !empty_files.is_empty() {
+                error_msg.push_str(&format!("\n  Empty: {}", empty_files.join(", ")));
+            }
+            
+            anyhow::bail!(error_msg);
+        }
+        
+        println!("Game extraction verification passed: {} files validated", critical_paths.len());
+        Ok(())
+    }
+
+    /// Verifies the installation directory structure
+    /// Checks if critical game files exist in the installation directory
+    pub async fn verify_install_dir(&self, game_dir: &PathBuf) -> anyhow::Result<()> {
+        let critical_paths = vec![
+            "Client", 
+            if cfg!(windows) { "Client/HytaleClient.exe" } else { "Client/HytaleClient" }
+        ];
+        
+        for path in &critical_paths {
+            if !game_dir.join(path).exists() {
+                anyhow::bail!("Missing critical file: {}", path);
+            }
+        }
+        
+        Ok(())
     }
 
     /// Verifies patch file integrity using SHA256 (Offloaded to Blocking Thread)
@@ -188,7 +347,7 @@ impl IntegrityChecker {
         cancel_token: Option<Arc<AtomicBool>>,
     ) -> Result<IntegrityResult>
     where
-        F: Fn(f64, &str) + Send + Sync + 'static,
+        F: Fn(f64, &str) + Send + Sync + Clone + 'static,
     {
         let mut result = IntegrityResult::new();
         
@@ -230,11 +389,12 @@ impl IntegrityChecker {
         }
         
         // Create a callback for checksum progress (0.0-1.0 range)
-        let progress_callback = progress_callback.map(|cb| std::sync::Arc::new(cb));
-        let progress_callback_clone = progress_callback.clone();
+        use std::sync::Arc;
+        let checksum_callback: Option<Arc<dyn Fn(f64, &str) + Send + Sync>> = progress_callback.clone().map(|cb| Arc::new(cb) as Arc<dyn Fn(f64, &str) + Send + Sync>);
+        let checksum_callback_clone = checksum_callback.clone();
         let scaled_callback = move |pct: f64, msg: &str| {
             // Reportar el progreso real del checksum (0.0-1.0)
-            if let Some(cb) = progress_callback_clone.as_ref() {
+            if let Some(cb) = checksum_callback_clone.as_ref() {
                 cb(pct, msg);
             }
         };

@@ -10,7 +10,6 @@ pub mod mods_api;
 pub mod patcher;
 pub mod paths;
 pub mod progress;
-pub mod repair;
 pub mod runner;
 pub mod status;
 pub mod zip_mods;

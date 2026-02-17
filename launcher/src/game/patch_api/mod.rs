@@ -1,24 +1,24 @@
 pub mod estrogen;
-pub mod hytale;
 pub mod shipofyarn;
 pub mod traits;
 pub mod utils;
 pub mod installer;
+pub mod integrity_checker;
 pub mod version_manager;
 pub mod patch_downloader;
 pub mod frontend;
 pub mod shared_cache;
 
-pub use traits::{PatchProvider, VersionInfo, PatchInfo, DownloadInfo};
+pub use traits::PatchProvider;
 pub use estrogen::EstrogenProvider;
-pub use hytale::HytaleProvider;
 pub use shipofyarn::ShipOfYarnProvider;
 pub use utils::*;
 pub use installer::{ButlerInstaller, JreInstaller};
+pub use integrity_checker::IntegrityChecker;
 pub use version_manager::VersionManager;
 pub use patch_downloader::PatchDownloader;
 pub use frontend::PatchApiFrontend;
-pub use shared_cache::{SharedCacheManager, init_shared_cache, get_shared_cache, CacheStats};
+pub use shared_cache::{get_shared_cache};
 
 use anyhow::Result;
 use std::sync::Arc;
@@ -73,34 +73,6 @@ impl PatchApiManager {
             }
         }
         anyhow::bail!("No provider could fetch patch URL for {}->{}", from_version, to_version)
-    }
-
-    /// Try to get JRE download URL from any provider
-    pub async fn get_jre_url(&self, os: &str, arch: &str) -> Result<String> {
-        // First try the providers
-        for provider in &self.providers {
-            if let Ok(url) = provider.get_jre_url(os, arch).await {
-                return Ok(url);
-            }
-        }
-        
-        // If all providers fail, use Adoptium fallback
-        println!("All providers failed for JRE, using Adoptium fallback");
-        Ok(get_java_adoptium_url(os, arch))
-    }
-
-    /// Try to get Butler download URL from any provider
-    pub async fn get_butler_url(&self, os: &str, arch: &str) -> Result<String> {
-        // First try the providers
-        for provider in &self.providers {
-            if let Ok(url) = provider.get_butler_url(os, arch).await {
-                return Ok(url);
-            }
-        }
-        
-        // If all providers fail, use the itch.io CDN fallback
-        println!("All providers failed for Butler, using itch.io CDN fallback");
-        Ok(get_butler_fallback_url(os, arch))
     }
 
     /// Check if a complete version exists from any provider

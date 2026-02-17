@@ -67,7 +67,11 @@ pub async fn apply_pwr(
 
     // Validate patch file integrity before attempting to apply
     progress_callback("install", 2.0, "Validating patch file...", 0, 0, None, None);
-    validate_patch_file(&pwr_path_absolute).await
+    
+    // Create IntegrityChecker instance
+    let integrity_checker = crate::game::patch_api::IntegrityChecker::new();
+    
+    integrity_checker.validate_patch_file(&pwr_path).await
         .context("Patch file validation failed - file may be corrupted")?;
 
     // Enhanced retry logic for patch application
@@ -114,8 +118,8 @@ pub async fn apply_pwr(
             .context("Failed to create Butler log file")?;
         let mut log_writer = BufWriter::new(log_file);
 
-        let mut stdout = child.stdout.take().unwrap();
-        let mut stderr = child.stderr.take().unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let stderr = child.stderr.take().unwrap();
 
         // Spawn a task to handle stderr
         tokio::spawn(async move {
@@ -189,7 +193,7 @@ pub async fn apply_pwr(
             // SUCCESS: Verify extraction integrity before reporting success
             progress_callback("install", 95.0, "Verifying installation...", 0, 0, None, None);
             
-            match verify_extraction_integrity(&game_dir).await {
+            match integrity_checker.verify_extraction_integrity(&game_dir).await {
                 Ok(_) => {
                     progress_callback("install", 100.0, "Patch applied successfully", 0, 0, None, None);
                     println!("[SUCCESS] Patch application and verification completed on attempt {}", attempt);
@@ -242,126 +246,6 @@ fn parse_butler_line(line: &str) -> Option<f32> {
     None
 }
 
-/// Downloads a file with automatic fallback using the new patch API system
-/// Enhanced with retry logic and better error recovery
-pub async fn download_with_fallback<F>(
-    client: &reqwest::Client,
-    primary_url: &str,
-    dest_path: &PathBuf,
-    progress_callback: impl Fn(f32, &str, u64, u64, Option<String>),
-    cancel_token: Option<Arc<AtomicBool>>,
-    fallback_url_resolver: F,
-    file_type: &str,
-) -> anyhow::Result<()>
-where
-    F: FnOnce() -> anyhow::Result<String>,
-{
-    // Flag to coordinate which callback is active (prevents duplication)
-    let primary_active = Arc::new(AtomicBool::new(true));
-    let primary_active_clone = primary_active.clone();
-    
-    // Enhanced retry logic: Try primary download up to 2 times
-    let mut last_error = None;
-    
-    for attempt in 1..=2 {
-        // Check if we have a valid partial download to resume
-        let should_resume = dest_path.exists() && attempt > 1;
-        if should_resume {
-            println!("[RETRY] Resuming {} download (attempt {})", file_type, attempt);
-        } else {
-            println!("[DOWNLOAD] Starting {} download (attempt {})", file_type, attempt);
-        }
-        
-        let download_result = crate::game::downloader::download_file(
-            client,
-            primary_url,
-            dest_path,
-            |pct, speed, total, downloaded, eta| {
-                // Only update progress if primary is still active
-                if primary_active.load(Ordering::Relaxed) {
-                    let status = if attempt > 1 {
-                        format!("Retry {}", attempt)
-                    } else {
-                        String::new()
-                    };
-                    progress_callback(pct, &status, total, downloaded, eta);
-                }
-            },
-            cancel_token.clone(),
-        ).await;
-        
-        match download_result {
-            Ok(_) => {
-                println!("[SUCCESS] {} download completed on attempt {}", file_type, attempt);
-                return Ok(());
-            }
-            Err(e) => {
-                let error_str = e.to_string();
-                last_error = Some(anyhow::anyhow!("{} download failed on attempt {}: {}", file_type, attempt, error_str));
-                println!("[ERROR] {} download failed on attempt {}: {}", file_type, attempt, error_str);
-                
-                // Clean up partial download for retry
-                if dest_path.exists() {
-                    let _ = tokio::fs::remove_file(dest_path).await;
-                }
-            }
-        }
-    }
-    
-    // Primary failed twice, try fallback
-    println!("[FALLBACK] Primary {} download failed after 2 attempts, trying fallback API...", file_type);
-    
-    // Deactivate primary callback to prevent duplication
-    primary_active_clone.store(false, Ordering::Relaxed);
-    
-    match fallback_url_resolver() {
-        Ok(fallback_url) => {
-            println!("[FALLBACK] Using fallback URL: {}", fallback_url);
-            
-            // Try fallback download with retry logic
-            for attempt in 1..=2 {
-                println!("[FALLBACK] Attempting fallback download (attempt {})", attempt);
-                
-                match crate::game::downloader::download_file(
-                    client,
-                    &fallback_url,
-                    dest_path,
-                    |pct, speed, total, downloaded, eta| {
-                        // Only update progress if primary is deactivated
-                        if !primary_active_clone.load(Ordering::Relaxed) {
-                            let status = if attempt > 1 {
-                                format!("Fallback Retry {}", attempt)
-                            } else {
-                                "Fallback".to_string()
-                            };
-                            progress_callback(pct, &status, total, downloaded, eta);
-                        }
-                    },
-                    cancel_token.clone(),
-                ).await {
-                    Ok(_) => {
-                        println!("[SUCCESS] Fallback {} download completed on attempt {}", file_type, attempt);
-                        return Ok(());
-                    }
-                    Err(e) => {
-                        println!("[ERROR] Fallback {} download failed on attempt {}: {}", file_type, attempt, e);
-                        
-                        // Clean up partial download
-                        if dest_path.exists() {
-                            let _ = tokio::fs::remove_file(dest_path).await;
-                        }
-                    }
-                }
-            }
-            
-            anyhow::bail!("Fallback download failed after 2 attempts: {}", last_error.unwrap_or_else(|| anyhow::anyhow!("Unknown error")));
-        }
-        Err(e) => {
-            anyhow::bail!("Failed to get fallback URL: {}", e);
-        }
-    }
-}
-
 /// Cleans up the patches cache directory using the shared cache system
 pub async fn clean_patches_cache(
     progress_callback: impl Fn(f32, &str, u64, u64, Option<String>, Option<usize>),
@@ -372,159 +256,10 @@ pub async fn clean_patches_cache(
 
     // Use the shared cache manager for cleanup
     let cleaned = crate::game::patch_api::get_shared_cache()
-        .cleanup_old_patches(&base_dir).await?;
+        .cleanup_old_patches().await?;
 
     progress_callback(100.0, &format!("Cleaned {} cache files", cleaned), 0, 0, None, None);
     Ok(())
 }
 
-/// Helper function to get architecture name
-pub fn get_arch_name() -> &'static str {
-    match std::env::consts::ARCH {
-        "x86_64" => "amd64",
-        "aarch64" => "arm64",
-        other => other,
-    }
-}
 
-/// Validates the integrity of a PWR patch file
-/// Checks if the file exists, is readable, and has valid content
-pub async fn validate_patch_file(pwr_path: &PathBuf) -> anyhow::Result<()> {
-    use tokio::fs;
-    
-    // Check if file exists
-    if !pwr_path.exists() {
-        anyhow::bail!("Patch file does not exist: {}", pwr_path.display());
-    }
-    
-    // Check file size (should be greater than 0)
-    let metadata = fs::metadata(pwr_path).await
-        .context("Failed to read patch file metadata")?;
-    
-    if metadata.len() == 0 {
-        anyhow::bail!("Patch file is empty: {}", pwr_path.display());
-    }
-    
-    // Try to read first few bytes to verify it's a valid file
-    let mut file = fs::File::open(pwr_path).await
-        .context("Failed to open patch file")?;
-    
-    let mut buffer = [0u8; 1024];
-    let bytes_read = file.read(&mut buffer).await
-        .context("Failed to read patch file")?;
-    
-    if bytes_read == 0 {
-        anyhow::bail!("Patch file appears to be corrupted (cannot read): {}", pwr_path.display());
-    }
-    
-    println!("Patch file validation passed: {} ({} bytes)", pwr_path.display(), metadata.len());
-    Ok(())
-}
-
-/// Verifies the integrity of the extracted game files
-/// This ensures that critical game files exist and are not empty
-pub async fn verify_extraction_integrity(game_dir: &PathBuf) -> anyhow::Result<()> {
-    use tokio::fs;
-    
-    // List of critical files/directories that must exist after extraction
-    let critical_paths = vec![
-        "Client", // Main game client directory
-        "Client/HytaleClient", // Main executable (Linux/Mac)
-        "Client/HytaleClient.exe", // Main executable (Windows)
-        // Note: Libraries are directly in Client/, not in Client/libs/
-        // We'll check for common library patterns instead
-    ];
-    
-    let mut missing_files: Vec<&str> = Vec::new();
-    let mut empty_files: Vec<&str> = Vec::new();
-    
-    for path in &critical_paths {
-        let full_path = game_dir.join(path);
-        
-        if !full_path.exists() {
-            // Skip platform-specific executables that don't apply
-            if path.contains("HytaleClient.exe") && !cfg!(windows) {
-                continue;
-            }
-            if path.contains("HytaleClient") && cfg!(windows) {
-                continue;
-            }
-            missing_files.push(*path);
-            continue;
-        }
-        
-        // For files, check they're not empty
-        if full_path.is_file() {
-            let metadata = fs::metadata(&full_path).await?;
-            if metadata.len() == 0 {
-                empty_files.push(*path);
-            }
-        }
-    }
-    
-    // Additional check: ensure Client directory has substantial content
-    let client_dir = game_dir.join("Client");
-    if client_dir.exists() {
-        let mut entries = fs::read_dir(&client_dir).await?;
-        let mut file_count = 0;
-        let mut total_size = 0u64;
-        let mut has_libraries = false;
-        
-        while let Ok(Some(entry)) = entries.next_entry().await {
-            if let Ok(metadata) = entry.metadata().await {
-                let path = entry.path();
-                if metadata.is_file() {
-                    file_count += 1;
-                    total_size += metadata.len();
-                    
-                    // Check for library files directly in Client/
-                    if let Some(extension) = path.extension() {
-                        if let Some(ext_str) = extension.to_str() {
-                            match ext_str {
-                                "jar" | "so" | "dll" | "dylib" => {
-                                    has_libraries = true;
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Verify we have libraries (they should be directly in Client/)
-        if !has_libraries {
-            anyhow::bail!("No library files found in Client/ directory. Expected .jar, .so, .dll, or .dylib files.");
-        }
-        
-        // A valid installation should have multiple files and substantial size
-        if file_count < 5 || total_size < 10_000_000 { // Less than 10MB seems suspicious
-            anyhow::bail!(
-                "Installation appears incomplete: {} files, {} bytes total. Expected at least 5 files and 10MB.",
-                file_count, total_size
-            );
-        }
-        
-        println!("Client directory verification passed: {} files, {} bytes, libraries found: {}", 
-                 file_count, total_size, has_libraries);
-    } else {
-        missing_files.push("Client");
-    }
-    
-    if !missing_files.is_empty() || !empty_files.is_empty() {
-        let mut error_msg = "Critical game files are missing or corrupted:".to_string();
-        
-        if !missing_files.is_empty() {
-            error_msg.push_str(&format!("\n  Missing: {}", missing_files.join(", ")));
-        }
-        
-        if !empty_files.is_empty() {
-            error_msg.push_str(&format!("\n  Empty: {}", empty_files.join(", ")));
-        }
-        
-        anyhow::bail!(error_msg);
-    }
-    
-    println!("Game extraction verification passed: {} files validated", critical_paths.len());
-    Ok(())
-}

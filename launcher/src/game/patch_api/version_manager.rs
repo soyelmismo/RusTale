@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::PatchApiManager;
+use super::utils::*;
 use crate::game::patcher::GameVersionInfo;
 
 /// Manager for game version operations using the new patch API system
@@ -109,10 +110,3 @@ impl VersionManager {
     }
 }
 
-fn get_arch_name() -> &'static str {
-    match std::env::consts::ARCH {
-        "x86_64" => "amd64",
-        "aarch64" => "arm64",
-        other => other,
-    }
-}

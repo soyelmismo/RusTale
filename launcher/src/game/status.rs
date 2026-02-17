@@ -55,7 +55,8 @@ pub async fn calculate_status(
     // ENHANCED: Verify installation integrity for installed games
     if is_installed {
         let game_dir = paths.version_dir(channel, &version_str);
-        match crate::game::patcher::verify_extraction_integrity(&game_dir).await {
+        let integrity_checker = crate::game::patch_api::IntegrityChecker::new();
+        match integrity_checker.verify_extraction_integrity(&game_dir).await {
             Ok(_) => {
                 println!("[DEBUG] Installation integrity verified");
             }
@@ -94,59 +95,22 @@ pub async fn calculate_status(
         }
     }
 
-    // Step 3: Latest mode - check for updates
-    match crate::game::patch_api::PatchApiFrontend::get_instance()
-        .get_version_info(
-            client,
-            &paths.root,
-            channel,
-            settings.game_version as i32,
-        )
-        .await
-    {
-        Ok(manifest) => {
-            if manifest.update_available {
-                (LauncherStatus::NeedsUpdate, Some(manifest.latest_remote))
-            } else {
-                (LauncherStatus::Ready, Some(manifest.latest_remote))
-            }
-        }
+    // Step 3: Latest mode - check for updates using PatchApiFrontend
+    let version_info = crate::game::patch_api::PatchApiFrontend::get_instance()
+        .get_version_info(client, &paths.root, channel, settings.game_version as i32)
+        .await;
+    
+    let version_info = match version_info {
+        Ok(info) => info,
         Err(_) => {
-            // Can't reach server, try patch API with fallback
-            match crate::game::patch_api::PatchApiFrontend::get_instance().find_latest_version(&settings.channel, None).await {
-                Ok(fallback_ver) => {
-                    println!("Found latest version via patch API: {}", fallback_ver);
-                    // Check if local version matches fallback version
-                    let version_file = paths.version_json(channel);
-                    let local_ver = if let Ok(content) = tokio::fs::read_to_string(&version_file).await {
-                        serde_json::from_str::<serde_json::Value>(&content)
-                            .ok()
-                            .and_then(|v| v.get("version").and_then(|n| n.as_i64()))
-                            .unwrap_or(0) as i32
-                    } else {
-                        0
-                    };
-                    
-                    if local_ver >= fallback_ver && is_installed {
-                        // Local version is up-to-date or newer, allow offline play
-                        println!("Local version {} is up-to-date, allowing offline play", local_ver);
-                        (LauncherStatus::Ready, Some(fallback_ver))
-                    } else {
-                        // Need to download/update
-                        (LauncherStatus::NeedsInstall, Some(fallback_ver))
-                    }
-                }
-                Err(e) => {
-                    println!("Patch API error: {}", e);
-                    // All APIs failed, but if game is installed locally, allow offline play
-                    if is_installed {
-                        println!("APIs unavailable but game is installed locally, allowing offline play");
-                        (LauncherStatus::Ready, None)
-                    } else {
-                        (LauncherStatus::NeedsInstall, None)
-                    }
-                }
-            }
+            // If network fails, allow offline Ready if installed
+            return (LauncherStatus::Ready, None);
         }
+    };
+
+    if version_info.update_available {
+        (LauncherStatus::NeedsUpdate, Some(version_info.latest_remote))
+    } else {
+        (LauncherStatus::Ready, Some(version_info.latest_remote))
     }
 }

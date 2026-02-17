@@ -1,33 +1,5 @@
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use anyhow::Result;
-
-/// Information about a version
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VersionInfo {
-    pub version: i32,
-    pub channel: String,
-    pub is_complete: bool,
-}
-
-/// Information about a patch
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PatchInfo {
-    pub from_version: i32,
-    pub to_version: i32,
-    pub channel: String,
-    pub is_complete: bool,
-    pub download_url: String,
-}
-
-/// Download information
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DownloadInfo {
-    pub url: String,
-    pub filename: String,
-    pub size: Option<u64>,
-    pub checksum: Option<String>,
-}
 
 /// Generic trait for patch providers
 #[async_trait]
@@ -49,12 +21,4 @@ pub trait PatchProvider: Send + Sync {
 
     /// Check if a complete version exists
     async fn has_complete_version(&self, channel: &str, os: &str, arch: &str, version: i32) -> Result<bool>;
-
-    /// Get JRE download URL
-    async fn get_jre_url(&self, os: &str, arch: &str) -> Result<String>;
-
-    /// Get Butler download URL (optional)
-    async fn get_butler_url(&self, os: &str, arch: &str) -> Result<String> {
-        anyhow::bail!("Butler downloads not supported by this provider")
-    }
 }

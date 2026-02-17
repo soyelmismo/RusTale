@@ -272,16 +272,27 @@ impl PatchApiFrontend {
             let install_result = crate::game::patcher::apply_pwr(
                 base_dir, channel, &install_dir_name, &patch_path, 
                 move |phase, pct, speed, total, down, eta, step| {
-                    // Map patcher progress to our progress system
+                    // Map patcher progress to our progress system with detailed stats
+                    let stats = if total > 0 {
+                        Some(DownloadStats {
+                            total_bytes: total,
+                            downloaded_bytes: down,
+                            speed_str: speed.to_string(),
+                            eta_str: eta,
+                        })
+                    } else {
+                        None
+                    };
+                    
                     if pct >= 95.0 {
                         // Verification phase
-                        WeightedProgressTracker::report(&tracker_clone, 0.95, "launcher.status.verifying", vec![], None);
+                        WeightedProgressTracker::report(&tracker_clone, 0.95, "launcher.status.verifying", vec![], stats);
                     } else if pct >= 10.0 {
                         // Main extraction phase
-                        WeightedProgressTracker::report(&tracker_clone, (pct / 100.0) as f32 * 0.9, "launcher.status.extracting", vec![], None);
+                        WeightedProgressTracker::report(&tracker_clone, (pct / 100.0) as f32 * 0.9, "launcher.status.extracting", vec![], stats);
                     } else {
                         // Initial setup
-                        WeightedProgressTracker::report(&tracker_clone, (pct / 100.0) as f32 * 0.1, "launcher.status.patching", vec![], None);
+                        WeightedProgressTracker::report(&tracker_clone, (pct / 100.0) as f32 * 0.1, "launcher.status.patching", vec![], stats);
                     }
                 },
                 cancel_token.clone()
@@ -312,7 +323,18 @@ impl PatchApiFrontend {
                         channel,
                         target_version.unwrap_or(0),
                         |phase, pct, status, total, downloaded, eta, step| {
-                            WeightedProgressTracker::report(&tracker, 0.5 + (pct as f32 / 100.0) * 0.4, "launcher.status.downloading", vec![], None);
+                            // Enhanced fallback download with real progress stats
+                            let stats = if total > 0 {
+                                Some(DownloadStats {
+                                    total_bytes: total,
+                                    downloaded_bytes: downloaded,
+                                    speed_str: status.to_string(), // status contains speed info here
+                                    eta_str: eta,
+                                })
+                            } else {
+                                None
+                            };
+                            WeightedProgressTracker::report(&tracker, 0.5 + (pct as f32 / 100.0) * 0.4, "launcher.status.downloading_fallback", vec![], stats);
                         },
                         cancel_token.clone()
                     ).await {
@@ -324,10 +346,22 @@ impl PatchApiFrontend {
                             crate::game::patcher::apply_pwr(
                                 base_dir, channel, &install_dir_name, &complete_patch_path,
                                 move |phase, pct, speed, total, down, eta, step| {
-                                    if pct >= 95.0 {
-                                        WeightedProgressTracker::report(&tracker_clone, 0.9, "launcher.status.verifying", vec![], None);
+                                    // Enhanced fallback patching with detailed stats
+                                    let stats = if total > 0 {
+                                        Some(DownloadStats {
+                                            total_bytes: total,
+                                            downloaded_bytes: down,
+                                            speed_str: speed.to_string(),
+                                            eta_str: eta,
+                                        })
                                     } else {
-                                        WeightedProgressTracker::report(&tracker_clone, 0.5 + (pct as f32 / 100.0) * 0.4, "launcher.status.extracting", vec![], None);
+                                        None
+                                    };
+                                    
+                                    if pct >= 95.0 {
+                                        WeightedProgressTracker::report(&tracker_clone, 0.9, "launcher.status.verifying_fallback", vec![], stats);
+                                    } else {
+                                        WeightedProgressTracker::report(&tracker_clone, 0.5 + (pct as f32 / 100.0) * 0.4, "launcher.status.extracting_fallback", vec![], stats);
                                     }
                                 },
                                 cancel_token.clone()
@@ -359,7 +393,8 @@ impl PatchApiFrontend {
                 let game_dir = crate::game::paths::GamePaths::new(base_dir.clone())
                     .version_dir(channel, &install_dir_name);
                 
-                match crate::game::patcher::verify_extraction_integrity(&game_dir).await {
+                let integrity_checker = crate::game::patch_api::IntegrityChecker::new();
+                match integrity_checker.verify_extraction_integrity(&game_dir).await {
                     Ok(_) => {
                         verification_passed = true;
                         println!("[FINAL] Installation verification passed on attempt {}", attempt);

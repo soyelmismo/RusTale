@@ -2,6 +2,7 @@ use crate::server::assets::{
     find_best_client_version, generate_server_args_with_direct_assets, validate_client_version,
 };
 use crate::server::config::ServerConfig;
+use crate::game::patch_api::utils::get_arch_name;
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -149,8 +150,8 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         if pct == 0.0 || pct == 100.0 {
             let size_info = if total > 0 {
                 format!(" ({} / {})", 
-                    crate::game::downloader::format_bytes(downloaded), 
-                    crate::game::downloader::format_bytes(total)
+                    crate::game::patch_api::utils::format_bytes(downloaded), 
+                    crate::game::patch_api::utils::format_bytes(total)
                 )
             } else {
                 String::new()
@@ -199,7 +200,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
 
     let target_ver_num = if config.game_version == "latest" {
         let manager = crate::game::patch_api::PatchApiManager::new();
-        manager.get_latest_version(&config.branch, std::env::consts::OS, crate::game::patcher::get_arch_name()).await?
+        manager.get_latest_version(&config.branch, std::env::consts::OS, get_arch_name()).await?
     } else {
         config
             .game_version
@@ -229,7 +230,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
                 // Fallback to original logic
                 let target_ver_num = if config.game_version == "latest" {
                     let manager = crate::game::patch_api::PatchApiManager::new();
-                    manager.get_latest_version(&config.branch, std::env::consts::OS, crate::game::patcher::get_arch_name()).await?
+                    manager.get_latest_version(&config.branch, std::env::consts::OS, get_arch_name()).await?
                 } else {
                     config
                         .game_version
@@ -484,8 +485,8 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
                     |phase, progress, msg, total, downloaded, eta, step| {
                         let size_info = if total > 0 {
                             format!(" ({} / {})", 
-                                crate::game::downloader::format_bytes(downloaded), 
-                                crate::game::downloader::format_bytes(total)
+                                crate::game::patch_api::utils::format_bytes(downloaded), 
+                                crate::game::patch_api::utils::format_bytes(total)
                             )
                         } else {
                             String::new()

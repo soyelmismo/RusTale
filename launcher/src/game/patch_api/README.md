@@ -133,5 +133,3 @@ The trait requires implementing:
 - `get_patch_url()` - Get patch download URL
 - `get_patch_signature_url()` - Get patch signature URL
 - `has_complete_version()` - Check if complete version exists
-- `get_jre_url()` - Get JRE download URL
-- `get_butler_url()` - Get Butler download URL (optional)

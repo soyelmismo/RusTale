@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use std::collections::HashMap;
 
 use super::traits::PatchProvider;
+use super::utils::*;
 
 const SHIPOFYARN_API_URL: &str = "https://thecute.cloud/ShipOfYarn/api.php";
 
@@ -91,7 +92,7 @@ impl ShipOfYarnProvider {
         Ok(data)
     }
 
-    fn get_platform_data<'a>(&self, data: &'a ShipOfYarnAPI, channel: &str) -> Result<&'a PlatformData> {
+    fn get_channel<'a>(&self, data: &'a ShipOfYarnAPI, channel: &str) -> Result<&'a PlatformData> {
         match channel {
             "release" => Ok(&data.hytale.release),
             "pre-release" => Ok(&data.hytale.pre_release),
@@ -99,51 +100,19 @@ impl ShipOfYarnProvider {
         }
     }
 
-    fn get_os_files(platform_data: &PlatformData) -> Result<&HashMap<String, String>> {
+    fn get_files_for_current_os(channel_data: &PlatformData) -> Result<&HashMap<String, String>> {
         let os_name = std::env::consts::OS;
         match os_name {
-            "linux" => Ok(&platform_data.linux.files),
-            "windows" => Ok(&platform_data.windows.files),
-            "macos" => Ok(&platform_data.mac.files),
+            "linux" => Ok(&channel_data.linux.files),
+            "windows" => Ok(&channel_data.windows.files),
+            "macos" => Ok(&channel_data.mac.files),
             _ => anyhow::bail!("Unsupported OS: {}", os_name),
         }
     }
 
-    fn get_arch_name() -> &'static str {
-        match std::env::consts::ARCH {
-            "x86_64" => "amd64",
-            "aarch64" => "arm64",
-            other => other,
-        }
-    }
-
-    fn extract_versions_from_filename(filename: &str) -> Option<(i32, i32)> {
-        if let Some(start) = filename.find('v') {
-            let version_part = &filename[start + 1..];
-            let version_part = version_part.split('-').next()?;
             
-            if let Some(tilde_pos) = version_part.find('~') {
-                // Incremental format: "19~20" -> (19, 20)
-                let from_part = &version_part[..tilde_pos];
-                let to_part = &version_part[tilde_pos + 1..];
-                match (from_part.parse::<i32>(), to_part.parse::<i32>()) {
-                    (Ok(from), Ok(to)) => Some((from, to)),
-                    _ => None,
-                }
-            } else {
-                // Complete format: "8" -> (0, 8)
-                match version_part.parse::<i32>() {
-                    Ok(version) => Some((0, version)),
-                    _ => None,
-                }
-            }
-        } else {
-            None
-        }
-    }
-
     fn extract_version_from_filename(filename: &str) -> Option<i32> {
-        if let Some((_, to)) = Self::extract_versions_from_filename(filename) {
+        if let Some((_, to)) = extract_versions_from_filename(filename) {
             Some(to)
         } else {
             None
@@ -152,8 +121,8 @@ impl ShipOfYarnProvider {
 
     async fn get_version_url(&self, channel: &str, os: &str, arch: &str, prev_version: i32, target_version: i32) -> Result<String> {
         let data = self.fetch_data().await?;
-        let platform_data = self.get_platform_data(&data, channel)?;
-        let os_data = Self::get_os_files(platform_data)?;
+        let channel_data = self.get_channel(&data, channel)?;
+        let os_data = Self::get_files_for_current_os(channel_data)?;
 
         // Try different filename patterns
         let possible_filenames = vec![
@@ -186,10 +155,10 @@ impl PatchProvider for ShipOfYarnProvider {
         }
     }
 
-    async fn get_latest_version(&self, channel: &str, os: &str, arch: &str) -> Result<i32> {
+    async fn get_latest_version(&self, channel: &str, os: &str, _arch: &str) -> Result<i32> {
         let data = self.fetch_data().await?;
-        let platform_data = self.get_platform_data(&data, channel)?;
-        let os_data = Self::get_os_files(platform_data)?;
+        let channel_data = self.get_channel(&data, channel)?;
+        let os_data = Self::get_files_for_current_os(channel_data)?;
 
         let mut max_version = 0;
         for filename in os_data.keys() {
@@ -207,10 +176,10 @@ impl PatchProvider for ShipOfYarnProvider {
         Ok(max_version)
     }
 
-    async fn get_available_versions(&self, channel: &str, os: &str, arch: &str) -> Result<Vec<i32>> {
+    async fn get_available_versions(&self, channel: &str, os: &str, _arch: &str) -> Result<Vec<i32>> {
         let data = self.fetch_data().await?;
-        let platform_data = self.get_platform_data(&data, channel)?;
-        let os_data = Self::get_os_files(platform_data)?;
+        let channel_data = self.get_channel(&data, channel)?;
+        let os_data = Self::get_files_for_current_os(channel_data)?;
 
         let mut complete_versions = std::collections::HashSet::new();
         let mut incremental_versions = std::collections::HashSet::new();
@@ -220,7 +189,7 @@ impl PatchProvider for ShipOfYarnProvider {
         
         // Extract version numbers from filenames
         for filename in os_data.keys() {
-            if let Some((from_ver, to_ver)) = Self::extract_versions_from_filename(filename) {
+            if let Some((from_ver, to_ver)) = extract_versions_from_filename(filename) {
                 if from_ver == 0 {
                     // Complete version: v6-linux-amd64.pwr (extracted as 0->6)
                     complete_versions.insert(to_ver);
@@ -257,62 +226,11 @@ impl PatchProvider for ShipOfYarnProvider {
 
     async fn has_complete_version(&self, channel: &str, os: &str, arch: &str, version: i32) -> Result<bool> {
         let data = self.fetch_data().await?;
-        let platform_data = self.get_platform_data(&data, channel)?;
-        let os_data = Self::get_os_files(platform_data)?;
+        let channel_data = self.get_channel(&data, channel)?;
+        let os_data = Self::get_files_for_current_os(channel_data)?;
         
         let expected_filename = format!("v{}-{}-{}.pwr", version, os, arch);
         Ok(os_data.contains_key(&expected_filename))
-    }
-
-    async fn get_jre_url(&self, os: &str, arch: &str) -> Result<String> {
-        let data = self.fetch_data().await?;
-        
-        let platform_data = match os {
-            "linux" => &data.jre.linux,
-            "windows" => &data.jre.windows,
-            "macos" => &data.jre.mac,
-            _ => anyhow::bail!("Unsupported OS: {}", os),
-        };
-
-        // Get first available JRE file for the platform
-        let filename = platform_data
-            .keys()
-            .find(|key| {
-                key.starts_with("OpenJDK") && 
-                (key.contains(&format!("{}_{}", os, arch)) || 
-                 (os == "linux" && key.contains("x64_linux")) ||
-                 (os == "windows" && key.contains("x64_windows")) ||
-                 (os == "macos" && key.contains("aarch64_mac")))
-            })
-            .ok_or_else(|| anyhow::anyhow!("JRE not found for {}-{}", os, arch))?;
-
-        platform_data
-            .get(filename)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("JRE not found for {}-{}", os, arch))
-    }
-
-    async fn get_butler_url(&self, os: &str, arch: &str) -> Result<String> {
-        let data = self.fetch_data().await?;
-        
-        let platform_data = match os {
-            "linux" => &data.butler.linux,
-            "windows" => &data.butler.windows,
-            "macos" => &data.butler.mac,
-            _ => anyhow::bail!("Unsupported OS: {}", os),
-        };
-
-        let filename = match os {
-            "linux" => "butler-linux-amd64.zip",
-            "windows" => "butler-windows-amd64.zip",
-            "macos" => "butler-mac-amd64.zip",
-            _ => anyhow::bail!("Unsupported OS: {}", os),
-        };
-
-        platform_data
-            .get(filename)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("Butler not found for {}-{}", os, arch))
     }
 }
 

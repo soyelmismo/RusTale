@@ -547,11 +547,11 @@ impl ModsState {
                                     |_, _, total, downloaded, eta| {
                                         let size_info = if total > 0 {
                                             format!("{} / {}", 
-                                                crate::game::downloader::format_bytes(downloaded), 
-                                                crate::game::downloader::format_bytes(total)
+                                                crate::game::patch_api::utils::format_bytes(downloaded), 
+                                                crate::game::patch_api::utils::format_bytes(total)
                                             )
                                         } else {
-                                            crate::game::downloader::format_bytes(downloaded)
+                                            crate::game::patch_api::utils::format_bytes(downloaded)
                                         };
                                         
                                         let eta_info = if let Some(eta_str) = &eta {
@@ -1087,11 +1087,11 @@ impl ModsState {
                                 |_, _, total, downloaded, eta| {
                                         let size_info = if total > 0 {
                                             format!("{} / {}", 
-                                                crate::game::downloader::format_bytes(downloaded), 
-                                                crate::game::downloader::format_bytes(total)
+                                                crate::game::patch_api::utils::format_bytes(downloaded), 
+                            crate::game::patch_api::utils::format_bytes(total)
                                             )
                                         } else {
-                                            crate::game::downloader::format_bytes(downloaded)
+                                            crate::game::patch_api::utils::format_bytes(downloaded)
                                         };
                                         
                                         let eta_info = if let Some(eta_str) = &eta {

@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, atomic::AtomicBool};
 
 use super::PatchApiManager;
+use super::utils::*;
 use crate::game::paths::GamePaths;
 
 /// Downloader for game patches using the new patch API system
@@ -50,11 +51,11 @@ impl PatchDownloader {
                 |pct, speed, total, downloaded, eta| {
                     let size_info = if total > 0 {
                         format!("{} / {}", 
-                            crate::game::downloader::format_bytes(downloaded), 
-                            crate::game::downloader::format_bytes(total)
+                            crate::game::patch_api::utils::format_bytes(downloaded), 
+                            crate::game::patch_api::utils::format_bytes(total)
                         )
                     } else {
-                        crate::game::downloader::format_bytes(downloaded)
+                        crate::game::patch_api::utils::format_bytes(downloaded)
                     };
                     
                     let eta_info = if let Some(eta_str) = &eta {
@@ -127,10 +128,3 @@ impl PatchDownloader {
     }
 }
 
-fn get_arch_name() -> &'static str {
-    match std::env::consts::ARCH {
-        "x86_64" => "amd64",
-        "aarch64" => "arm64",
-        other => other,
-    }
-}

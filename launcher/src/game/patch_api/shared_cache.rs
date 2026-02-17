@@ -61,7 +61,7 @@ impl SharedCacheManager {
     }
 
     /// Clean up old patches from cache
-    pub async fn cleanup_old_patches(&self, base_dir: &PathBuf) -> Result<usize> {
+    pub async fn cleanup_old_patches(&self) -> Result<usize> {
         let cache_dir = crate::config::get_cache_dir("patches").await;
         
         if !cache_dir.exists() {
@@ -113,7 +113,7 @@ impl SharedCacheManager {
     }
 
     /// Get cache statistics
-    pub async fn get_cache_stats(&self, base_dir: &PathBuf) -> Result<CacheStats> {
+    pub async fn get_cache_stats(&self) -> Result<CacheStats> {
         let cache_dir = crate::config::get_cache_dir("patches").await;
         
         if !cache_dir.exists() {
@@ -164,7 +164,7 @@ pub struct CacheStats {
 
 impl CacheStats {
     pub fn size_formatted(&self) -> String {
-        crate::game::downloader::format_bytes(self.total_size)
+        crate::game::patch_api::utils::format_bytes(self.total_size)
     }
 }
 

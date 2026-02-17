@@ -126,7 +126,7 @@ pub async fn download_file(
                                 if last_report.elapsed().as_millis() > 200 {
                                     let speed = bytes_since_last_report as f64
                                         / last_report.elapsed().as_secs_f64();
-                                    let speed_str = format_speed(speed);
+                                    let speed_str = crate::game::patch_api::utils::format_speed(speed);
 
                                     let pct = if total_size > 0 {
                                         (downloaded_len as f32 / total_size as f32) * 100.0
@@ -202,23 +202,3 @@ pub async fn download_file(
     Ok(())
 }
 
-fn format_speed(bytes_per_sec: f64) -> String {
-    if bytes_per_sec > 1_000_000.0 {
-        format!("{:.2} MB/s", bytes_per_sec / 1_000_000.0)
-    } else if bytes_per_sec > 1_000.0 {
-        format!("{:.2} KB/s", bytes_per_sec / 1_000.0)
-    } else {
-        format!("{:.0} B/s", bytes_per_sec)
-    }
-}
-
-#[allow(dead_code)]
-pub fn format_bytes(bytes: u64) -> String {
-    if bytes > 1_000_000 {
-        format!("{:.1} MB", bytes as f64 / 1_000_000.0)
-    } else if bytes > 1_000 {
-        format!("{:.1} KB", bytes as f64 / 1_000.0)
-    } else {
-        format!("{} B", bytes)
-    }
-}

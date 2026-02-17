@@ -6,6 +6,7 @@ use tokio::io::AsyncBufReadExt;
 use super::PatchApiManager;
 use crate::game::paths::GamePaths;
 use crate::util::make_executable;
+use crate::game::patch_api::get_butler_fallback_url;
 
 /// Installer for Butler using the new patch API system
 #[derive(Clone)]
@@ -40,14 +41,9 @@ impl ButlerInstaller {
 
         // Get Butler URL using the patch API system
         let os = std::env::consts::OS;
-        let arch = match std::env::consts::ARCH {
-            "x86_64" => "amd64",
-            "aarch64" => "arm64",
-            other => other,
-        };
+        let arch = crate::game::patch_api::utils::get_arch_name();
 
-        let url = self.api_manager.get_butler_url(os, arch).await
-            .context("Failed to get Butler download URL")?;
+        let url = get_butler_fallback_url(os, arch);
 
         progress_callback("butler", 0.0, "Downloading Butler...", 0, 0, None, None);
 
@@ -124,14 +120,9 @@ impl JreInstaller {
     ) -> Result<()> {
         // Get JRE URL using the patch API system
         let os = std::env::consts::OS;
-        let arch = match std::env::consts::ARCH {
-            "x86_64" => "amd64",
-            "aarch64" => "arm64",
-            other => other,
-        };
+        let arch = crate::game::patch_api::utils::get_arch_name();
 
-        let url = self.api_manager.get_jre_url(os, arch).await
-            .context("Failed to get JRE download URL")?;
+        let url = crate::game::patch_api::utils::get_java_adoptium_url(os, arch);
 
         self.download_jre_from_url(client, &url, base_dir, &progress_callback, cancel_token).await
     }
@@ -166,11 +157,11 @@ impl JreInstaller {
                 |pct, speed, total, downloaded, eta| {
                     let size_info = if total > 0 {
                         format!("{} / {}", 
-                            crate::game::downloader::format_bytes(downloaded), 
-                            crate::game::downloader::format_bytes(total)
+                            crate::game::patch_api::utils::format_bytes(downloaded), 
+                            crate::game::patch_api::utils::format_bytes(total)
                         )
                     } else {
-                        crate::game::downloader::format_bytes(downloaded)
+                        crate::game::patch_api::utils::format_bytes(downloaded)
                     };
                     
                     let eta_info = if let Some(eta_str) = &eta {

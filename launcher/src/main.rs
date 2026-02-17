@@ -82,8 +82,6 @@ mod util;
 
 mod services;
 
-mod messages;
-
 mod logic_handlers;
 
 mod profile_handlers;
