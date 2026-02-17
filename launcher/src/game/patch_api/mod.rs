@@ -42,9 +42,39 @@ impl PatchApiManager {
         manager
     }
 
+    /// Static helper for getting latest version
+    pub async fn get_latest_version_static(channel: &str, os: &str, arch: &str) -> Result<i32> {
+        let manager = Self::new();
+        manager.get_latest_version(channel, os, arch).await
+    }
+
+    /// Static helper for getting available versions
+    pub async fn get_available_versions_static(channel: &str, os: &str, arch: &str) -> Result<Vec<i32>> {
+        let manager = Self::new();
+        manager.get_available_versions(channel, os, arch).await
+    }
+
+    /// Static helper for getting patch URL
+    pub async fn get_patch_url_static(channel: &str, os: &str, arch: &str, from_version: i32, to_version: i32) -> Result<String> {
+        let manager = Self::new();
+        manager.get_patch_url(channel, os, arch, from_version, to_version).await
+    }
+
+    /// Static helper for checking complete version
+    pub async fn has_complete_version_static(channel: &str, os: &str, arch: &str, version: i32) -> bool {
+        let manager = Self::new();
+        manager.has_complete_version(channel, os, arch, version).await
+    }
+
     /// Try to get the latest version from any provider
     pub async fn get_latest_version(&self, channel: &str, os: &str, arch: &str) -> Result<i32> {
         for provider in &self.providers {
+            // Check if provider is available before attempting API calls
+            if !provider.is_available().await {
+                println!("⚠️  Provider {} is not available, skipping", provider.name());
+                continue;
+            }
+            
             if let Ok(version) = provider.get_latest_version(channel, os, arch).await {
                 println!("✅ Successfully got latest version {} from provider: {}", version, provider.name());
                 return Ok(version);
@@ -56,6 +86,12 @@ impl PatchApiManager {
     /// Try to get all available versions from any provider
     pub async fn get_available_versions(&self, channel: &str, os: &str, arch: &str) -> Result<Vec<i32>> {
         for provider in &self.providers {
+            // Check if provider is available before attempting API calls
+            if !provider.is_available().await {
+                println!("⚠️  Provider {} is not available, skipping", provider.name());
+                continue;
+            }
+            
             if let Ok(versions) = provider.get_available_versions(channel, os, arch).await {
                 println!("✅ Successfully got {} versions from provider: {}", versions.len(), provider.name());
                 return Ok(versions);
@@ -67,6 +103,12 @@ impl PatchApiManager {
     /// Try to get patch download URL from any provider
     pub async fn get_patch_url(&self, channel: &str, os: &str, arch: &str, from_version: i32, to_version: i32) -> Result<String> {
         for provider in &self.providers {
+            // Check if provider is available before attempting API calls
+            if !provider.is_available().await {
+                println!("⚠️  Provider {} is not available, skipping", provider.name());
+                continue;
+            }
+            
             if let Ok(url) = provider.get_patch_url(channel, os, arch, from_version, to_version).await {
                 println!("✅ Successfully got patch URL from provider: {}", provider.name());
                 return Ok(url);
@@ -78,6 +120,12 @@ impl PatchApiManager {
     /// Check if a complete version exists from any provider
     pub async fn has_complete_version(&self, channel: &str, os: &str, arch: &str, version: i32) -> bool {
         for provider in &self.providers {
+            // Check if provider is available before attempting API calls
+            if !provider.is_available().await {
+                println!("⚠️  Provider {} is not available, skipping", provider.name());
+                continue;
+            }
+            
             if let Ok(has_version) = provider.has_complete_version(channel, os, arch, version).await {
                 if has_version {
                     return true;

@@ -652,8 +652,6 @@ fn trim_memory_predictive() {
 /// Niveles de agresividad para el giro de memoria
 #[derive(Debug, Clone, Copy)]
 pub enum TrimLevel {
-    /// Suave: solo recolección básica (sin medición detallada)
-    Gentle,
     /// Normal: recolección estándar con medición
     Normal,
     /// Agresivo: limpieza completa con múltiples pasadas
@@ -752,7 +750,7 @@ fn force_linux_swap_behavior() {
         // Esto incentiva al kernel a mover las páginas a swap
         #[cfg(target_os = "linux")]
         {
-            use libc::{madvise, MADV_DONTNEED, MADV_SEQUENTIAL, MADV_RANDOM};
+            use libc::{madvise, MADV_DONTNEED};
             
             // Intentar liberar memoria del proceso actual usando madvise
             // Nota: Esto es experimental y puede no funcionar en todos los sistemas
@@ -799,25 +797,6 @@ pub fn trim_memory_with_level(level: TrimLevel) {
     }
     
     match level {
-        TrimLevel::Gentle => {
-            // Solo recolección básica, sin forzar
-            #[cfg(target_os = "linux")]
-            unsafe {
-                unsafe extern "C" {
-                    fn mi_collect(force: bool);
-                }
-                mi_collect(false); // No forzar
-            }
-            
-            #[cfg(target_os = "windows")]
-            unsafe {
-                use windows_sys::Win32::System::ProcessStatus::K32EmptyWorkingSet;
-                use windows_sys::Win32::System::Threading::GetCurrentProcess;
-                let process = GetCurrentProcess();
-                K32EmptyWorkingSet(process);
-            }
-        }
-        
         TrimLevel::Normal => {
             // Comportamiento estándar original
             #[cfg(target_os = "windows")]
@@ -949,7 +928,6 @@ pub fn trim_memory_with_level(level: TrimLevel) {
         }
         
         let level_emoji = match level {
-            TrimLevel::Gentle => "🌸",
             TrimLevel::Normal => "🌀",
             TrimLevel::Aggressive => "🌪️",
             TrimLevel::Extreme => "💥",

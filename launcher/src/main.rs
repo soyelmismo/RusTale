@@ -3324,89 +3324,68 @@ impl RusTale {
 
 
             Message::ProgressUpdate(payload) => {
-
                 // Track progress changes for stuck detection using GLOBAL progress
-
                 let progress_changed = (payload.global_progress * 100.0 - self.last_download_progress).abs() > 0.1;
-
                 if progress_changed {
-
                     self.last_download_progress = payload.global_progress * 100.0;
-
                     self.last_status_change = std::time::Instant::now(); // Reset timeout on progress
-
                 }
-
-
 
                 if payload.global_progress >= 1.0 || payload.message_key.contains("verified") {
-
                     self.status = LauncherStatus::Busy;
-
                 } else {
-
                     self.status = LauncherStatus::Downloading;
-
                 }
-
-
 
                 // Store the current progress payload for UI rendering
-
                 self.current_progress_payload = Some(payload.clone());
 
-                
-
                 // Update legacy fields for backward compatibility
-
                 self.download_progress = payload.global_progress * 100.0;
-
                 self.sub_progress = payload.step_progress * 100.0;
 
-                
-
-                // Use proper localization with arguments if available
-
-                self.status_text = if !payload.message_args.is_empty() {
-
-                    let args: Vec<&str> = payload.message_args.iter().map(|s| s.as_str()).collect();
-
-                    self.localization.ta(&payload.message_key, &args)
-
-                } else {
-
-                    self.localization.t(&payload.message_key).to_string()
-
-                };
-
-                
-
-                if let Some(stats) = &payload.stats {
-
-                    self.total_bytes = stats.total_bytes;
-
-                    self.downloaded_bytes = stats.downloaded_bytes;
-
-                    self.eta = stats.eta_str.clone();
-
+                // Extract current step from message if it contains step information
+                // Check if message_key indicates a step change or if we can derive step info
+                if payload.message_key.contains("step") || payload.message_key.contains("phase") {
+                    // Try to extract step number from message args or use a simple increment
+                    if let Some(step_str) = payload.message_args.first() {
+                        if let Ok(step_num) = step_str.parse::<usize>() {
+                            self.current_step = Some(step_num);
+                        }
+                    }
+                } else if let Some(current) = self.current_step {
+                    // Auto-increment step if we have significant progress and total_steps is set
+                    if let Some(total) = self.total_steps {
+                        // Simple heuristic: if global progress crosses certain thresholds, advance step
+                        let progress_percent = payload.global_progress * 100.0;
+                        let estimated_step = ((progress_percent / 100.0) * total as f32).ceil() as usize;
+                        if estimated_step > current && estimated_step <= total {
+                            self.current_step = Some(estimated_step);
+                        }
+                    }
                 }
 
+                // Use proper localization with arguments if available
+                self.status_text = if !payload.message_args.is_empty() {
+                    let args: Vec<&str> = payload.message_args.iter().map(|s| s.as_str()).collect();
+                    self.localization.ta(&payload.message_key, &args)
+                } else {
+                    self.localization.t(&payload.message_key).to_string()
+                };
 
+                if let Some(stats) = &payload.stats {
+                    self.total_bytes = stats.total_bytes;
+                    self.downloaded_bytes = stats.downloaded_bytes;
+                    self.eta = stats.eta_str.clone();
+                }
 
                 println!(
-
                     "[Progress] Global: {:.1}% | Step: {:.1}% | Status: {}",
-
-                    payload.global_progress * 100.0, 
-
-                    payload.step_progress * 100.0, 
-
+                    payload.global_progress * 100.0,
+                    payload.step_progress * 100.0,
                     payload.message_key
-
                 );
-
                 Task::none()
-
             }
 
             Message::GameLaunched(res) => {
@@ -5198,157 +5177,85 @@ impl RusTale {
 
 
         let left_column_content = column![
-
             profile_card::view(
-
                 &self.profiles,
-
                 &self.editing_profile,
-
                 &self.editing_uuid,
-
                 self.profile_dropdown_open && !is_interaction_disabled,
-
                 &self.localization,
-
                 ctx,
-
             ),
-
+            
             Space::new().height(Length::Fill),
-
+            
             control_section::view(
-
                 &self.status,
-
                 &self.settings,
-
                 self.latest_version,
-
                 &self.current_progress_payload,
-
                 &self.localization,
-
                 is_interaction_disabled,
-
                 self.server_patch_progress,
-
                 self.show_server_patch_progress,
-
+                self.current_step,
+                self.total_steps,
                 ctx,
-
             ),
-
         ]
-
         .spacing(20);
-
-
 
         let show_news = self.settings.enable_news && self.window_size.width > 750.0;
 
-
-
         let main_content: Element<'_, Message> = if show_news {
-
             let left_column = theme::magic_container(
-
                 container(left_column_content)
-
                     .width(Length::FillPortion(1))
-
                     .height(Length::Fill)
-
                     .padding(30)
-
                     .style(move |t| theme::glass_container(&ctx.palette, t))
-
                     .into(),
-
                 ctx,
-
             );
-
-
 
             let right_column = theme::magic_container(
-
                 container(
-
                     self.views.news
-
                         .view(&self.localization, is_interaction_disabled, ctx)
-
                         .map(Message::News),
-
                 )
-
                 .width(Length::FillPortion(2))
-
                 .height(Length::Fill)
-
                 .padding(30)
-
                 .style(move |t| theme::container_style_transparent(&ctx.palette, t))
-
                 .into(),
-
                 ctx,
-
             );
 
-
-
             // Renderizar siempre los contenedores con paleta con alfa variable
-
             Into::<Element<'_, Message>>::into(
-
                 container(
-
                     row![left_column, right_column]
-
                         .width(Length::Fill)
-
                         .height(Length::Fill)
-
                         .padding(20)
-
                         .spacing(20),
-
                 )
-
                 .width(Length::Fill)
-
                 .height(Length::Fill),
-
             )
-
         } else {
-
             // MODO COMPACTO
-
             // Usamos Length::Fill para que ocupe todo el ancho disponible
-
             // Reducimos el padding para aprovechar espacio en ventanas muy pequenas (480px)
-
             let padding = if self.window_size.width < 500.0 {
-
                 10
-
             } else {
-
                 30
-
             };
 
-
-
             let left_column = theme::magic_container(
-
                 container(left_column_content)
-
                     .width(Length::Fill)
-
                     .height(Length::Fill)
 
                     .padding(padding) // Padding dinamico

@@ -1,30 +1,11 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
-use std::sync::{Arc, atomic::AtomicBool};
+use std::sync::atomic;
 
-use crate::game::patch_api::utils::*;
 
 pub mod proxy;
 
 
-/// Downloads and installs JRE if not already installed.
-/// Installs into `.../RusTale/tools/jre/latest` to persist across game deletions.
-/// Downloads JRE with automatic fallback using PatchApiManager
-pub async fn download_jre(
-    client: &reqwest::Client,
-    base_dir: &PathBuf,
-    progress_callback: impl Fn(&str, f64, &str, u64, u64, Option<String>) + Clone + Send + Sync + 'static,
-    cancel_token: Option<Arc<AtomicBool>>,
-) -> Result<()> {
-    // Map our local callback to match the frontend signature
-    let cb = move |phase: &str, pct: f64, msg: &str, total: u64, down: u64, eta: Option<String>| {
-        progress_callback(phase, pct, msg, total, down, eta);
-    };
-    
-    crate::game::patch_api::PatchApiFrontend::get_instance()
-        .download_jre(client, base_dir, cb, cancel_token)
-        .await
-}
 
 /// Gets the path to the Java executable from the tools/jre/latest directory
 pub fn get_java_exec(base_dir: &PathBuf) -> Result<String> {

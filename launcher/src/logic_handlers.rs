@@ -1,13 +1,11 @@
 /// Logic handlers for core business operations
 /// This module contains all the heavy Task-creating logic that was previously in main.rs
 
-use crate::config::{self, GameSettings};
+use crate::config;
 use crate::game::{self, install::InstallPolicy, GamePaths, LauncherStatus};
 use crate::{Message, RusTale};
-use crate::services::Services;
 use iced::Task;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 
 impl RusTale {
     /// Handles the game start logic

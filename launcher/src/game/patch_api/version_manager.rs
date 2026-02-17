@@ -1,26 +1,22 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::path::PathBuf;
-use std::sync::Arc;
 
-use super::PatchApiManager;
-use super::utils::*;
+use super::{PatchApiManager, utils::*};
 use crate::game::patcher::GameVersionInfo;
 
 /// Manager for game version operations using the new patch API system
 #[derive(Clone)]
 pub struct VersionManager {
-    api_manager: Arc<PatchApiManager>,
 }
 
 impl VersionManager {
-    pub fn new(api_manager: Arc<PatchApiManager>) -> Self {
-        Self { api_manager }
+    pub fn new() -> Self {
+        Self {}
     }
 
     /// Gets comprehensive version information for a channel
     pub async fn get_version_info(
         &self,
-        client: &reqwest::Client,
         base_dir: &PathBuf,
         channel: &str,
         user_version: i32,
@@ -30,14 +26,14 @@ impl VersionManager {
             .unwrap_or(0);
 
         // Get latest version from patch API
-        let latest = self.api_manager.get_latest_version(channel, std::env::consts::OS, get_arch_name()).await?;
+        let latest = PatchApiManager::get_latest_version_static(channel, std::env::consts::OS, get_arch_name()).await?;
 
         // Generate default list (assuming all versions exist)
         let mut available: Vec<i32> = (1..=latest).collect();
         available.reverse(); // From newest to oldest for the UI
 
         // Try to get real available versions from patch API
-        let available_versions_from_fallback = match self.api_manager.get_available_versions(channel, std::env::consts::OS, get_arch_name()).await {
+        let available_versions_from_fallback = match PatchApiManager::get_available_versions_static(channel, std::env::consts::OS, get_arch_name()).await {
             Ok(versions) => {
                 println!("Using {} versions from patch API for channel {}", versions.len(), channel);
                 Some(versions)
@@ -70,14 +66,14 @@ impl VersionManager {
 
         // If we have a hint, try it first
         if let Some(hint) = start_hint {
-            if hint > 0 && self.api_manager.has_complete_version(channel, os, arch, hint).await {
+            if hint > 0 && PatchApiManager::has_complete_version_static(channel, os, arch, hint).await {
                 println!("Starting from hint: version {}", hint);
                 return Ok(hint);
             }
         }
 
         // Get latest version from patch API
-        self.api_manager.get_latest_version(channel, os, arch).await
+        PatchApiManager::get_latest_version_static(channel, os, arch).await
     }
 
     /// Gets all available versions for a channel
@@ -85,7 +81,7 @@ impl VersionManager {
         let os = std::env::consts::OS;
         let arch = get_arch_name();
         
-        self.api_manager.get_available_versions(channel, os, arch).await
+        PatchApiManager::get_available_versions_static(channel, os, arch).await
     }
 
     /// Checks if a specific version exists
@@ -93,7 +89,7 @@ impl VersionManager {
         let os = std::env::consts::OS;
         let arch = get_arch_name();
         
-        self.api_manager.has_complete_version(channel, os, arch, version).await
+        PatchApiManager::has_complete_version_static(channel, os, arch, version).await
     }
 
     /// Gets patch download URL for a version range
@@ -106,7 +102,7 @@ impl VersionManager {
         let os = std::env::consts::OS;
         let arch = get_arch_name();
         
-        self.api_manager.get_patch_url(channel, os, arch, from_version, to_version).await
+        PatchApiManager::get_patch_url_static(channel, os, arch, from_version, to_version).await
     }
 }
 

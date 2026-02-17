@@ -1,5 +1,4 @@
 /// Utility functions for patch API providers
-use std::collections::BTreeMap;
 
 /// Format bytes in human-readable format
 pub fn format_bytes(bytes: u64) -> String {
@@ -25,20 +24,6 @@ pub fn format_speed(bytes_per_sec: f64) -> String {
     }
 }
 
-/// Extract filename from HTML directory listing
-/// Look for patterns like: <a href="filename.ext">filename.ext</a>
-pub fn extract_filename_from_html(line: &str) -> Option<String> {
-    if let Some(start) = line.find("href=\"") {
-        let start = start + 6;
-        if let Some(end) = line[start..].find("\"") {
-            let filename = &line[start..start + end];
-            if filename.contains('.') && !filename.starts_with('?') && !filename.starts_with('/') {
-                return Some(filename.to_string());
-            }
-        }
-    }
-    None
-}
 
 /// Check if a filename looks like a JRE distribution file
 pub fn looks_like_jre_file(filename: &str) -> bool {
@@ -87,26 +72,6 @@ pub fn looks_like_butler_file(filename: &str) -> bool {
     is_archive && is_butler && !is_excluded
 }
 
-/// Extract version information from filename
-/// Supports patterns like:
-/// - "v8-linux-amd64.pwr" -> (0, 8)
-/// - "v19~20-linux-amd64.pwr" -> (19, 20)
-/// - "jre-17.0.2-windows-x64.zip" -> Some(17.0.2)
-pub fn extract_version_from_filename(filename: &str) -> Option<String> {
-    // Try to extract semantic version first (like "17.0.2")
-    let version_regex = regex::Regex::new(r"(\d+\.\d+\.\d+(?:\.\d+)*)").ok()?;
-    if let Some(caps) = version_regex.captures(filename) {
-        return Some(caps[1].to_string());
-    }
-    
-    // Try to extract single version number (like "v8" or "v20")
-    let single_version_regex = regex::Regex::new(r"v(\d+)").ok()?;
-    if let Some(caps) = single_version_regex.captures(filename) {
-        return Some(caps[1].to_string());
-    }
-    
-    None
-}
 
 /// Extract version range from filename for patches
 /// Returns (from_version, to_version)
@@ -135,69 +100,19 @@ pub fn extract_versions_from_filename(filename: &str) -> Option<(i32, i32)> {
     }
 }
 
-/// Get the latest filename from a slice of filenames
-/// Assumes that newer files have names that sort later alphabetically
-pub fn get_latest_filename(filenames: &[String]) -> Option<String> {
-    if filenames.is_empty() {
-        return None;
-    }
-    
-    // Sort and take the last one
-    let mut sorted_filenames = filenames.to_vec();
-    sorted_filenames.sort();
-    sorted_filenames.pop()
-}
 
-/// Get the latest file from a map of filenames to URLs
-/// Returns the filename and URL of the latest file
-pub fn get_latest_file_from_map(file_map: &BTreeMap<String, String>) -> Option<(&String, &String)> {
-    if file_map.is_empty() {
-        return None;
-    }
-    
-    // BTreeMap is already sorted by key, so the last entry is the latest
-    file_map.iter().last()
-}
 
-/// Filter filenames by a predicate function
-pub fn filter_filenames<F>(filenames: &[String], predicate: F) -> Vec<String>
-where
-    F: Fn(&str) -> bool,
-{
-    filenames
-        .iter()
-        .filter(|filename| predicate(filename))
-        .cloned()
-        .collect()
-}
 
 /// Get architecture name in standard format
 pub fn get_arch_name() -> &'static str {
     match std::env::consts::ARCH {
         "x86_64" => "amd64",
         "aarch64" => "arm64",
-        other => other,
+        _ => std::env::consts::ARCH,
     }
 }
 
-/// Get OS name in standard format
-pub fn get_os_name() -> &'static str {
-    match std::env::consts::OS {
-        "windows" => "windows",
-        "macos" => "darwin",
-        _ => std::env::consts::OS,
-    }
-}
 
-/// Try multiple URLs and return the first one that exists
-pub async fn find_first_existing_url(client: &reqwest::Client, urls: &[String]) -> Option<String> {
-    for url in urls {
-        if check_file_exists(client, url).await {
-            return Some(url.clone());
-        }
-    }
-    None
-}
 
 /// Get Butler download URL from itch.io CDN fallback
 /// This works as a universal fallback for all platforms
@@ -210,10 +125,7 @@ pub fn get_butler_fallback_url(os: &str, arch: &str) -> String {
 pub fn get_java_adoptium_url(os: &str, arch: &str) -> String {
     // Map to Adoptium's naming conventions
     let os_name = match os {
-        "windows" => "windows",
         "darwin" => "mac",  // Adoptium uses "mac" instead of "darwin"
-        "linux" => "linux",
-        other => os,
         _ => os,
     };
     
@@ -266,11 +178,6 @@ where
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_extract_filename_from_html() {
-        let line = r#"<a href="test-file.tar.gz">test-file.tar.gz</a>"#;
-        assert_eq!(extract_filename_from_html(line), Some("test-file.tar.gz".to_string()));
-    }
 
     #[test]
     fn test_looks_like_jre_file() {
@@ -295,12 +202,6 @@ mod tests {
         assert_eq!(extract_versions_from_filename("invalid.txt"), None);
     }
 
-    #[test]
-    fn test_get_latest_filename() {
-        // This test would need to be implemented based on actual usage
-        // For now, we'll test the extraction function works
-        assert!(true); // Placeholder
-    }
 
     #[test]
     fn test_get_butler_fallback_url() {

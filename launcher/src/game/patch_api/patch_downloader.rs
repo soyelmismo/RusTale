@@ -9,12 +9,11 @@ use crate::game::paths::GamePaths;
 /// Downloader for game patches using the new patch API system
 #[derive(Clone)]
 pub struct PatchDownloader {
-    api_manager: Arc<PatchApiManager>,
 }
 
 impl PatchDownloader {
-    pub fn new(api_manager: Arc<PatchApiManager>) -> Self {
-        Self { api_manager }
+    pub fn new() -> Self {
+        Self {}
     }
 
     /// Downloads a patch for the specified version range
@@ -33,7 +32,7 @@ impl PatchDownloader {
         tokio::fs::create_dir_all(&cache_dir).await?;
 
         // Get patch URL from patch API
-        let patch_url = self.api_manager.get_patch_url(channel, std::env::consts::OS, get_arch_name(), from_version, to_version).await
+        let patch_url = PatchApiManager::get_patch_url_static(channel, std::env::consts::OS, get_arch_name(), from_version, to_version).await
             .context("Failed to get patch download URL")?;
 
         // Generate filename
@@ -49,25 +48,11 @@ impl PatchDownloader {
                 &patch_url,
                 &patch_path,
                 |pct, speed, total, downloaded, eta| {
-                    let size_info = if total > 0 {
-                        format!("{} / {}", 
-                            crate::game::patch_api::utils::format_bytes(downloaded), 
-                            crate::game::patch_api::utils::format_bytes(total)
-                        )
-                    } else {
-                        crate::game::patch_api::utils::format_bytes(downloaded)
-                    };
-                    
-                    let eta_info = if let Some(eta_str) = &eta {
-                        format!(" • ETA: {}", eta_str)
-                    } else {
-                        String::new()
-                    };
                     
                     progress_callback(
                         "patch",
                         pct as f64,
-                        &format!("{}→{} ", from_version, to_version),
+                        &format!("{} - {}→{}", speed, from_version, to_version),
                         total,
                         downloaded,
                         eta,

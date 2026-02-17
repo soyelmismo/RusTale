@@ -13,6 +13,8 @@ pub fn view<'a>(
     is_disabled: bool,
     server_patch_progress: f32,
     show_server_patch_progress: bool,
+    current_step: Option<usize>,
+    total_steps: Option<usize>,
     ctx: theme::UIContext,
 ) -> Element<'a, Message> {
 
@@ -204,7 +206,12 @@ pub fn view<'a>(
                 row![
                     theme::text_micro(status_msg, ctx),
                     Space::new().width(Length::Fill),
-                    theme::text_micro(format!("{:.0}%", data.global_progress * 100.0), ctx)
+                    // Show step information if available
+                    if let (Some(step), Some(total)) = (current_step, total_steps) {
+                        theme::text_micro(format!("Step {}/{}", step, total), ctx)
+                    } else {
+                        theme::text_micro(format!("{:.0}%", data.global_progress * 100.0), ctx)
+                    }
                 ],
                 
                 // Primary progress bar (Global Progress)

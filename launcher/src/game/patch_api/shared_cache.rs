@@ -1,18 +1,17 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::{Arc, atomic::AtomicBool};
 
 use super::{PatchDownloader, PatchApiManager};
 
 /// Shared cache manager for patch downloads
 /// This ensures both client and server use the same cache files
 pub struct SharedCacheManager {
-    api_manager: Arc<PatchApiManager>,
 }
 
 impl SharedCacheManager {
-    pub fn new(api_manager: Arc<PatchApiManager>) -> Self {
-        Self { api_manager }
+    pub fn new() -> Self {
+        Self { }
     }
 
     /// Get or download a patch file (shared between client and server)
@@ -35,7 +34,7 @@ impl SharedCacheManager {
         }
 
         // Download patch using the new patch API system
-        let downloader = PatchDownloader::new(self.api_manager.clone());
+        let downloader = PatchDownloader::new();
         downloader.download_patch(
             client,
             base_dir,
@@ -174,14 +173,11 @@ use std::sync::OnceLock;
 static SHARED_CACHE: OnceLock<SharedCacheManager> = OnceLock::new();
 
 /// Initialize the shared cache system
-pub fn init_shared_cache(api_manager: Arc<PatchApiManager>) {
-    SHARED_CACHE.get_or_init(|| SharedCacheManager::new(api_manager));
+pub fn init_shared_cache() {
+    SHARED_CACHE.get_or_init(|| SharedCacheManager::new());
 }
 
 /// Get the global shared cache instance
 pub fn get_shared_cache() -> &'static SharedCacheManager {
-    SHARED_CACHE.get_or_init(|| {
-        let api_manager = Arc::new(PatchApiManager::new());
-        SharedCacheManager::new(api_manager)
-    })
+    SHARED_CACHE.get_or_init(|| SharedCacheManager::new())
 }

@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 
@@ -12,8 +12,6 @@ const SHIPOFYARN_API_URL: &str = "https://thecute.cloud/ShipOfYarn/api.php";
 #[derive(Debug, Clone, Deserialize)]
 pub struct ShipOfYarnAPI {
     pub hytale: HytaleData,
-    pub jre: JreData,
-    pub butler: ButlerData,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -39,19 +37,6 @@ pub struct PlatformFiles {
     pub patch: Option<HashMap<String, String>>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct JreData {
-    pub linux: HashMap<String, String>,
-    pub windows: HashMap<String, String>,
-    pub mac: HashMap<String, String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ButlerData {
-    pub linux: HashMap<String, String>,
-    pub windows: HashMap<String, String>,
-    pub mac: HashMap<String, String>,
-}
 
 /// ShipOfYarn API provider (fallback API)
 pub struct ShipOfYarnProvider {

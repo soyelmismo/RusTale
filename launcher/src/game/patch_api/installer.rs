@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, atomic::AtomicBool};
 use tokio::io::AsyncBufReadExt;
 
-use super::PatchApiManager;
 use crate::game::paths::GamePaths;
 use crate::util::make_executable;
 use crate::game::patch_api::get_butler_fallback_url;
@@ -11,12 +10,11 @@ use crate::game::patch_api::get_butler_fallback_url;
 /// Installer for Butler using the new patch API system
 #[derive(Clone)]
 pub struct ButlerInstaller {
-    api_manager: Arc<PatchApiManager>,
 }
 
 impl ButlerInstaller {
-    pub fn new(api_manager: Arc<PatchApiManager>) -> Self {
-        Self { api_manager }
+    pub fn new() -> Self {
+        Self {}
     }
 
     /// Installs Butler if not already installed
@@ -48,6 +46,41 @@ impl ButlerInstaller {
         progress_callback("butler", 0.0, "Downloading Butler...", 0, 0, None, None);
 
         let zip_path = tools_dir.join("butler.zip");
+
+        // Validate cached file before using it
+        if zip_path.exists() {
+            let file_name = url.split('/').last().unwrap_or("butler.zip");
+            if !crate::game::patch_api::utils::looks_like_butler_file(file_name) {
+                progress_callback("butler", 5.0, &format!("Invalid cached file: {}", file_name), 0, 0, None, None);
+                tokio::fs::remove_file(&zip_path).await?;
+            } else {
+                // Cached file is valid, proceed to extraction
+                progress_callback("butler", 70.0, "Extracting Butler...", 0, 0, None, None);
+                
+                let zip_path_clone = zip_path.clone();
+                let tools_dir_clone = tools_dir.clone();
+                
+                tokio::task::spawn_blocking(move || -> Result<()> {
+                    let file = std::fs::File::open(&zip_path_clone)
+                        .context("Failed to open Butler archive")?;
+                    let mut archive = zip::ZipArchive::new(file)
+                        .context("Failed to read Butler archive")?;
+                    archive
+                        .extract(&tools_dir_clone)
+                        .context("Failed to extract Butler")?;
+                    Ok(())
+                })
+                .await
+                .context("Butler extraction task failed")??;
+                
+                // Make executable on Unix
+                let _ = make_executable(&butler_path).await;
+                
+                progress_callback("butler", 100.0, "Butler installed from cache", 0, 0, None, None);
+                
+                return Ok(butler_path);
+            }
+        }
 
         // Download using the existing downloader
         crate::game::downloader::download_file(
@@ -102,12 +135,11 @@ impl ButlerInstaller {
 /// Installer for JRE using the new patch API system
 #[derive(Clone)]
 pub struct JreInstaller {
-    api_manager: Arc<PatchApiManager>,
 }
 
 impl JreInstaller {
-    pub fn new(api_manager: Arc<PatchApiManager>) -> Self {
-        Self { api_manager }
+    pub fn new() -> Self {
+        Self {}
     }
 
     /// Downloads and installs JRE if not already installed
@@ -145,6 +177,14 @@ impl JreInstaller {
 
         let file_name = jre_url.split('/').last().unwrap_or("jre.zip");
         let cache_file = cache_dir.join(file_name);
+
+        // Validate cached file before using it
+        if cache_file.exists() {
+            if !crate::game::patch_api::utils::looks_like_jre_file(file_name) {
+                progress_callback("jre", 5.0, &format!("Invalid cached file: {}", file_name), 0, 0, None);
+                tokio::fs::remove_file(&cache_file).await?;
+            }
+        }
 
         // Download if not cached
         if !cache_file.exists() {

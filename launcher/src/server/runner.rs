@@ -2,14 +2,11 @@ use crate::server::assets::{
     find_best_client_version, generate_server_args_with_direct_assets, validate_client_version,
 };
 use crate::server::config::ServerConfig;
-use crate::game::patch_api::utils::get_arch_name;
 use anyhow::{Context, Result};
 use std::path::PathBuf;
-use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
-
 // Import patch_api for shared cache functionality
 use crate::game::patch_api::{PatchApiFrontend, get_shared_cache};
 
@@ -146,7 +143,8 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
 
     // 1. Tool Validation (JRE e Itch/Butler)
     println!("[1/5] Validating tools...");
-    let callback = |task: &str, pct: f64, msg: &str, total: u64, downloaded: u64, eta: Option<String>, _current_step: Option<usize>| {
+    let callback = |task: &str, pct: f64, msg: &str, total: u64, downloaded: u64, eta: Option<String>, _step: Option<usize>| {
+        let eta_str = eta.map(|e| format!(" • ETA: {}", e)).unwrap_or_default();
         if pct == 0.0 || pct == 100.0 {
             let size_info = if total > 0 {
                 format!(" ({} / {})", 
@@ -157,13 +155,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
                 String::new()
             };
             
-            let eta_info = if let Some(eta_str) = &eta {
-                format!(" • ETA: {}", eta_str)
-            } else {
-                String::new()
-            };
-            
-            println!("{}... {}% ({}{})", task, pct, msg, size_info);
+            println!("{}... {}% ({}{})", task, pct, msg, eta_str);
         }
     };
 
@@ -198,14 +190,15 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     // 3. Resolver Version y Descargar Servidor
     println!("[2/5] Checking Game Server files...");
 
-    let target_ver_num = if config.game_version == "latest" {
-        let manager = crate::game::patch_api::PatchApiManager::new();
-        manager.get_latest_version(&config.branch, std::env::consts::OS, get_arch_name()).await?
+    // Get version info using centralized management
+    let version_info = patch_frontend
+        .get_version_info(&main_app_dir, &config.branch, 0) // We check client folder to see if we can recycle
+        .await?;
+
+    let target_ver_num = if config.game_version == "latest" || config.game_version == "0" {
+        version_info.latest_remote
     } else {
-        config
-            .game_version
-            .parse::<i32>()
-            .context("Invalid version number")?
+        config.game_version.parse::<i32>().context("Invalid version number")?
     };
 
     let server_jar_raw = install_dir.join("Server").join("HytaleServer.jar");
@@ -215,40 +208,19 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         println!("Checking for local game files in main installation...");
         let mut source_candidate = None;
 
-        // Find the best matching client version
-        let best_version = match find_best_client_version(
-            &main_app_dir,
-            &config.branch,
-            &config.game_version.to_string(),
-        ) {
-            Ok(version) => {
-                println!("Found matching client version: {}", version);
-                version
-            }
-            Err(e) => {
-                println!("Warning: {}", e);
-                // Fallback to original logic
-                let target_ver_num = if config.game_version == "latest" {
-                    let manager = crate::game::patch_api::PatchApiManager::new();
-                    manager.get_latest_version(&config.branch, std::env::consts::OS, get_arch_name()).await?
-                } else {
-                    config
-                        .game_version
-                        .parse::<i32>()
-                        .context("Invalid version number")?
-                };
-                target_ver_num.to_string()
-            }
+        // Find the best matching client version using centralized version management
+        let version_str = if config.game_version == "latest" || config.game_version == "0" {
+            "latest".to_string()
+        } else {
+            config.game_version.clone()
         };
-
-        // Candidate 1: Specific version folder
-        let specific = main_app_dir.join(&config.branch).join(&best_version);
+        let specific = main_app_dir.join(&config.branch).join(&version_str);
         if specific.exists() && specific.join("Server").exists() {
             source_candidate = Some(specific);
         }
 
         // Candidate 2: Latest folder (check version.json)
-        if source_candidate.is_none() && best_version == "latest" {
+        if source_candidate.is_none() && version_str == "latest" {
             let latest = main_app_dir.join(&config.branch).join("latest");
             if latest.exists() {
                 if let Ok(ver) =
@@ -264,7 +236,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
         if let Some(src) = source_candidate {
             println!(
                 "Found matching version {} at {:?}. Processing files...",
-                best_version, src
+                version_str, src
             );
             let _ = tokio::fs::create_dir_all(&install_dir).await;
 
@@ -273,7 +245,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
             if config.use_direct_assets {
                 // Validate client version has required files
                 if let Err(e) =
-                    validate_client_version(&main_app_dir, &config.branch, &best_version)
+                    validate_client_version(&main_app_dir, &config.branch, &version_str)
                 {
                     eprintln!("Client validation failed: {}", e);
                     eprintln!("Falling back to copying Assets.zip...");
@@ -341,7 +313,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
 
     // Find the best matching client version for assets (moved to higher scope)
     let main_app_dir = crate::config::get_app_dir();
-    let best_version = match find_best_client_version(
+    let version_str = match find_best_client_version(
         &main_app_dir,
         &config.branch,
         &config.game_version.to_string(),
@@ -366,13 +338,13 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
 
         // Try to find client installation
         // Candidate 1: Specific version folder
-        let specific = main_app_dir.join(&config.branch).join(&best_version);
+        let specific = main_app_dir.join(&config.branch).join(&version_str);
         if specific.exists() && specific.join("Assets.zip").exists() {
             source_candidate = Some(specific);
         }
 
         // Candidate 2: Latest folder
-        if source_candidate.is_none() && best_version == "latest" {
+        if source_candidate.is_none() && version_str == "latest" {
             let latest = main_app_dir.join(&config.branch).join("latest");
             if latest.exists() && latest.join("Assets.zip").exists() {
                 source_candidate = Some(latest);
@@ -387,7 +359,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
             if config.use_direct_assets {
                 // Validate client version has required files
                 if let Err(e) =
-                    validate_client_version(&main_app_dir, &config.branch, &best_version)
+                    validate_client_version(&main_app_dir, &config.branch, &version_str)
                 {
                     eprintln!("Client validation failed: {}", e);
                     eprintln!("Falling back to copying Assets.zip...");
@@ -433,7 +405,7 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
                 "Looking for assets in: {:?}",
                 main_app_dir
                     .join(&config.branch)
-                    .join(&best_version)
+                    .join(&version_str)
                     .join("Assets.zip")
             );
         }
@@ -446,10 +418,10 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
     let assets_exist_in_server = local_assets_path.exists();
     // Re-check if assets exist in client since source_candidate was consumed
     let assets_exist_in_client = {
-        let specific = main_app_dir.join(&config.branch).join(&best_version);
+        let specific = main_app_dir.join(&config.branch).join(&version_str);
         if specific.exists() && specific.join("Assets.zip").exists() {
             true
-        } else if best_version == "latest" {
+        } else if version_str == "latest" {
             let latest = main_app_dir.join(&config.branch).join("latest");
             latest.exists() && latest.join("Assets.zip").exists()
         } else {
@@ -459,64 +431,28 @@ pub async fn run_server_flow(mut config: ServerConfig) -> Result<()> {
 
     // Only download if NEITHER jar NOR original exists AND no assets are available anywhere
     if !jar_available && (!assets_exist_in_server && !assets_exist_in_client) {
-        println!(
-            "Downloading server version {} (no JAR or assets found locally)...",
-            target_ver_num
-        );
+        println!("[Server] No assets found. Downloading version {}...", target_ver_num);
+        
+        let cache = crate::game::patch_api::get_shared_cache();
+        let patch_path = cache.get_or_download_patch(
+            &client,
+            &root_dir, // Download into server root
+            &config.branch,
+            0, 
+            target_ver_num,
+            callback,
+            None,
+        ).await?;
 
-        let cache_dir = root_dir.join("cache");
-        let _ = tokio::fs::create_dir_all(&cache_dir).await;
-
-        // Manual PWR download
-        let pwr_name = format!("0-{}.pwr", target_ver_num);
-        let pwr_path = cache_dir.join(&pwr_name);
-
-        if !pwr_path.exists() {
-            println!("Downloading Patch for version {}", target_ver_num);
-            
-            // Download patch directly using shared cache
-            let patch_path = crate::game::patch_api::get_shared_cache()
-                .get_or_download_patch(
-                    &client,
-                    &cache_dir,
-                    &config.branch,
-                    0, // from_version (0 means complete installation)
-                    target_ver_num,
-                    |phase, progress, msg, total, downloaded, eta, step| {
-                        let size_info = if total > 0 {
-                            format!(" ({} / {})", 
-                                crate::game::patch_api::utils::format_bytes(downloaded), 
-                                crate::game::patch_api::utils::format_bytes(total)
-                            )
-                        } else {
-                            String::new()
-                        };
-                        
-                        let eta_info = if let Some(eta_str) = &eta {
-                            format!(" • ETA: {}", eta_str)
-                        } else {
-                            String::new()
-                        };
-                        
-                        println!("Downloading patch... {}% ({}{}{})", progress, msg, size_info, eta_info);
-                    },
-                    None,
-                ).await
-                .map_err(|e| anyhow::anyhow!("Failed to download server patch: {}", e))?;
-            let patch_path: PathBuf = patch_path;
-        }
-
-        println!("Applying patch via Butler...");
-        // FIX: Pasamos root_dir para que encuentre Butler en ./tools
+        println!("[Server] Applying patch via Butler...");
         crate::game::patcher::apply_pwr(
             &root_dir,
             &config.branch,
             &version_dir_name,
-            &pwr_path,
+            &patch_path,
             callback,
             None,
-        )
-        .await?;
+        ).await?;
 
         // After patch application, update server args to use the extracted assets
         config.server_args =

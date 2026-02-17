@@ -257,7 +257,7 @@ impl Recipe for Runner {
                         // Save version.json for latest installations
                         if install_settings.game_version == 0 {
                             let version_info = crate::game::patch_api::PatchApiFrontend::get_instance()
-                                .get_version_info(&install_client_clone, &install_base_clone, &install_channel_clone, 0).await;
+                                .get_version_info(&install_base_clone, &install_channel_clone, 0).await;
                             if let Ok(info) = version_info {
                                 if let Err(e) = crate::game::install::save_local_version(&install_base_clone, &install_channel_clone, info.latest_remote).await {
                                     println!("[WARNING] Failed to save version.json: {}", e);

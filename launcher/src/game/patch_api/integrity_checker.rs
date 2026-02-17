@@ -1,11 +1,9 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::sync::{Arc, atomic::AtomicBool};
-use std::fs::File;
 use std::io::Read;
 use tokio::fs;
 use tokio::io::AsyncReadExt;
-use ed25519_dalek::VerifyingKey;
 use tokio::task;
 
 use sha2::{Sha256, Digest};
@@ -58,8 +56,6 @@ impl IntegrityChecker {
     /// Verifies the integrity of the extracted game files
     /// This ensures that critical game files exist and are not empty
     pub async fn verify_extraction_integrity(&self, game_dir: &PathBuf) -> anyhow::Result<()> {
-        use tokio::fs;
-        
         // List of critical files/directories that must exist after extraction
         let critical_paths = vec![
             "Client", // Main game client directory
@@ -201,7 +197,7 @@ impl IntegrityChecker {
         // MOVIMIENTO CLAVE: spawn_blocking
         let result = task::spawn_blocking(move || {
             // Toda esta logica ahora ocurre en un thread independiente que no congela la UI
-            let mut file = File::open(&path)
+            let mut file = std::fs::File::open(&path)
                 .context("Failed to open patch file for integrity check")?;
             
             let file_size = file.metadata()
@@ -269,7 +265,7 @@ impl IntegrityChecker {
 
     /// Verifies patch signature using Ed25519
     pub async fn verify_patch_signature(&self, patch_path: &PathBuf, signature_path: &PathBuf) -> Result<bool> {
-        use ed25519_dalek::{Verifier, VerifyingKey, Signature};
+        use ed25519_dalek::{Verifier, Signature};
         
         if !signature_path.exists() {
             return Ok(false);
@@ -280,11 +276,13 @@ impl IntegrityChecker {
         }
         
         // Read signature file
-        let signature_bytes = std::fs::read(signature_path)
+        let signature_bytes = fs::read(signature_path)
+            .await
             .context("Failed to read signature file")?;
         
         // Read patch file
-        let patch_bytes = std::fs::read(patch_path)
+        let patch_bytes = fs::read(patch_path)
+            .await
             .context("Failed to read patch file")?;
         
         // Try to parse signature (64 bytes for Ed25519)
@@ -306,19 +304,18 @@ impl IntegrityChecker {
     }
 
     /// Loads trusted public key for signature verification
-    async fn load_trusted_public_key(&self) -> Result<VerifyingKey> {
-        use ed25519_dalek::VerifyingKey;
-        
+    async fn load_trusted_public_key(&self) -> Result<ed25519_dalek::VerifyingKey> {
         // Try to load from config directory first
         if let Some(config_dir) = crate::config::get_app_dir().to_str() {
             let pubkey_path = PathBuf::from(config_dir).join("trusted_public_key.bin");
             
             if pubkey_path.exists() {
-                let pubkey_bytes = std::fs::read(&pubkey_path)
+                let pubkey_bytes = fs::read(&pubkey_path)
+                    .await
                     .context("Failed to read trusted public key")?;
                 
                 if pubkey_bytes.len() == 32 {
-                    if let Ok(key) = VerifyingKey::from_bytes(&pubkey_bytes.try_into().unwrap()) {
+                    if let Ok(key) = ed25519_dalek::VerifyingKey::from_bytes(&pubkey_bytes.try_into().unwrap()) {
                          return Ok(key);
                     }
                 }
@@ -334,7 +331,7 @@ impl IntegrityChecker {
             0x1b, 0xe5, 0x0f, 0x9c, 0x4d, 0x2a, 0x7f, 0x9b,
         ];
         
-        Ok(VerifyingKey::from_bytes(&trusted_key).unwrap())
+        Ok(ed25519_dalek::VerifyingKey::from_bytes(&trusted_key).unwrap())
     }
 
     /// Verifies complete download integrity
@@ -367,7 +364,8 @@ impl IntegrityChecker {
         }
         
         // Check file size
-        let actual_size = std::fs::metadata(patch_path)
+        let actual_size = fs::metadata(patch_path)
+            .await
             .context("Failed to get patch metadata")?
             .len();
         
@@ -466,7 +464,8 @@ impl IntegrityChecker {
             return Ok(false);
         }
         
-        let metadata = std::fs::metadata(patch_path)
+        let metadata = fs::metadata(patch_path)
+            .await
             .context("Failed to get patch metadata")?;
         
         // Check if file has reasonable size (> 0 and < 10GB)
@@ -484,7 +483,7 @@ impl IntegrityChecker {
             return Ok(result);
         }
         
-        let mut file = File::open(patch_path)
+        let mut file = std::fs::File::open(patch_path)
             .context("Failed to open patch file")?;
         
         // Read first few bytes to check format

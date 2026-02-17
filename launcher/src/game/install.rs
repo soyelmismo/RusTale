@@ -1,9 +1,8 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
-use std::sync::{Arc, atomic::AtomicBool};
+use std::sync::atomic;
 use tokio::fs;
 
-use crate::game::patch_api::get_arch_name;
 
 /// Installation policy - defines the intent of the installation operation
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

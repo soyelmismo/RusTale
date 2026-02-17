@@ -20,9 +20,14 @@ impl RusTale {
                 let profiles = self.profiles.clone();
                 Task::perform(
                     async move {
-                        config::save_profiles(&profiles).await;
+                        config::save_profiles(&profiles).await
                     },
-                    |_| Message::None,
+                    |result| {
+                        if let Err(e) = result {
+                            return Message::DownloadError(format!("Failed to save profile: {}", e));
+                        }
+                        Message::None
+                    },
                 )
             }
 
@@ -56,9 +61,14 @@ impl RusTale {
                     let profiles = self.profiles.clone();
                     return Task::perform(
                         async move {
-                            config::save_profiles(&profiles).await;
+                            config::save_profiles(&profiles).await
                         },
-                        |_| Message::None,
+                        |result| {
+                            if let Err(e) = result {
+                                return Message::DownloadError(format!("Failed to save profile: {}", e));
+                            }
+                            Message::None
+                        },
                     );
                 }
                 Task::none()
@@ -98,9 +108,14 @@ impl RusTale {
                         let profiles = self.profiles.clone();
                         return Task::perform(
                             async move {
-                                config::save_profiles(&profiles).await;
+                                config::save_profiles(&profiles).await
                             },
-                            |_| Message::None,
+                            |result| {
+                                if let Err(e) = result {
+                                    return Message::DownloadError(format!("Failed to save profile: {}", e));
+                                }
+                                Message::None
+                            },
                         );
                     }
                 }
@@ -143,9 +158,14 @@ impl RusTale {
                             let profiles = self.profiles.clone();
                             return Task::perform(
                                 async move {
-                                    config::save_profiles(&profiles).await;
+                                    config::save_profiles(&profiles).await
                                 },
-                                |_| Message::None,
+                                |result| {
+                                    if let Err(e) = result {
+                                        return Message::DownloadError(format!("Failed to save profile: {}", e));
+                                    }
+                                    Message::None
+                                },
                             );
                         }
                     }

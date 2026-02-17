@@ -97,7 +97,7 @@ pub async fn calculate_status(
 
     // Step 3: Latest mode - check for updates using PatchApiFrontend
     let version_info = crate::game::patch_api::PatchApiFrontend::get_instance()
-        .get_version_info(client, &paths.root, channel, settings.game_version as i32)
+        .get_version_info(&paths.root, channel, settings.game_version as i32)
         .await;
     
     let version_info = match version_info {

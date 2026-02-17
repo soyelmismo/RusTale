@@ -147,6 +147,14 @@ pub async fn apply_pwr(
 
         // Use read_until(b'\r') because Butler uses \r to update progress without newlines
         while let Ok(n) = stdout_reader.read_until(b'\r', &mut line_buf).await {
+            // Check for cancellation
+            if let Some(token) = &cancel_token {
+                if token.load(Ordering::Relaxed) {
+                    let _ = child.kill().await;
+                    return Err(anyhow::anyhow!("Operation cancelled"));
+                }
+            }
+            
             if n == 0 {
                 break;
             }
