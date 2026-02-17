@@ -197,8 +197,6 @@ impl Recipe for Runner {
                 let install_settings = settings.clone();
                 let install_client = client.clone();
                 let install_base = base_dir.clone();
-                let install_base_clone = install_base.clone();
-                let install_channel_clone = install_settings.channel.clone();
 
                 tokio::spawn(async move {
                     let progress_tx = tx.clone();
@@ -262,34 +260,6 @@ impl Recipe for Runner {
                         println!(
                             "[Install] Installation completed successfully, preparing to launch"
                         );
-
-                        // Save version.json for latest installations
-                        if install_settings.game_version == 0 {
-                            let version_info =
-                                crate::game::patch_api::PatchApiFrontend::get_instance()
-                                    .get_version_info(
-                                        &install_base_clone,
-                                        &install_channel_clone,
-                                        0,
-                                    )
-                                    .await;
-                            if let Ok(info) = version_info {
-                                if let Err(e) = crate::game::install::save_local_version(
-                                    &install_base_clone,
-                                    &install_channel_clone,
-                                    info.latest_remote,
-                                )
-                                .await
-                                {
-                                    println!("[WARNING] Failed to save version.json: {}", e);
-                                } else {
-                                    println!(
-                                        "[INFO] Saved version.json for latest version: {}",
-                                        info.latest_remote
-                                    );
-                                }
-                            }
-                        }
 
                         let _ = output
                             .send(Message::ProgressUpdate(
@@ -540,7 +510,8 @@ impl Recipe for Runner {
 
                 // Aurora ya está disponible en tools/aurora{DLL_SUFFIX}
                 // En Windows se copia a la carpeta del cliente como Secur32.dll
-                if settings.enable_online_fix {
+                #[cfg(target_os = "windows")]
+                let security_cleanup_guard = if settings.enable_online_fix {
                     let tools_aurora_path = crate::config::get_app_dir()
                         .join("tools")
                         .join(format!("aurora{}", std::env::consts::DLL_SUFFIX));
@@ -554,28 +525,28 @@ impl Recipe for Runner {
                         return;
                     }
 
-                    #[cfg(target_os = "windows")]
-                    {
-                        let dll_path = executable_path
-                            .parent()
-                            .map(|p| p.join("Secur32.dll"))
-                            .unwrap_or_else(|| executable_path.join("Secur32.dll"));
+                    let dll_path = executable_path
+                        .parent()
+                        .map(|p| p.join("Secur32.dll"))
+                        .unwrap_or_else(|| executable_path.join("Secur32.dll"));
 
-                        if let Err(e) = std::fs::copy(&tools_aurora_path, &dll_path) {
-                            eprintln!("[Runner] Failed to copy Aurora binary: {}", e);
-                            return;
-                        }
-
-                        // Initialize the guard
-                        let security_cleanup_guard = FileCleanupGuard { path: dll_path };
-                        println!("[Runner] Security cleanup guard initialized for {:?}", security_cleanup_guard.path);
-                        // Store it in a variable that lasts the scope
-                        let _active_guard = security_cleanup_guard;
-                        println!("[Runner] Aurora copied to Secur32.dll");
+                    if let Err(e) = std::fs::copy(&tools_aurora_path, &dll_path) {
+                        eprintln!("[Runner] Failed to copy Aurora binary: {}", e);
+                        return;
                     }
 
-                    #[cfg(target_os = "linux")]
-                    {
+                    // Initialize the guard
+                    let security_cleanup_guard = FileCleanupGuard { path: dll_path };
+                    println!("[Runner] Security cleanup guard initialized for {:?}", security_cleanup_guard.path);
+                    println!("[Runner] Aurora copied to Secur32.dll");
+                    Some(security_cleanup_guard)
+                } else {
+                    None
+                };
+
+                #[cfg(target_os = "linux")]
+                {
+                    if settings.enable_online_fix {
                         println!("[Runner] Using Aurora binary from tools/");
                     }
                 }
@@ -831,6 +802,10 @@ impl Recipe for Runner {
                 if server_started {
                     let _ = server_stop_tx.send(());
                 }
+
+                // Ensure the security cleanup guard stays alive until here
+                #[cfg(target_os = "windows")]
+                let _ = security_cleanup_guard;
 
                 let _ = output.send(Message::GameStopped).await;
             },

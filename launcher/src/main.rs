@@ -1921,38 +1921,7 @@ impl RusTale {
                 if self.memory_stats.auto_trims % 6 == 0 {
                     println!("[MONITOR] {}", self.memory_stats.format_status());
                 }
-                // Rebuild tray menu to show "Start Game"
-
-                self.rebuild_tray_menu();
-                // Modificamos la logica aqui para mayor seguridad:
-
-                // Solo salimos si es quickplay Y la ventana no esta visible.
-
-                if self.is_quickplay_mode && !self.is_window_visible {
-                    return self.save_and_exit();
-                }
-                if self.settings.minimize_on_play {
-                    self.is_window_visible = true;
-
-                    return window::oldest().and_then(|id| {
-                        Task::batch(vec![
-                            window::set_mode(id, window::Mode::Windowed),
-                            window::gain_focus(id),
-                        ])
-                    });
-                }
-                // Si veniamos de quickplay pero el usuario abrio la ventana,
-
-                // nos aseguramos de que la ventana se quede visible y activa.
-
-                if self.is_window_visible {
-                    return window::oldest().and_then(|id| {
-                        Task::batch(vec![
-                            window::set_mode(id, window::Mode::Windowed),
-                            window::gain_focus(id),
-                        ])
-                    });
-                }
+                
                 Task::none()
             }
             Message::News(msg) => {

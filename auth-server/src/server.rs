@@ -61,7 +61,7 @@ pub async fn start_server(
     println!("Initializing constant JWKS...");
     println!("[Server] Identity directory: {:?}", identity_dir);
     
-    if let Err(e) = crypto::set_identity_dir(identity_dir.clone()) {
+    if let Err(_) = crypto::set_identity_dir(identity_dir.clone()) {
         // Only log warning, don't return Err if it was already set
         println!("[Server] Identity directory was already initialized by caller.");
     }

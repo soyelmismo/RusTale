@@ -148,13 +148,6 @@ pub fn get_private_jwk_as_value() -> serde_json::Value {
     })
 }
 
-/// Retorna la ruta al archivo de llave privada
-fn get_key_file_path() -> PathBuf {
-    let path = get_identity_dir().join("host.key");
-    println!("[Crypto] Key file path: {:?}", path);
-    path
-}
-
 /// Inicializa la identidad criptografica del servidor.
 ///
 /// 1. Intenta leer `identity/host.key`.

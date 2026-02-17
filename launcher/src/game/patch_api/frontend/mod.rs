@@ -87,7 +87,7 @@ impl PatchApiFrontend {
         }
         
         // Phase 7: Final verification
-        self.phase_finalize(&tracker, base_dir, channel, target_version).await?;
+        self.phase_finalize(&tracker, base_dir, channel, target_version, target_ver_val).await?;
         
         Ok(())
     }

@@ -752,6 +752,7 @@ fn should_use_windows_style() -> bool {
 }
 
 /// Fuerza a Linux a mover páginas a swap/zram (comportamiento similar a Windows)
+#[cfg(target_os = "linux")]
 fn force_linux_swap_behavior() {
     println!("[Swap] Forzando comportamiento similar a Windows en Linux...");
 
@@ -770,7 +771,6 @@ fn force_linux_swap_behavior() {
 
         // 3. Usar madvise para indicar al kernel que las páginas no son necesarias
         // Esto incentiva al kernel a mover las páginas a swap
-        #[cfg(target_os = "linux")]
         {
             use libc::{MADV_DONTNEED, madvise};
 
@@ -786,7 +786,6 @@ fn force_linux_swap_behavior() {
         }
 
         // 4. Forzar sync para asegurar que los datos se escriban en disco
-        #[cfg(target_os = "linux")]
         {
             unsafe extern "C" {
                 fn sync();

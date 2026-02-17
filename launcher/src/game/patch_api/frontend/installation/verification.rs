@@ -10,6 +10,7 @@ impl PatchApiFrontend {
         base_dir: &std::path::PathBuf,
         channel: &str,
         target_version: Option<i32>,
+        target_ver_val: i32,
     ) -> anyhow::Result<()> {
         WeightedProgressTracker::set_phase(tracker, "finalize");
         WeightedProgressTracker::report(
@@ -67,6 +68,25 @@ impl PatchApiFrontend {
         if verification_passed {
             WeightedProgressTracker::report_simple(tracker, 1.0, "launcher.status.ready", None);
             println!("[SUCCESS] Installation completed successfully");
+            
+            // Save version.json only for latest installations and only after successful verification
+            if is_latest {
+                if let Err(e) = crate::game::install::save_local_version(
+                    base_dir,
+                    channel,
+                    target_ver_val,
+                )
+                .await
+                {
+                    println!("[WARNING] Failed to save version.json: {}", e);
+                } else {
+                    println!(
+                        "[INFO] Saved version.json for latest version: {}",
+                        target_ver_val
+                    );
+                }
+            }
+            
             Ok(())
         } else {
             anyhow::bail!(

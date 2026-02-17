@@ -9,7 +9,7 @@ use super::utils::*;
 
 const SHIPOFYARN_API_URL: &str = "https://thecute.cloud/ShipOfYarn/api.php";
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct ShipOfYarnAPI {
     pub hytale: HytaleData,
 }
@@ -31,10 +31,8 @@ pub struct PlatformData {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct PlatformFiles {
-    #[serde(flatten)]
-    pub files: HashMap<String, String>,
-    #[allow(dead_code)]
-    pub patch: Option<HashMap<String, String>>,
+    pub patch: HashMap<String, String>,
+    pub base: HashMap<String, String>,
 }
 
 /// ShipOfYarn API provider (fallback API)
@@ -86,11 +84,11 @@ impl ShipOfYarnProvider {
         }
     }
 
-    fn get_files_for_current_os<'a>(channel_data: &'a PlatformData, os: &str) -> Result<&'a HashMap<String, String>> {
+    fn get_files_for_current_os<'a>(channel_data: &'a PlatformData, os: &str) -> Result<&'a PlatformFiles> {
         match os {
-            "linux" => Ok(&channel_data.linux.files),
-            "windows" => Ok(&channel_data.windows.files),
-            "macos" => Ok(&channel_data.mac.files),
+            "linux" => Ok(&channel_data.linux),
+            "windows" => Ok(&channel_data.windows),
+            "macos" => Ok(&channel_data.mac),
             _ => anyhow::bail!("Unsupported OS: {}", os),
         }
     }
@@ -123,8 +121,16 @@ impl ShipOfYarnProvider {
             format!("v{}~{}-{}-{}.pwr", prev_version, target_version, os, arch),
         ];
 
-        for filename in possible_filenames {
-            if let Some(url) = os_data.get(&filename) {
+        // First check in patch files (for incremental updates)
+        for filename in &possible_filenames {
+            if let Some(url) = os_data.patch.get(filename) {
+                return Ok(url.clone());
+            }
+        }
+
+        // Then check in base files (for complete versions)
+        for filename in &possible_filenames {
+            if let Some(url) = os_data.base.get(filename) {
                 return Ok(url.clone());
             }
         }
@@ -160,7 +166,9 @@ impl PatchProvider for ShipOfYarnProvider {
 
         let mut max_version = 0;
         let arch_pattern = format!("-{}.", arch);
-        for filename in os_data.keys() {
+        
+        // Check both patch and base files
+        for filename in os_data.patch.keys().chain(os_data.base.keys()) {
             // Filter files by architecture
             if filename.contains(&arch_pattern) {
                 if let Some(version) = Self::extract_version_from_filename(filename) {
@@ -194,9 +202,9 @@ impl PatchProvider for ShipOfYarnProvider {
         // Always include version 0 as base version
         complete_versions.insert(0);
 
-        // Extract version numbers from filenames
+        // Extract version numbers from filenames in both patch and base
         let arch_pattern = format!("-{}.", arch);
-        for filename in os_data.keys() {
+        for filename in os_data.patch.keys().chain(os_data.base.keys()) {
             // Filter files by architecture
             if filename.contains(&arch_pattern) {
                 if let Some((from_ver, to_ver)) = extract_versions_from_filename(filename) {
@@ -255,7 +263,8 @@ impl PatchProvider for ShipOfYarnProvider {
         let os_data = Self::get_files_for_current_os(channel_data, os)?;
 
         let expected_filename = format!("v{}-{}-{}.pwr", version, os, arch);
-        Ok(os_data.contains_key(&expected_filename))
+        // Check in base files for complete versions
+        Ok(os_data.base.contains_key(&expected_filename))
     }
 }
 
