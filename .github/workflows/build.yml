@@ -58,11 +58,16 @@ jobs:
           sed -i 's|../../../rustale_security|../../rustale_security|g' crates/rustale_engine/Cargo.toml
           # Update launcher dependency path
           sed -i 's|../../rustale_security|rustale_security|g' launcher/Cargo.toml
-          # Add rustale_security to workspace members
-          sed -i '/^members = \[$/,/^\]$/ {
-            /^\]$/i\    "../rustale_security",
-            /^\]$/i\    "../rustale_security/rustale_security_macros"
-          }' Cargo.toml
+          # Add rustale_security to workspace members using awk
+          awk '
+          /^members = \[/ { in_members=1 }
+          in_members && /^\]$/ {
+            print "    \"../rustale_security\","
+            print "    \"../rustale_security/rustale_security_macros\""
+            in_members=0
+          }
+          { print }
+          ' Cargo.toml > Cargo.toml.tmp && mv Cargo.toml.tmp Cargo.toml
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -135,11 +140,16 @@ jobs:
           sed -i 's|../../../rustale_security|../../rustale_security|g' crates/rustale_engine/Cargo.toml
           # Update launcher dependency path
           sed -i 's|../../rustale_security|rustale_security|g' launcher/Cargo.toml
-          # Add rustale_security to workspace members
-          sed -i '/^members = \[$/,/^\]$/ {
-            /^\]$/i\    "../rustale_security",
-            /^\]$/i\    "../rustale_security/rustale_security_macros"
-          }' Cargo.toml
+          # Add rustale_security to workspace members using awk
+          awk '
+          /^members = \[/ { in_members=1 }
+          in_members && /^\]$/ {
+            print "    \"../rustale_security\","
+            print "    \"../rustale_security/rustale_security_macros\""
+            in_members=0
+          }
+          { print }
+          ' Cargo.toml > Cargo.toml.tmp && mv Cargo.toml.tmp Cargo.toml
 
       - name: Install System Dependencies
         run: |
