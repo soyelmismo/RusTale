@@ -1063,6 +1063,60 @@ async fn handle_ui_message(
                 }
             });
         }
+        ToCore::UseDataLocation { path } => {
+            // Use existing data from a different location without moving
+            let tx_clone = tx.clone();
+            
+            state.spawn_managed(TaskType::GenericIO, move |cancel_token| async move {
+                // Check cancellation before expensive operation
+                if cancel_token.load(std::sync::atomic::Ordering::Relaxed) { return; }
+                
+                let _ = tx_clone
+                    .send(FromCore::StatusChanged(LauncherStatus::Busy))
+                    .await;
+
+                // Verify the target path exists and has valid data
+                if !path.exists() {
+                    let _ = tx_clone.send(FromCore::Error {
+                        message: format!("Path does not exist: {}", path.display()),
+                        fatal: false,
+                    }).await;
+                    let _ = tx_clone.send(FromCore::StatusChanged(LauncherStatus::Ready)).await;
+                    return;
+                }
+
+                // Save the new path to bootstrap config for next launch
+                if let Err(e) = crate::system::save_bootstrap_path(&path) {
+                    let _ = tx_clone.send(FromCore::Error {
+                        message: format!("Failed to save data location: {}", e),
+                        fatal: false,
+                    }).await;
+                    let _ = tx_clone.send(FromCore::StatusChanged(LauncherStatus::Ready)).await;
+                    return;
+                }
+
+                let _ = tx_clone
+                    .send(FromCore::MigrationFinished(Ok(path.clone())))
+                    .await;
+                let _ = tx_clone.send(FromCore::StatusChanged(LauncherStatus::Ready)).await;
+            });
+        }
+        ToCore::WatchdogCheck => {
+            // Check game process status and system health
+            let game_running = state.game_process.is_some();
+            let active_task_count = state.active_task_count();
+            
+            // Report status back to UI
+            let _ = tx.send(FromCore::StatusChanged(
+                if game_running {
+                    LauncherStatus::Playing
+                } else if active_task_count > 0 {
+                    LauncherStatus::Busy
+                } else {
+                    LauncherStatus::Ready
+                }
+            )).await;
+        }
         _ => {}
     }
 }

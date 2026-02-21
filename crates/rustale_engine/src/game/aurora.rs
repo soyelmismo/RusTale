@@ -11,9 +11,30 @@ impl Drop for FileCleanupGuard {
         #[cfg(target_os = "windows")]
         if self.path.exists() {
             // Try to delete the file. Use std::fs sync because Drop cannot be async.
-            // Ignore errors (e.g: if the user already deleted it) to avoid panics on close.
-            let _ = std::fs::remove_file(&self.path);
-            println!("[Cleanup] Injected file deleted: {:?}", self.path);
+            // The file might be locked by the game process if it's still running.
+            // We try multiple times with delays to handle the case where the game
+            // is shutting down but hasn't released the DLL yet.
+            let mut attempts = 0;
+            loop {
+                match std::fs::remove_file(&self.path) {
+                    Ok(_) => {
+                        println!("[Cleanup] Injected file deleted: {:?}", self.path);
+                        break;
+                    }
+                    Err(e) => {
+                        attempts += 1;
+                        if attempts >= 5 {
+                            // File is still locked after 5 attempts (500ms total)
+                            // This is non-critical - the file will be cleaned up on next launch
+                            eprintln!("[Cleanup] Could not delete {:?} after {} attempts: {}", self.path, attempts, e);
+                            eprintln!("[Cleanup] File will be cleaned up on next launch");
+                            break;
+                        }
+                        // Wait a bit for the game process to release the file
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                }
+            }
         }
     }
 }

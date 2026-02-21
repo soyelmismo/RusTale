@@ -225,7 +225,6 @@ pub async fn run_server_flow_internal(
     // ── DualAuth agent ───────────────────────────────────────────────────────
     sink.log("Ensuring DualAuth Agent is up to date...");
     rustale_engine::game::agent::ensure_agent(
-        &*rustale_shared::HTTP_CLIENT,
         &root_dir,
         &|_phase: String, _pct: f64, _msg: String| {},
         None,
@@ -557,7 +556,15 @@ pub async fn run_server_flow_internal(
     let java_path = PathBuf::from(&java_exec);
 
     // Siempre parchar Java (tanto singleplayer como servidor)
-    let _proxy_setup = rustale_engine::java::proxy::setup_java_proxy(&java_path);
+    // Usar spawn_blocking para no bloquear el hilo async
+    let java_path_clone = java_path.clone();
+    let proxy_setup = tokio::task::spawn_blocking(move || {
+        rustale_engine::java::proxy::setup_java_proxy(&java_path_clone)
+    }).await;
+    
+    if let Ok(Err(e)) = proxy_setup {
+        sink.err(format!("[Runner] Warning: Failed to setup Java proxy: {}", e));
+    }
     
     // Servidor dedicado usa java_original explícitamente
     let java_original_name = if cfg!(windows) { "java_original.exe" } else { "java_original" };

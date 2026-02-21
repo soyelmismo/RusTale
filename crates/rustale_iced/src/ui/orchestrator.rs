@@ -1410,10 +1410,12 @@ impl UiOrchestrator {
                 self.handle_misc_events_with_core(message, core_tx)
             }
             
-            // === EVENTOS IGNORADOS CONSCIENTEMENTE ===
-            // WatchdogCheck, DownloadError, ServerPatchProgress, VersionsReceived son
-            // obsoletos o manejados internamente; se consumen sin efecto visible.
-            Message::WatchdogCheck => None,
+            // === EVENTOS DE WATCHDOG ===
+            Message::WatchdogCheck => {
+                // Request status check from core to verify game process health
+                let _ = core_tx.try_send(crate::core::signals::ToCore::WatchdogCheck);
+                None
+            }
             Message::DownloadError(e) => {
                 self.error = Some(e.clone());
                 None
@@ -1760,12 +1762,16 @@ impl UiOrchestrator {
         use crate::messages::Message;
         
         match message {
-            Message::RequestMoveData(_path) => {
-                // MoveData no existe en ToCore
+            Message::RequestMoveData(path) => {
+                // Use StartMigrationActual instead - redirect to it
+                let from = crate::config::get_app_dir();
+                let to = path.clone();
+                let _ = to_core.try_send(crate::core::signals::ToCore::MigrateData { from, to });
                 None
             }
-            Message::RequestUseDataLocation(_path) => {
-                // UseDataLocation no existe en ToCore
+            Message::RequestUseDataLocation(path) => {
+                // Use existing data from a different location without moving
+                let _ = to_core.try_send(crate::core::signals::ToCore::UseDataLocation { path: path.clone() });
                 None
             }
             Message::DataMoveStarted => {

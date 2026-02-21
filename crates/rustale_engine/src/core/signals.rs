@@ -77,6 +77,14 @@ pub enum ToCore {
     TrimMemory,
     OpenGameFolder,
     GetCacheStats,
+    
+    // --- Data Location Management ---
+    UseDataLocation {
+        path: PathBuf,
+    },
+    
+    // --- Watchdog ---
+    WatchdogCheck,
 }
 
 /// EVENTS: Backend -> Frontend

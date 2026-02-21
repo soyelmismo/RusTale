@@ -145,6 +145,38 @@ async fn launch_flow_internal(
     let mut java_exec_for_client = java_real_path.to_string_lossy().to_string();
 
     // --- PROXY SETUP (HIJACK MODE) ---
+    // CRITICAL: Ensure javaagent is available BEFORE configuring proxy
+    // This fixes the issue where fresh installations fail to inject javaagent
+    if settings.enable_online_fix {
+        println!("[Core] Pre-flight: Ensuring javaagent is available...");
+        match crate::game::agent::ensure_agent(
+            &base_dir,
+            &|phase, progress, msg| {
+                println!("[PreLaunch] Agent {} {:.1}% - {}", phase, progress, msg);
+            },
+            Some(cancel_token.clone())
+        ).await {
+            Ok(agent_path) => {
+                println!("[PreLaunch] ✓ JavaAgent ready: {:?}", agent_path);
+            }
+            Err(e) => {
+                eprintln!("[PreLaunch] ✗ CRITICAL: Failed to ensure javaagent: {}", e);
+                eprintln!("[PreLaunch] ✗ OnlineFix will be disabled for stability");
+                
+                // Disable online_fix to prevent injection failures
+                // This is a safety measure - better to work offline than crash
+                let mut safe_settings = settings.clone();
+                safe_settings.enable_online_fix = false;
+                
+                // Continue with disabled online_fix
+                return Err(LaunchError::Generic(format!(
+                    "Failed to download javaagent: {}. OnlineFix disabled for stability.",
+                    e
+                )));
+            }
+        }
+    }
+    
     if settings.enable_online_fix {
         println!("[Core] Enabling Online Fix (Hijack Mode)...");
         match crate::java::proxy::setup_java_proxy(&java_real_path) {
@@ -260,10 +292,50 @@ async fn launch_flow_internal(
                 .join("tools")
                 .join(format!("aurora{}", std::env::consts::DLL_SUFFIX));
             let dll_path = executable_path.parent().unwrap().join("Secur32.dll");
-            if let Ok(_) = std::fs::copy(&tools_aurora_path, &dll_path) {
-                Some(crate::game::aurora::FileCleanupGuard { path: dll_path })
-            } else {
+            
+            // Verify Aurora source exists
+            if !tools_aurora_path.exists() {
+                eprintln!("[Windows] ✗ Aurora DLL not found at: {:?}", tools_aurora_path);
+                eprintln!("[Windows] ✗ Secur32.dll injection SKIPPED - authentication may fail!");
                 None
+            } else {
+                // Check if target directory is writable
+                let target_dir = dll_path.parent().unwrap();
+                let can_write = target_dir.exists() && {
+                    // Try a test write to verify permissions
+                    let test_file = target_dir.join(".rustale_write_test");
+                    let writable = std::fs::write(&test_file, b"test").is_ok();
+                    let _ = std::fs::remove_file(&test_file);
+                    writable
+                };
+                
+                if !can_write {
+                    eprintln!("[Windows] ✗ Cannot write to Client directory: {:?}", target_dir);
+                    eprintln!("[Windows] ✗ Secur32.dll injection SKIPPED - authentication may fail!");
+                    None
+                } else {
+                    // If Secur32.dll already exists, try to remove it first
+                    if dll_path.exists() {
+                        if let Err(e) = std::fs::remove_file(&dll_path) {
+                            eprintln!("[Windows] Warning: Could not remove existing Secur32.dll: {}", e);
+                            // File might be locked by another process, try anyway
+                        }
+                    }
+                    
+                    match std::fs::copy(&tools_aurora_path, &dll_path) {
+                        Ok(_) => {
+                            println!("[Windows] ✓ Secur32.dll injected: {:?}", dll_path);
+                            Some(crate::game::aurora::FileCleanupGuard { path: dll_path })
+                        }
+                        Err(e) => {
+                            eprintln!("[Windows] ✗ Failed to copy Secur32.dll: {}", e);
+                            eprintln!("[Windows] ✗ Source: {:?}", tools_aurora_path);
+                            eprintln!("[Windows] ✗ Target: {:?}", dll_path);
+                            eprintln!("[Windows] ✗ Authentication may fail!");
+                            None
+                        }
+                    }
+                }
             }
         }
         #[cfg(not(target_os = "windows"))]
@@ -402,14 +474,9 @@ async fn launch_flow_internal(
 
             env_vars
         },
-        jvm_args: if settings.java_args.is_empty() {
-            None
-        } else {
-            Some(settings.java_args.split_whitespace().map(|s| s.to_string()).collect())
-        },
     };
 
-    match crate::game::launch::launch_game_with_async_agent(launch_context, client) {
+    match crate::game::launch::launch_game_with_async_agent(launch_context) {
         Ok(child) => {
             let _ = internal_tx
                 .send(super::super::coordinator::CoordinatorEvent::GameProcessReady(
