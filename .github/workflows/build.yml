@@ -66,6 +66,9 @@ jobs:
             print "    \"../rustale_security/rustale_security_macros\""
             in_members=0
           }
+          in_members && /"[^"]*"/ && !/,$/ {
+            sub(/"[^"]*"$/, "&,", $0)
+          }
           { print }
           ' Cargo.toml > Cargo.toml.tmp && mv Cargo.toml.tmp Cargo.toml
 
@@ -147,6 +150,9 @@ jobs:
             print "    \"../rustale_security\","
             print "    \"../rustale_security/rustale_security_macros\""
             in_members=0
+          }
+          in_members && /"[^"]*"/ && !/,$/ {
+            sub(/"[^"]*"$/, "&,", $0)
           }
           { print }
           ' Cargo.toml > Cargo.toml.tmp && mv Cargo.toml.tmp Cargo.toml
