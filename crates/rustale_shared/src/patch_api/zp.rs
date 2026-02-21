@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use zeroize::Zeroize;
+use zeroize::Zeroizing;
 
 #[cfg(feature = "security")]
 use rustale_security::{RawSecureClient, SecureClient, init_shield};
@@ -89,7 +89,7 @@ impl ZProvider {
             || ua_header.is_empty()
             || ua_val.is_empty()
         {
-            panic!("[ZProvider] Critical environment variables missing. Check your .env file.");
+            panic!("[ZProvider] Security configuration incomplete");
         }
 
         // Ejecutamos la petición HEAD en un hilo de bloqueo para no colgar el runtime async.
@@ -126,7 +126,7 @@ impl ZProvider {
         .unwrap_or(false)
     }
 
-    /// Try to guess the patch URL for the given parameters
+    /// Try to guess the patch URL for the given parameters.
     fn guess_patch_url_no_auth(
         &self,
         architecture: &str,
@@ -134,7 +134,7 @@ impl ZProvider {
         channel: &str,
         from_version: i32,
         to_version: i32,
-    ) -> String {
+    ) -> Zeroizing<String> {
         let arch = match architecture {
             "x86_64" => "amd64",
             "aarch64" => "arm64",
@@ -146,19 +146,23 @@ impl ZProvider {
             _ => operating_system,
         };
 
-        let result = format!(
+        // Keep base URL as SafeString until used
+        let base = get_private_var("Z_A");
+        
+        // Build URL directly into Zeroizing<String>
+        let url = Zeroizing::new(format!(
             "{}/patches/{}/{}/{}/{}/{}.pwr",
-            &*get_private_var("Z_A"),
+            &*base,
             os,   // linux
             arch, // amd64
             channel,
             from_version,
             to_version
-        );
+        ));
 
         // DEBUG: Verificar URL generada
-        //println!("[DEBUG] Generated URL: {}", result);
-        result
+        //println!("[DEBUG] Generated URL: {}", url);
+        url
     }
 
     async fn check_version_exists(
@@ -169,16 +173,14 @@ impl ZProvider {
         operating_system: &str,
         channel: &str,
     ) -> bool {
-        let mut url = self.guess_patch_url_no_auth(
+        let url = self.guess_patch_url_no_auth(
             architecture,
             operating_system,
             channel,
             start_version,
             end_version,
         );
-        let res = self.check_file_exists_secure_with_mode(&url, true).await;
-        url.zeroize(); // WIPE FROM RAM
-        res
+        self.check_file_exists_secure_with_mode(&url, true).await
     }
 }
 
@@ -195,12 +197,9 @@ impl PatchProvider for ZProvider {
 
     async fn is_available(&self) -> bool {
         // Probar con un patch específico que sabemos que funciona
-        let mut test_url = format!("{}/", &*get_private_var("Z_A"));
-        let res = self
-            .check_file_exists_secure_with_mode(&test_url, false)
-            .await;
-        test_url.zeroize(); // WIPE FROM RAM
-        res
+        let base = get_private_var("Z_A");
+        let test_url = Zeroizing::new(format!("{}/", &*base));
+        self.check_file_exists_secure_with_mode(&test_url, false).await
     }
 
     async fn get_latest_version(&self, channel: &str, os: &str, arch: &str) -> Result<i32> {
@@ -320,13 +319,12 @@ impl PatchProvider for ZProvider {
         arch: &str,
         from_version: i32,
         to_version: i32,
-    ) -> Result<zeroize::Zeroizing<String>> {
-        let mut url = self.guess_patch_url_no_auth(arch, os, channel, from_version, to_version);
+    ) -> Result<Zeroizing<String>> {
+        let url = self.guess_patch_url_no_auth(arch, os, channel, from_version, to_version);
         if self.check_file_exists_secure_with_mode(&url, true).await {
-            Ok(zeroize::Zeroizing::new(url))
+            Ok(url)
         } else {
-            url.zeroize(); // WIPE FROM RAM
-            anyhow::bail!("Patch check failed on Z") // REMOVED LEAKING URL
+            anyhow::bail!("Patch check failed on Z")
         }
     }
 
@@ -350,13 +348,12 @@ impl PatchProvider for ZProvider {
         os: &str,
         arch: &str,
         version: i32,
-    ) -> Result<zeroize::Zeroizing<String>> {
-        let mut url = self.guess_patch_url_no_auth(arch, os, channel, 0, version);
+    ) -> Result<Zeroizing<String>> {
+        let url = self.guess_patch_url_no_auth(arch, os, channel, 0, version);
         if self.check_file_exists_secure_with_mode(&url, false).await {
-            Ok(zeroize::Zeroizing::new(url))
+            Ok(url)
         } else {
-            url.zeroize(); // WIPE FROM RAM
-            anyhow::bail!("Complete version check failed on Z") // REMOVED LEAKING URL
+            anyhow::bail!("Complete version check failed on Z")
         }
     }
 }
