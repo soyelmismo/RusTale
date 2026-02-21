@@ -42,6 +42,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Remove existing rustale_security directory
+        run: rm -rf crates/rustale_security
+
       - name: Checkout rustale-security
         uses: actions/checkout@v4
         with:
@@ -111,6 +114,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Remove existing rustale_security directory
+        run: rm -rf crates/rustale_security
 
       - name: Checkout rustale-security
         uses: actions/checkout@v4
