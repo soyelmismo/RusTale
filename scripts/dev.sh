@@ -10,7 +10,7 @@ echo "🚀 Iniciando compilación de desarrollo optimizada..."
 # Variables de entorno para compilación rápida
 export CARGO_INCREMENTAL=1
 export CARGO_TARGET_DIR="$PWD/target-dev"
-export RUSTFLAGS="-C target-cpu=native"
+export RUSTFLAGS="-C target-cpu=x86-64-v2"
 export RUST_LOG=debug
 
 # Limpiar cache si es muy grande (>2GB)

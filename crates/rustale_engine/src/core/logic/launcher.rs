@@ -6,7 +6,6 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use crate::core::logic::checks::PreLaunchChecks;
-use rustale_shared::config;
 
 /// Custom error type for launch flow failures
 #[derive(Debug, thiserror::Error)]

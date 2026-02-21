@@ -10,7 +10,7 @@ incremental = true
 
 # Optimizaciones para desarrollo
 [target.'cfg(all(debug_assertions, not(target_os = "windows")))']
-rustflags = ["-C", "target-cpu=native"]
+rustflags = ["-C", "target-cpu=x86-64-v2"]
 
 [target.'cfg(all(debug_assertions, target_os = "windows"))']
 rustflags = ["-C", "target-cpu=generic"]
@@ -18,7 +18,7 @@ rustflags = ["-C", "target-cpu=generic"]
 # Para compilaciones de release optimizadas
 [target.'cfg(not(debug_assertions))']
 rustflags = [
-    "-C", "target-cpu=native",
+    "-C", "target-cpu=x86-64-v2",
     "-C", "codegen-units=1",
     "-C", "lto=fat",
     "-C", "embed-bitcode=no"
