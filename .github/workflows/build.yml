@@ -49,6 +49,18 @@ jobs:
           path: rustale_security
           token: ${{ secrets.BLACKBOX_PAT }}
 
+      - name: Fix rustale_security paths for CI
+        shell: bash
+        run: |
+          # Update rustale_shared dependency path
+          sed -i 's|../../../rustale_security|../../rustale_security|g' launcher/crates/rustale_shared/Cargo.toml
+          # Update rustale_engine dependency path  
+          sed -i 's|../../../rustale_security|../../rustale_security|g' launcher/crates/rustale_engine/Cargo.toml
+          # Update launcher dependency path
+          sed -i 's|../../rustale_security|rustale_security|g' launcher/launcher/Cargo.toml
+          # Add rustale_security to workspace members
+          sed -i '/^\]$/i\    "../rustale_security",\n    "../rustale_security/rustale_security_macros"' launcher/Cargo.toml
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -111,6 +123,17 @@ jobs:
           repository: soyelmismo/rustale-security
           path: rustale_security
           token: ${{ secrets.BLACKBOX_PAT }}
+
+      - name: Fix rustale_security paths for CI
+        run: |
+          # Update rustale_shared dependency path
+          sed -i 's|../../../rustale_security|../../rustale_security|g' launcher/crates/rustale_shared/Cargo.toml
+          # Update rustale_engine dependency path  
+          sed -i 's|../../../rustale_security|../../rustale_security|g' launcher/crates/rustale_engine/Cargo.toml
+          # Update launcher dependency path
+          sed -i 's|../../rustale_security|rustale_security|g' launcher/launcher/Cargo.toml
+          # Add rustale_security to workspace members
+          sed -i '/^\]$/i\    "../rustale_security",\n    "../rustale_security/rustale_security_macros"' launcher/Cargo.toml
 
       - name: Install System Dependencies
         run: |
