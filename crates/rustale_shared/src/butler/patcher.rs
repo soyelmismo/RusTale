@@ -117,6 +117,11 @@ pub async fn apply_pwr(
             .arg(&pwr_path_absolute)
             .arg(&game_dir);
 
+        #[cfg(windows)]
+        {
+            cmd.creation_flags(0x08000000);
+        }
+
         progress_callback("install".to_string(), 10.0, "Extracting patch...".to_string(), 0, 0, None, Some(3));
 
         let mut child = cmd
