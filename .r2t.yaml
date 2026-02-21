@@ -1,0 +1,22 @@
+# r2t settings file - https://github.com/T00fy/r2t
+# Syntax: gitignore-style glob patterns
+
+# The output format. Can be: yaml, json, xml
+# Defaults to xml if not specified.
+# format: xml
+
+# Ignore files and directories for both the tree view and content sections.
+ignore-tree-and-content:
+  - ".git/"
+  - "target/"
+  - "node_modules/"
+  - ".idea/"
+  - "*.log"
+  - ".terraform/"
+  - "*/.git/"
+
+# Ignore files only for the content section (they will still appear in the tree).
+ignore-content:
+  - "LICENSE"
+  - "*.lock"
+  - ".r2t.yaml"

@@ -7,7 +7,9 @@ members = [
     "crates/rustale_engine",
     "crates/rustale_iced",
     "crates/rustale_tray",
-    "crates/rustale_server"
+    "crates/rustale_server",
+    "crates/rustale_security",
+    "crates/rustale_security/rustale_security_macros"
 ]
 resolver = "2"
 

@@ -31,7 +31,7 @@ async-trait = "0.1.89"
 zeroize = { version = "1.8", features = ["derive"] }
 aes-gcm = "0.10"
 generic-array = "0.14"
-rustale_security = { path = "../../../rustale_security", optional = true }
+rustale_security = { path = "../rustale_security", optional = true }
 rustls = { version = "0.23.36", default-features = false, features = ["ring"] }
 
 [target.'cfg(windows)'.dependencies]

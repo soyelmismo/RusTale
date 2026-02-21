@@ -97,7 +97,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: soyelmismo/rustale-security
-          path: rustale_security
+          path: crates/rustale_security
           token: ${{ secrets.BLACKBOX_PAT }}
 
       - name: Install Rust

@@ -26,7 +26,7 @@ rustale_iced   = { path = "../crates/rustale_iced",  optional = true }
 rustale_shared = { path = "../crates/rustale_shared" }
 rustale_engine = { path = "../crates/rustale_engine" }
 rustale_server = { path = "../crates/rustale_server" }
-rustale_security = { path = "../../rustale_security" }
+rustale_security = { path = "../crates/rustale_security" }
 auth_server = { path = "../auth_server" }
 mimalloc = { version = "0.1.48", default-features = false }
 

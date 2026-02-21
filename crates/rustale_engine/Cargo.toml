@@ -16,7 +16,7 @@ security = ["dep:rustale_security"]
 
 [dependencies]
 rustale_shared = { path = "../rustale_shared" }
-rustale_security = { path = "../../../rustale_security", optional = true }
+rustale_security = { path = "../rustale_security", optional = true }
 auth_server = { path = "../../auth_server", optional = true }
 tokio = { version = "1.49.0", features = ["fs", "io-util", "sync", "time", "macros", "rt-multi-thread", "process", "signal"] }
 serde = { version = "1.0", features = ["derive"] }
