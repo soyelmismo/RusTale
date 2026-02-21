@@ -59,7 +59,10 @@ jobs:
           # Update launcher dependency path
           sed -i 's|../../rustale_security|rustale_security|g' launcher/Cargo.toml
           # Add rustale_security to workspace members
-          sed -i '/^\]$/i\    "../rustale_security",\n    "../rustale_security/rustale_security_macros"' Cargo.toml
+          sed -i '/^members = \[$/,/^\]$/ {
+            /^\]$/i\    "../rustale_security",
+            /^\]$/i\    "../rustale_security/rustale_security_macros"
+          }' Cargo.toml
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -86,7 +89,7 @@ jobs:
           sed -i "s/^version = \"0.0.1\"/version = \"$NEW_VER\"/" Cargo.toml
 
       - name: Build Release
-        run: cargo build --release --verbose --features security
+        run: cargo build --release --verbose
         env:
           Z_H: ${{ secrets.Z_H }}
 
@@ -133,7 +136,10 @@ jobs:
           # Update launcher dependency path
           sed -i 's|../../rustale_security|rustale_security|g' launcher/Cargo.toml
           # Add rustale_security to workspace members
-          sed -i '/^\]$/i\    "../rustale_security",\n    "../rustale_security/rustale_security_macros"' Cargo.toml
+          sed -i '/^members = \[$/,/^\]$/ {
+            /^\]$/i\    "../rustale_security",
+            /^\]$/i\    "../rustale_security/rustale_security_macros"
+          }' Cargo.toml
 
       - name: Install System Dependencies
         run: |
@@ -162,7 +168,7 @@ jobs:
           sed -i "s/^version = \"0.0.1\"/version = \"$NEW_VER\"/" Cargo.toml
 
       - name: Build Release
-        run: cargo build --release --verbose --features security
+        run: cargo build --release --verbose
         env:
           Z_H: ${{ secrets.Z_H }}
 
