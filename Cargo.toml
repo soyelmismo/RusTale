@@ -1,0 +1,54 @@
+[workspace]
+members = [
+    "launcher",
+    "aurora",
+    "auth_server",
+    "crates/rustale_shared",
+    "crates/rustale_engine",
+    "crates/rustale_iced",
+    "crates/rustale_tray",
+    "crates/rustale_server"
+]
+resolver = "2"
+
+[profile.release]
+opt-level = "z"       # Maxima optimizacion (hace el flujo de control complejo)
+lto = true          # Link Time Optimization (mezcla codigo entre crates, dificil de separar)
+codegen-units = 1  # Reduce paralelismo para mejorar la optimizacion LTO
+panic = 'abort'     # Elimina la logica de "unwinding" (reduce tamano y pistas de flujo)
+strip = true        # ELIMINA LOS SIMBOLOS (hace que las funciones se llamen sub_401000)
+debug = false       # Asegura que no haya info de debug
+
+[profile.unopt]
+inherits = "release" # Hereda defaults de release para no olvidar detalles
+opt-level = 0        # Sin optimizacion (Compila rapido, corre lento)
+lto = "off"          # Apaga LTO explicitamente (Linkeo rapido)
+codegen-units = 256  # CLAVE: Paraleliza la compilacion al maximo
+panic = 'abort'      # Sin unwinding (menor tamano, linkeo mas simple)
+strip = false        # Saltar el paso de stripping ahorra tiempo de build
+debug = 0           # Minima info de debug para builds rapidos
+incremental = true   # Opcional: Habilita compilacion incremental (cache)
+
+# Perfil de desarrollo optimizado para velocidad
+[profile.dev]
+opt-level = 0        # Compilación ultra-rápida
+debug = 0           # Sin símbolos de debug para builds más rápidos
+strip = "debuginfo" # Remover debug info del binario final
+overflow-checks = false # Desactivar checks en desarrollo
+lto = false         # Sin LTO para compilación rápida
+codegen-units = 16  # Máxima paralelización
+incremental = true  # Compilación incremental activada
+panic = "unwind"    # unwind es mejor para desarrollo
+
+# Perfil de testing optimizado
+[profile.test]
+opt-level = 1       # Ligera optimización para tests más rápidos
+debug = 0          # Sin debug info
+strip = "debuginfo"
+codegen-units = 16  # Alta paralelización
+incremental = true
+panic = "unwind"
+
+# Optimización para procedural macros y build scripts
+[profile.dev.build-override]
+opt-level = 3       # Optimizar macros para ejecución rápida

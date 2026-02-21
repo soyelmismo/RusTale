@@ -1,0 +1,16 @@
+Cargo.lock
+target/
+.env
+*.txt
+*.log
+TODO.md
+*.exe
+*.rc
+.vscode
+.agent
+.windsurf
+unchanged
+dist/
+shaders_bak/
+notes/
+.clinerules/

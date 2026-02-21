@@ -1,0 +1,21 @@
+[package]
+name = "rustale_server"
+version = "0.0.1"
+edition = "2024"
+
+[dependencies]
+rustale_shared = { path = "../rustale_shared" }
+rustale_engine = { path = "../rustale_engine" }
+auth_server = { path = "../../auth_server" }
+
+tokio = { version = "1.49.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "1.0.3"
+anyhow = "1.0"
+uuid = { version = "1.21", features = ["v4", "serde"] }
+regex = "1.12"
+open = "5.3.3"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading"] }

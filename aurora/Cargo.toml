@@ -1,0 +1,25 @@
+[package]
+name = "aurora"
+version = "0.0.1"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"] # Generates .dll on Windows and .so on Linux
+
+[dependencies]
+# For safe and unsafe memory manipulation and system headers
+libc = "0.2.180"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_System_Memory",
+    "Win32_System_SystemServices",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_LibraryLoader",
+    "Win32_Foundation",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading"
+] }
+
+[target.'cfg(unix)'.dependencies]
+ctor = "0.6.3" # For executing code when loading the library (like __attribute__((constructor)))

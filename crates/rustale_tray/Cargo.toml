@@ -1,0 +1,12 @@
+[package]
+name = "rustale_tray"
+version = "0.0.1"
+edition = "2024"
+
+[dependencies]
+rustale_shared = { path = "../rustale_shared" }
+tray-icon = "0.21.3"
+image = "0.25.9"
+tokio = { version = "1.49.0", features = ["time"] }
+# We might need some shared types if we want to pass events back easily
+# or just return the tray-icon types and let the GUI handle mapping.

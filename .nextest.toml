@@ -1,0 +1,26 @@
+# Nextest configuration for RusTale
+# https://nexte.st/book/configuration.html
+
+[profile.default]
+# Continue running tests even if one fails
+fail-fast = false
+
+# Use all available CPU cores
+test-threads = "num-cpus"
+
+# Show test output immediately
+status-level = "pass"
+
+# Better output format
+final-status-level = "skip"
+
+# Skip aurora crate - it prints initialization messages that break test list parsing
+default-filter = "all() - package(aurora)"
+
+[profile.ci]
+# Fail fast in CI to save resources
+fail-fast = true
+
+# More verbose output for CI
+status-level = "all"
+final-status-level = "fail"

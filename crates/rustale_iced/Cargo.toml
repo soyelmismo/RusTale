@@ -1,0 +1,47 @@
+[package]
+name = "rustale_iced"
+version = "0.0.1"
+edition = "2024"
+
+[features]
+default = ["tray"]
+tray = ["dep:tray-icon", "dep:rustale_tray"]
+
+[dependencies]
+rustale_shared = { path = "../rustale_shared" }
+rustale_engine = { path = "../rustale_engine" }
+rustale_server = { path = "../rustale_server" }
+
+# UI Core
+iced = { version = "0.14.0", features = ["image", "svg", "tokio", "advanced", "canvas", "wgpu"] }
+iced_renderer = "0.14.0"
+
+# Async & Networking
+tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "net", "process", "signal"] }
+futures = "0.3.32"
+
+# Data & Utils
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+uuid = { version = "1.21.0", features = ["v4", "v5", "fast-rng", "serde"] }
+chrono = { version = "0.4.43", features = ["serde"] }
+anyhow = "1.0.102"
+thiserror = "2.0.18"
+hex = "0.4.3"
+sha2 = "0.10"
+rand = "0.9.2"
+rust-embed = "8.11.0"
+bytemuck = { version = "1.25.0", features = ["derive"] }
+
+# UI Specific
+tray-icon = { version = "0.21.3", optional = true }
+rustale_tray = { path = "../rustale_tray", optional = true }
+image = "0.25.9"
+open = "5.3.3"
+rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
+lru = "0.16.3"
+bytes = "1.11.1"
+once_cell = "1.21.3"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2.180"

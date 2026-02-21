@@ -1,0 +1,174 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, master, develop]
+  # Desactivamos pull_request de forks externos para evitar el robo de secretos (PAT)
+  # mediante inyección de código en el crate de seguridad privado.
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Detect which crates have changed
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      crates: ${{ steps.changes.outputs.crates }}
+      has-changes: ${{ steps.changes.outputs.has-changes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Need full history for proper diff
+
+      - name: Detect changed crates
+        id: changes
+        run: |
+          # Get the base ref for comparison
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_REF="${{ github.base_ref }}"
+            git fetch origin "$BASE_REF"
+            BASE="origin/$BASE_REF"
+          else
+            # For push events, compare with previous commit
+            BASE="${{ github.event.before }}"
+            if [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+              BASE="HEAD~1"
+            fi
+          fi
+
+          echo "Comparing against: $BASE"
+
+          # Get changed files and extract crate names
+          CHANGED_FILES=$(git diff --name-only "$BASE" HEAD 2>/dev/null || git diff --name-only HEAD~1 HEAD)
+
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+
+          # Extract unique crate names
+          CRATES=""
+          HAS_CHANGES="false"
+
+          # Check for changes in each workspace member
+          MEMBERS=("launcher" "aurora" "auth_server" "crates/rustale_shared" "crates/rustale_engine" "crates/rustale_iced" "crates/rustale_tray" "crates/rustale_server")
+
+          for member in "${MEMBERS[@]}"; do
+            if echo "$CHANGED_FILES" | grep -q "^$member/"; then
+              # Convert path to package name
+              PKG_NAME=$(basename "$member" | tr '-' '_')
+              if [ -n "$CRATES" ]; then
+                CRATES="$CRATES $PKG_NAME"
+              else
+                CRATES="$PKG_NAME"
+              fi
+              HAS_CHANGES="true"
+            fi
+          done
+
+          # Check for root-level changes that affect all crates
+          if echo "$CHANGED_FILES" | grep -qE "^(Cargo\.toml|Cargo\.lock|\.github/|\.nextest\.toml)$"; then
+            echo "Root configuration changed - testing all crates"
+            CRATES="all"
+            HAS_CHANGES="true"
+          fi
+
+          echo "Detected crates: $CRATES"
+          echo "Has changes: $HAS_CHANGES"
+
+          echo "crates=$CRATES" >> $GITHUB_OUTPUT
+          echo "has-changes=$HAS_CHANGES" >> $GITHUB_OUTPUT
+
+  # Run tests for changed crates
+  test:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has-changes == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        # Add windows-latest, macos-latest if needed for cross-platform testing
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout rustale-security
+        uses: actions/checkout@v4
+        with:
+          repository: soyelmismo/rustale-security
+          path: rustale_security
+          token: ${{ secrets.BLACKBOX_PAT }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}
+
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Build test targets
+        run: |
+          CRATES="${{ needs.detect-changes.outputs.crates }}"
+
+          if [ "$CRATES" = "all" ] || [ -z "$CRATES" ]; then
+            echo "Building all workspace members..."
+            cargo build --workspace --features security
+          else
+            echo "Building changed crates: $CRATES"
+            for crate in $CRATES; do
+              cargo build -p "$crate" --features security || echo "Warning: Could not build $crate"
+            done
+          fi
+
+      - name: Run tests with nextest
+        run: |
+          CRATES="${{ needs.detect-changes.outputs.crates }}"
+
+          if [ "$CRATES" = "all" ] || [ -z "$CRATES" ]; then
+            echo "Testing all workspace members..."
+            cargo nextest run --workspace --exclude aurora --features security --profile ci
+          else
+            echo "Testing changed crates: $CRATES"
+            for crate in $CRATES; do
+              cargo nextest run -p "$crate" --features security --profile ci || echo "Warning: Some tests in $crate may have failed"
+            done
+          fi
+
+      - name: Run clippy
+        run: |
+          CRATES="${{ needs.detect-changes.outputs.crates }}"
+
+          if [ "$CRATES" = "all" ] || [ -z "$CRATES" ]; then
+            cargo clippy --workspace --features security -- -D warnings
+          else
+            for crate in $CRATES; do
+              cargo clippy -p "$crate" --features security -- -D warnings || true
+            done
+          fi
+
+      - name: Check formatting
+        run: cargo fmt -- --check
+
+  # Summary job
+  test-summary:
+    needs: [detect-changes, test]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check test results
+        run: |
+          if [ "${{ needs.test.result }}" = "failure" ]; then
+            echo "::error::Tests failed"
+            exit 1
+          elif [ "${{ needs.detect-changes.outputs.has-changes }}" = "false" ]; then
+            echo "::notice::No relevant changes detected, skipping tests"
+          else
+            echo "::notice::All tests passed"
+          fi

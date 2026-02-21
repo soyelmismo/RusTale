@@ -1,0 +1,251 @@
+name: Build & Auto-Release
+
+on:
+  push:
+    branches: ["master", "main"]
+  # Also trigger after test workflow completes successfully
+  workflow_run:
+    workflows: ["Tests"]
+    types:
+      - completed
+    branches: ["master", "main"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+
+jobs:
+  # ---------------------------------------------------
+  # 0. CHECK TEST RESULT - Only proceed if tests passed
+  # ---------------------------------------------------
+  check-tests:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify tests passed
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            echo "✅ Tests workflow completed successfully"
+            echo "Test workflow conclusion: ${{ github.event.workflow_run.conclusion }}"
+          else
+            echo "⚠️ Direct push or manual dispatch - tests may need to run separately"
+          fi
+
+  # ---------------------------------------------------
+  # 1. JOB DE COMPILACION WINDOWS
+  # ---------------------------------------------------
+  build-windows:
+    needs: check-tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout rustale-security
+        uses: actions/checkout@v4
+        with:
+          repository: soyelmismo/rustale-security
+          path: rustale_security
+          token: ${{ secrets.BLACKBOX_PAT }}
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          target: x86_64-pc-windows-msvc
+
+      - name: Generate Version Tag
+        id: tagger_local
+        shell: bash
+        run: |
+          YEAR=$(date +'%Y')
+          MONTH=$(date +'%-m')
+          DAY=$(date +'%-d')
+          SHA=$(git rev-parse --short HEAD)
+          echo "tag=$YEAR.$MONTH.$DAY-g$SHA" >> $GITHUB_OUTPUT
+
+      - name: Inject version into Cargo.toml
+        shell: bash
+        run: |
+          # Reemplaza la version 0.0.1 por la del tag actual
+          NEW_VER="${{ steps.tagger_local.outputs.tag }}"
+          sed -i "s/^version = \"0.0.1\"/version = \"$NEW_VER\"/" launcher/Cargo.toml
+          sed -i "s/^version = \"0.0.1\"/version = \"$NEW_VER\"/" Cargo.toml
+
+      - name: Build Release
+        run: cargo build --release --verbose --features security
+        env:
+          Z_H: ${{ secrets.Z_H }}
+
+      - name: Prepare Distribution Folder
+        run: |
+          mkdir dist
+          copy target\release\rustale.exe dist\rustale.exe
+          copy target\release\aurora.dll dist\aurora.dll
+          copy scripts\start_server.bat dist\start_server.bat
+
+      - name: Create ZIP
+        run: |
+          cd dist
+          7z a ../windows.zip *
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-windows
+          path: windows.zip
+
+  # ---------------------------------------------------
+  # 2. JOB DE COMPILACION LINUX
+  # ---------------------------------------------------
+  build-linux:
+    needs: check-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout rustale-security
+        uses: actions/checkout@v4
+        with:
+          repository: soyelmismo/rustale-security
+          path: rustale_security
+          token: ${{ secrets.BLACKBOX_PAT }}
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libfreetype6-dev libexpat1-dev libxcb-composite0-dev libasound2-dev libglib2.0-dev libgtk-3-dev libxdo-dev mold
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Generate Version Tag
+        id: tagger_local
+        shell: bash
+        run: |
+          YEAR=$(date +'%Y')
+          MONTH=$(date +'%-m')
+          DAY=$(date +'%-d')
+          SHA=$(git rev-parse --short HEAD)
+          echo "tag=$YEAR.$MONTH.$DAY-g$SHA" >> $GITHUB_OUTPUT
+
+      - name: Inject version into Cargo.toml
+        shell: bash
+        run: |
+          # Reemplaza la version 0.0.1 por la del tag actual
+          NEW_VER="${{ steps.tagger_local.outputs.tag }}"
+          sed -i "s/^version = \"0.0.1\"/version = \"$NEW_VER\"/" launcher/Cargo.toml
+          sed -i "s/^version = \"0.0.1\"/version = \"$NEW_VER\"/" Cargo.toml
+
+      - name: Build Release
+        run: cargo build --release --verbose --features security
+        env:
+          Z_H: ${{ secrets.Z_H }}
+
+      - name: Prepare Distribution Folder
+        run: |
+          mkdir dist
+          cp target/release/rustale dist/rustale
+
+          # Copy aurora library - try both possible names
+          if [ -f "target/release/libaurora.so" ]; then
+            cp target/release/libaurora.so dist/aurora.so
+          elif [ -f "target/release/aurora.so" ]; then
+            cp target/release/aurora.so dist/aurora.so
+          else
+            echo "Warning: No aurora library found"
+          fi
+
+          cp scripts/start_server.sh dist/start_server.sh
+          cp scripts/install_deps.sh dist/install_deps.sh
+          chmod +x dist/rustale
+          chmod +x dist/start_server.sh
+          chmod +x dist/install_deps.sh
+
+      - name: Create ZIP
+        run: |
+          cd dist
+          zip -r ../linux.zip *
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-linux
+          path: linux.zip
+
+  # ---------------------------------------------------
+  # 3. JOB DE RELEASE Y CHANGELOG
+  # ---------------------------------------------------
+  release:
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Necesario para leer el historial de git
+
+      - name: Download Windows Binary
+        uses: actions/download-artifact@v4
+        with:
+          name: binary-windows
+          path: release_assets
+
+      - name: Download Linux Binary
+        uses: actions/download-artifact@v4
+        with:
+          name: binary-linux
+          path: release_assets
+
+      # GENERACION DE CHANGELOG
+      - name: Generate Changelog
+        id: changelog
+        run: |
+          # Busca el ultimo tag. Si no existe, usa el hash inicial.
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          echo "Generating changelog since: $LAST_TAG"
+
+          if [ -z "$LAST_TAG" ]; then
+            # Si es el primer release, toma los ultimos 20 commits
+            CHANGES=$(git log --pretty=format:"- %s (%h)" -n 20)
+          else
+            # Si hay tag previo, toma los cambios desde ese tag hasta HEAD
+            CHANGES=$(git log "$LAST_TAG"..HEAD --pretty=format:"- %s (%h)")
+          fi
+
+          # Guardar en output multilinea para el siguiente paso
+          echo "changes<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      # GENERACION DE VERSION (Fecha + Hash Corto)
+      - name: Generate Version Tag
+        id: tagger
+        run: |
+          YEAR=$(date +'%Y')
+          MONTH=$(date +'%-m')
+          DAY=$(date +'%-d')
+          SHA=$(git rev-parse --short HEAD)
+          TAG="v$YEAR.$MONTH.$DAY-g$SHA"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tagger.outputs.tag }}
+          name: Build ${{ steps.tagger.outputs.tag }}
+          body: |
+            ## 🚀 New Update
+
+            **Changelog:**
+            ${{ steps.changelog.outputs.changes }}
+
+            ---
+            *Auto-generated by RusTale CI*
+          files: |
+            release_assets/windows.zip
+            release_assets/linux.zip
+          token: ${{ secrets.GITHUB_TOKEN }}
+          prerelease: false
+          make_latest: true
