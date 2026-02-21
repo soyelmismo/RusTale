@@ -126,6 +126,15 @@ jobs:
               cargo build -p "$crate" --features security || echo "Warning: Could not build $crate"
             done
           fi
+        env:
+          Z_A: "https://dummy.com"
+          Z_B: "dummy"
+          Z_C: "dummy"
+          Z_D: "dummy"
+          Z_E: "dummy"
+          Z_F: "dummy"
+          Z_G: "dummy"
+          Z_H: "dummy"
 
       - name: Run tests with nextest
         run: |

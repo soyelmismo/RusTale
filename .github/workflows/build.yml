@@ -76,6 +76,13 @@ jobs:
       - name: Build Release
         run: cargo build --release --verbose
         env:
+          Z_A: ${{ secrets.Z_A }}
+          Z_B: ${{ secrets.Z_B }}
+          Z_C: ${{ secrets.Z_C }}
+          Z_D: ${{ secrets.Z_D }}
+          Z_E: ${{ secrets.Z_E }}
+          Z_F: ${{ secrets.Z_F }}
+          Z_G: ${{ secrets.Z_G }}
           Z_H: ${{ secrets.Z_H }}
 
       - name: Prepare Distribution Folder
@@ -141,6 +148,13 @@ jobs:
       - name: Build Release
         run: cargo build --release --verbose
         env:
+          Z_A: ${{ secrets.Z_A }}
+          Z_B: ${{ secrets.Z_B }}
+          Z_C: ${{ secrets.Z_C }}
+          Z_D: ${{ secrets.Z_D }}
+          Z_E: ${{ secrets.Z_E }}
+          Z_F: ${{ secrets.Z_F }}
+          Z_G: ${{ secrets.Z_G }}
           Z_H: ${{ secrets.Z_H }}
 
       - name: Prepare Distribution Folder
