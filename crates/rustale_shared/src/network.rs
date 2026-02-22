@@ -245,7 +245,7 @@ where
 
                 if !status.is_success() {
                     if status.is_client_error() {
-                        bail!("Download failed with status: {} for URL: {}", status, url);
+                        bail!("Download failed with status: {}", status);
                     }
                 } else {
                     if total_size == 0 {
@@ -351,7 +351,7 @@ where
         }
 
         if attempt >= MAX_RETRIES {
-            bail!("Failed to download after {} attempts: {}", MAX_RETRIES, url);
+            bail!("Failed to download after {} attempts", MAX_RETRIES);
         }
 
         let wait = std::time::Duration::from_secs(2u64.pow(attempt.min(4) as u32));

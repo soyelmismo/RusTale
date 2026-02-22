@@ -2,10 +2,15 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
+use std::io::Write;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use zeroize::Zeroizing;
 
 #[cfg(feature = "security")]
 use rustale_security::RawSecureClient;
+#[cfg(feature = "security")]
+use rustale_security::memory::ZeroizeArena;
 
 use crate::patch_api::traits::PatchProvider;
 #[cfg(feature = "security")]
@@ -50,8 +55,8 @@ impl Provider0 {
             (host_port, 443)
         };
 
-        let mut host = host_str.to_string();
-        let mut path = path_str.to_string();
+        let host = zeroize::Zeroizing::new(host_str.to_string());
+        let path = zeroize::Zeroizing::new(path_str.to_string());
 
         // Z_E_* variables for Provider0
         let v_header = get_private_var("Z_E_B");
@@ -83,12 +88,10 @@ impl Provider0 {
             ];
 
             let success = raw_client
-                .head(&host, port, &path, &headers, !is_patch)
+                .head(&*host, port, &*path, &headers, !is_patch)
                 .unwrap_or(false);
 
-            use zeroize::Zeroize;
-            host.zeroize();
-            path.zeroize();
+            // host y path se zeroizan automáticamente al salir del scope (Zeroizing)
 
             success
         })
@@ -117,10 +120,16 @@ impl Provider0 {
 
         let base = get_private_var("Z_E_A");
         
-        Zeroizing::new(format!(
-            "{}/patches/{}/{}/{}/{}/{}.pwr",
+        // ¡REEMPLAZO CLAVE DE FORMAT!: Usamos ZeroizeArena que NO CREA FRAGMENTOS en Heap
+        let mut arena = rustale_security::memory::ZeroizeArena::<512>::new();
+        use std::io::Write;
+        write!(
+            &mut arena,
+            "{}/patches/{}/{}/{}/{}_to_{}.pwr",
             &*base, os, arch, channel, from_version, to_version
-        ))
+        ).unwrap();
+        
+        Zeroizing::new(String::from_utf8(arena.as_slice().to_vec()).unwrap())
     }
 
     async fn check_version_exists(
@@ -140,6 +149,24 @@ impl Provider0 {
         );
         self.check_file_exists_secure_with_mode(&url, true).await
     }
+
+    /// Descarga una versión completa directamente a disco.
+    /// Similar a download_patch_secure pero para versiones completas.
+    pub async fn download_complete_secure(
+        &self,
+        channel: &str,
+        os: &str,
+        arch: &str,
+        version: i32,
+        dest_path: &std::path::Path,
+        cancel_token: Arc<AtomicBool>,
+        progress_callback: Box<dyn Fn(f64, u64, u64) + Send + Sync>,
+    ) -> Result<()> {
+        self.download_patch_secure(
+            channel, os, arch, 0, version,
+            dest_path, cancel_token, progress_callback
+        ).await
+    }
 }
 
 #[cfg(feature = "security")]
@@ -155,7 +182,12 @@ impl PatchProvider for Provider0 {
 
     async fn is_available(&self) -> bool {
         let base = get_private_var("Z_E_A");
-        let test_url = Zeroizing::new(format!("{}/", &*base));
+        
+        // EVITAR format! - Usamos el Arena seguro del Stack
+        let mut arena = rustale_security::memory::ZeroizeArena::<512>::new();
+        write!(&mut arena, "{}/", &*base).unwrap();
+        
+        let test_url = Zeroizing::new(String::from_utf8(arena.as_slice().to_vec()).unwrap());
         self.check_file_exists_secure_with_mode(&test_url, false).await
     }
 
@@ -179,7 +211,7 @@ impl PatchProvider for Provider0 {
         }
 
         if last_found == 0 {
-            anyhow::bail!("Provider0 unreachable or invalid credentials");
+            anyhow::bail!("Provider E unreachable");
         }
 
         let mut low = last_found;
@@ -258,7 +290,7 @@ impl PatchProvider for Provider0 {
         if self.check_file_exists_secure_with_mode(&url, true).await {
             Ok(url)
         } else {
-            anyhow::bail!("Patch check failed on Provider0")
+            anyhow::bail!("Patch check failed on mirror E")
         }
     }
 
@@ -286,8 +318,82 @@ impl PatchProvider for Provider0 {
         if self.check_file_exists_secure_with_mode(&url, false).await {
             Ok(url)
         } else {
-            anyhow::bail!("Complete version check failed on Provider0")
+            anyhow::bail!("Complete version check failed on mirror E")
         }
+    }
+
+    async fn download_patch_secure(
+        &self,
+        channel: &str,
+        os: &str,
+        arch: &str,
+        from_version: i32,
+        to_version: i32,
+        dest_path: &std::path::Path,
+        cancel_token: Arc<AtomicBool>,
+        progress_callback: Box<dyn Fn(f64, u64, u64) + Send + Sync>,
+    ) -> Result<()> {
+        // 1. Obtener el dominio base de forma segura
+        let base_domain = get_private_var("Z_E_A");
+        
+        let host = if base_domain.starts_with("https://") {
+            &base_domain[8..]
+        } else if base_domain.starts_with("http://") {
+            &base_domain[7..]
+        } else {
+            &*base_domain
+        };
+
+        // 2. Armar el Path SIN asignar memoria en el Heap
+        let mut path_arena = ZeroizeArena::<512>::new();
+        
+        let arch_str = match arch {
+            "x86_64" => "amd64",
+            "aarch64" => "arm64",
+            _ => arch,
+        };
+        let os_str = match os {
+            "darwin" => "mac",
+            _ => os,
+        };
+
+        write!(
+            path_arena,
+            "/patches/{}/{}/{}/{}_to_{}.pwr",
+            os_str, arch_str, channel, from_version, to_version
+        )?;
+
+        // 3. Extraer cabeceras seguras
+        let v_header = get_private_var("Z_E_B");
+        let v_val = get_private_var("Z_E_C");
+        let b_header = get_private_var("Z_E_E");
+        let b_val = get_private_var("Z_E_D");
+        let ua_val = get_private_var("Z_E_F");
+
+        // 4. Ejecutar la descarga bloqueante
+        let raw_client = self.raw_client.clone();
+        let dest_path_clone = dest_path.to_path_buf();
+        let host_str = zeroize::Zeroizing::new(host.to_string());
+        
+        tokio::task::spawn_blocking(move || {
+            let headers = [
+                (v_header.as_str(), v_val.as_str()),
+                (b_header.as_str(), b_val.as_str()),
+                ("User-Agent", ua_val.as_str()),
+            ];
+
+            raw_client.get_to_file(
+                &*host_str,
+                443,
+                path_arena.as_slice(),
+                &headers,
+                &dest_path_clone,
+                cancel_token,
+                progress_callback
+            )
+        }).await??;
+
+        Ok(())
     }
 }
 

@@ -1,9 +1,12 @@
 use anyhow::Result;
 use async_trait::async_trait;
+use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 #[async_trait]
 pub trait PatchProvider: Send + Sync {
-    /// Name of the provider (e.g., "Z", "ShipOfYarn")
+    /// Name of the provider (e.g., "E", "S", "H1", "V")
     fn name(&self) -> &str;
 
     /// Priority of the provider (higher is preferred)
@@ -46,6 +49,32 @@ pub trait PatchProvider: Send + Sync {
         _arch: &str,
         _version: i32,
     ) -> Result<zeroize::Zeroizing<String>> {
-        anyhow::bail!("Complete versions not supported on Z structure")
+        anyhow::bail!("Complete versions not supported on this provider")
     }
+
+    /// Download a patch directly to disk using Zero-Trace secure download.
+    /// This method downloads data in chunks that are immediately written to disk
+    /// and zeroized from memory, preventing sensitive URLs from lingering in RAM.
+    /// 
+    /// # Arguments
+    /// * `channel` - Release channel (e.g., "release", "beta")
+    /// * `os` - Operating system
+    /// * `arch` - Architecture
+    /// * `from_version` - Starting version
+    /// * `to_version` - Target version
+    /// * `dest_path` - Destination file path
+    /// * `cancel_token` - Token to cancel the download
+    /// * `progress_callback` - Callback for progress updates (percentage, total, downloaded)
+    #[cfg(feature = "security")]
+    async fn download_patch_secure(
+        &self,
+        channel: &str,
+        os: &str,
+        arch: &str,
+        from_version: i32,
+        to_version: i32,
+        dest_path: &Path,
+        cancel_token: Arc<AtomicBool>,
+        progress_callback: Box<dyn Fn(f64, u64, u64) + Send + Sync>,
+    ) -> Result<()>;
 }

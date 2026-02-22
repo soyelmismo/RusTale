@@ -5,7 +5,11 @@ use std::sync::{Arc, atomic::AtomicBool};
 use crate::ProgressCallback;
 use crate::patch_api::integrity_checker::IntegrityChecker;
 use crate::patch_api::mod_manager::PatchApiManager;
+use crate::patch_api::traits::PatchProvider;
 use crate::patch_api::utils::*;
+
+#[cfg(feature = "security")]
+use crate::patch_api::providers::{Provider0, Provider1, Provider2, Provider3};
 
 /// Downloader for game patches
 #[derive(Clone)]
@@ -210,26 +214,109 @@ impl PatchDownloader {
                 Some(0),
             );
 
-            let progress_callback_clone = progress_callback.clone();
-            let from_v = actual_from_version;
-            let to_v = to_version;
-            crate::download_file(
-                &patch_url,
-                &patch_path,
-                move |_phase, pct, speed, total, downloaded, eta, _step| {
-                    progress_callback_clone(
-                        "patch".to_string(),
-                        pct,
-                        format!("{} - {}→{}", speed, from_v, to_v),
-                        total,
-                        downloaded,
-                        eta,
-                        Some(0),
-                    );
-                },
-                cancel_token.clone(),
-            )
-            .await?;
+            #[cfg(feature = "security")]
+            {
+                // SECURITY: Intentar descarga segura con cada provider en orden de prioridad
+                // No hardcodear un provider específico - tratar todos igual
+                let providers: Vec<Box<dyn PatchProvider>> = vec![
+                    Box::new(Provider0::new()),
+                    Box::new(Provider1::new()),
+                    Box::new(Provider2::new()),
+                    Box::new(Provider3::new()),
+                ];
+
+                let cancel_token_clone = cancel_token.clone().unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
+                let mut download_success = false;
+                let mut last_error: Option<anyhow::Error> = None;
+
+                for provider in providers {
+                    // Verificar disponibilidad antes de intentar
+                    if !provider.is_available().await {
+                        println!("[Downloader] Provider {} not available, skipping", provider.name());
+                        continue;
+                    }
+
+                    let progress_cb = Box::new({
+                        let from_v = actual_from_version;
+                        let to_v = to_version;
+                        let progress_callback_clone = progress_callback.clone();
+                        move |pct: f64, total: u64, downloaded: u64| {
+                            let speed_str = if downloaded > 0 {
+                                format!("{:.1} MB/s", downloaded as f64 / 1_048_576.0)
+                            } else {
+                                "Connecting...".to_string()
+                            };
+                            progress_callback_clone(
+                                "patch".to_string(),
+                                pct,
+                                format!("{} - {}→{}", speed_str, from_v, to_v),
+                                total,
+                                downloaded,
+                                None,
+                                Some(0),
+                            );
+                        }
+                    });
+
+                    match provider
+                        .download_patch_secure(
+                            channel,
+                            std::env::consts::OS,
+                            get_arch_name(),
+                            actual_from_version,
+                            to_version,
+                            &patch_path,
+                            cancel_token_clone.clone(),
+                            progress_cb,
+                        )
+                        .await
+                    {
+                        Ok(()) => {
+                            println!("[Downloader] ✓ Download successful from provider {}", provider.name());
+                            download_success = true;
+                            break;
+                        }
+                        Err(e) => {
+                            println!("[Downloader] ✗ Provider {} failed: {}", provider.name(), e);
+                            last_error = Some(e);
+                            // Continuar con el siguiente provider
+                        }
+                    }
+                }
+
+                if !download_success {
+                    // Si todos fallaron, reportar el último error
+                    if let Some(e) = last_error {
+                        return Err(e);
+                    } else {
+                        anyhow::bail!("No providers available for download");
+                    }
+                }
+            }
+
+            #[cfg(not(feature = "security"))]
+            {
+                let progress_callback_clone = progress_callback.clone();
+                let from_v = actual_from_version;
+                let to_v = to_version;
+                crate::download_file(
+                    &patch_url,
+                    &patch_path,
+                    move |_phase, pct, speed, total, downloaded, eta, _step| {
+                        progress_callback_clone(
+                            "patch".to_string(),
+                            pct,
+                            format!("{} - {}→{}", speed, from_v, to_v),
+                            total,
+                            downloaded,
+                            eta,
+                            Some(0),
+                        );
+                    },
+                    cancel_token.clone(),
+                )
+                .await?;
+            }
 
             progress_callback(
                 "patch".to_string(),

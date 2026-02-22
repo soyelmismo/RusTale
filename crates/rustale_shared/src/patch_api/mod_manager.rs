@@ -236,7 +236,12 @@ impl MirrorManager {
     /// Verifica si un mirror está disponible
     #[cfg(feature = "security")]
     async fn check_mirror_availability(&self, mirror: &MirrorConfig) -> bool {
-        let test_url = format!("{}/manifest.json", &*mirror.base_url);
+        // EVITAR format! - Usamos el Arena seguro del Stack
+        let mut arena = rustale_security::memory::ZeroizeArena::<512>::new();
+        use std::io::Write;
+        write!(&mut arena, "{}/manifest.json", &*mirror.base_url).unwrap();
+        
+        let test_url = Zeroizing::new(String::from_utf8(arena.as_slice().to_vec()).unwrap());
         
         // Parse manual de URL
         let without_scheme = if test_url.starts_with("https://") {
@@ -244,7 +249,7 @@ impl MirrorManager {
         } else if test_url.starts_with("http://") {
             &test_url[7..]
         } else {
-            &test_url
+            &*test_url
         };
 
         let slash_idx = without_scheme.find('/').unwrap_or(without_scheme.len());

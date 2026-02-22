@@ -241,6 +241,23 @@ impl PatchProvider for HytaleProvider {
         let exists = self.check_version_exists(0, version, arch, os, channel).await;
         Ok(exists)
     }
+
+    /// HytaleProvider no soporta descarga segura directa.
+    /// Usar get_patch_url() + download_file() en su lugar.
+    #[cfg(feature = "security")]
+    async fn download_patch_secure(
+        &self,
+        _channel: &str,
+        _os: &str,
+        _arch: &str,
+        _from_version: i32,
+        _to_version: i32,
+        _dest_path: &std::path::Path,
+        _cancel_token: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        _progress_callback: Box<dyn Fn(f64, u64, u64) + Send + Sync>,
+    ) -> Result<()> {
+        anyhow::bail!("HytaleProvider does not support secure direct download. Use get_patch_url() + download_file() instead.")
+    }
 }
 
 impl Default for HytaleProvider {
