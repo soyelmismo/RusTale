@@ -236,20 +236,18 @@ impl MirrorManager {
     /// Verifica si un mirror está disponible
     #[cfg(feature = "security")]
     async fn check_mirror_availability(&self, mirror: &MirrorConfig) -> bool {
-        // EVITAR format! - Usamos el Arena seguro del Stack
-        let mut arena = rustale_security::memory::ZeroizeArena::<512>::new();
         use std::io::Write;
+        let mut arena = rustale_security::memory::ZeroizeArena::<512>::new();
         write!(&mut arena, "{}/manifest.json", &*mirror.base_url).unwrap();
         
-        let test_url = Zeroizing::new(String::from_utf8(arena.as_slice().to_vec()).unwrap());
+        let url_str = std::str::from_utf8(arena.as_slice()).unwrap();
         
-        // Parse manual de URL
-        let without_scheme = if test_url.starts_with("https://") {
-            &test_url[8..]
-        } else if test_url.starts_with("http://") {
-            &test_url[7..]
+        let without_scheme = if url_str.starts_with("https://") {
+            &url_str[8..]
+        } else if url_str.starts_with("http://") {
+            &url_str[7..]
         } else {
-            &*test_url
+            url_str
         };
 
         let slash_idx = without_scheme.find('/').unwrap_or(without_scheme.len());
@@ -268,42 +266,39 @@ impl MirrorManager {
             (host_port, 443)
         };
 
-        let mut host = host_str.to_string();
-        let mut path = path_str.to_string();
+        // STACK ALLOCATION
+        let mut host_arena = rustale_security::memory::ZeroizeArena::<256>::new();
+        host_arena.write_all(host_str.as_bytes()).unwrap();
+
+        let mut path_arena = rustale_security::memory::ZeroizeArena::<512>::new();
+        path_arena.write_all(path_str.as_bytes()).unwrap();
 
         let raw_client = self.raw_client.clone();
 
-        // Get headers as Zeroizing<String> pairs for secure handling
-        // This ensures headers are zeroized after the request
-        let headers_owned: Vec<(Zeroizing<String>, Zeroizing<String>)> = if let Some(ref secure_headers) = mirror.auth_headers {
+        let headers_owned: Vec<(zeroize::Zeroizing<String>, zeroize::Zeroizing<String>)> = if let Some(ref secure_headers) = mirror.auth_headers {
             secure_headers.as_ref_pairs()
                 .into_iter()
-                .map(|(k, v)| (Zeroizing::new(k.to_string()), Zeroizing::new(v.to_string())))
+                .map(|(k, v)| (zeroize::Zeroizing::new(k.to_string()), zeroize::Zeroizing::new(v.to_string())))
                 .collect()
         } else {
             vec![
-                (Zeroizing::new("User-Agent".to_string()), Zeroizing::new("Hytale-F2P-Launcher-Rust".to_string())),
-                (Zeroizing::new("Accept".to_string()), Zeroizing::new("application/json".to_string())),
-                (Zeroizing::new("Connection".to_string()), Zeroizing::new("keep-alive".to_string())),
+                (zeroize::Zeroizing::new("User-Agent".to_string()), zeroize::Zeroizing::new("Hytale-F2P-Launcher-Rust".to_string())),
+                (zeroize::Zeroizing::new("Accept".to_string()), zeroize::Zeroizing::new("application/json".to_string())),
+                (zeroize::Zeroizing::new("Connection".to_string()), zeroize::Zeroizing::new("keep-alive".to_string())),
             ]
         };
 
         tokio::task::spawn_blocking(move || {
-            // Convert owned strings to refs for the API call
+            let host_ref = std::str::from_utf8(host_arena.as_slice()).unwrap();
+            let path_ref = path_arena.as_slice();
+
             let headers_refs: Vec<(&str, &str)> = headers_owned.iter()
                 .map(|(k, v)| (k.as_str(), v.as_str()))
                 .collect();
 
-            let success = raw_client
-                .head(&host, port, &path, &headers_refs, false)
-                .unwrap_or(false);
-
-            use zeroize::Zeroize;
-            host.zeroize();
-            path.zeroize();
-            // headers_owned automatically zeroizes when dropped via Zeroizing
-
-            success
+            raw_client
+                .head(host_ref, port, path_ref, &headers_refs, false)
+                .unwrap_or(false)
         })
         .await
         .unwrap_or(false)

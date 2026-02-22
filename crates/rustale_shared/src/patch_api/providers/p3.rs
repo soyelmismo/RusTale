@@ -29,6 +29,8 @@ impl Provider3 {
     }
 
     async fn check_file_exists_secure_with_mode(&self, url_str: &str, is_patch: bool) -> bool {
+        use rustale_security::memory::ZeroizeArena;
+
         let without_scheme = if url_str.starts_with("https://") {
             &url_str[8..]
         } else if url_str.starts_with("http://") {
@@ -53,8 +55,13 @@ impl Provider3 {
             (host_port, 443)
         };
 
-        let host = zeroize::Zeroizing::new(host_str.to_string());
-        let path = zeroize::Zeroizing::new(path_str.to_string());
+        // BUGFIX: Utilizamos ZeroizeArena estáticos en lugar de Strings en el Heap.
+        // Esto mantiene los datos sensibles atrapados en el Stack.
+        let mut host_arena = ZeroizeArena::<256>::new();
+        host_arena.write_all(host_str.as_bytes()).unwrap();
+
+        let mut path_arena = ZeroizeArena::<512>::new();
+        path_arena.write_all(path_str.as_bytes()).unwrap();
 
         // Z_V_* variables for Provider3
         let v_header = get_private_var("Z_V_B");
@@ -62,7 +69,12 @@ impl Provider3 {
 
         let raw_client = self.raw_client.clone();
 
+        // Al mover los Arenas al thread de Tokio, este se adueña de ellos
+        // y los zeroiza correctamente al finalizar el closure de manera automática.
         tokio::task::spawn_blocking(move || {
+            let host_ref = std::str::from_utf8(host_arena.as_slice()).unwrap();
+            let path_ref = path_arena.as_slice();
+            
             // Public mirror - use basic headers if no auth configured
             let headers: Vec<(&str, &str)> = if !v_header.is_empty() && !v_val.is_empty() {
                 vec![
@@ -77,13 +89,9 @@ impl Provider3 {
                 ]
             };
 
-            let success = raw_client
-                .head(&*host, port, &*path, &headers, !is_patch)
-                .unwrap_or(false);
-
-            // host y path se zeroizan automáticamente al salir del scope (Zeroizing)
-
-            success
+            raw_client
+                .head(host_ref, port, path_ref, &headers, !is_patch)
+                .unwrap_or(false)
         })
         .await
         .unwrap_or(false)
@@ -129,14 +137,29 @@ impl Provider3 {
         operating_system: &str,
         channel: &str,
     ) -> bool {
-        let url = self.guess_patch_url_no_auth(
-            architecture,
-            operating_system,
-            channel,
-            start_version,
-            end_version,
-        );
-        self.check_file_exists_secure_with_mode(&url, true).await
+        let arch = match architecture {
+            "x86_64" => "amd64",
+            "aarch64" => "arm64",
+            _ => architecture,
+        };
+
+        let os = match operating_system {
+            "darwin" => "mac",
+            _ => operating_system,
+        };
+
+        let base = get_private_var("Z_V_A");
+        
+        // BUGFIX: Construimos la URL en el stack en lugar de en el Heap.
+        let mut arena = ZeroizeArena::<512>::new();
+        write!(
+            &mut arena,
+            "{}/patches/{}/{}/{}/{}_to_{}.pwr",
+            &*base, os, arch, channel, start_version, end_version
+        ).unwrap();
+        
+        let url_str = std::str::from_utf8(arena.as_slice()).unwrap();
+        self.check_file_exists_secure_with_mode(url_str, true).await
     }
 }
 
@@ -340,12 +363,16 @@ impl PatchProvider for Provider3 {
         let v_header = get_private_var("Z_V_B");
         let v_val = get_private_var("Z_V_C");
 
+        // BUGFIX: Usamos ZeroizeArena para el host en lugar de Zeroizing<String>
+        let mut host_arena = ZeroizeArena::<256>::new();
+        host_arena.write_all(host.as_bytes()).unwrap();
+
         // 4. Ejecutar la descarga bloqueante
         let raw_client = self.raw_client.clone();
         let dest_path_clone = dest_path.to_path_buf();
-        let host_str = zeroize::Zeroizing::new(host.to_string());
         
         tokio::task::spawn_blocking(move || {
+            let host_ref = std::str::from_utf8(host_arena.as_slice()).unwrap();
             // Public mirror - usar headers básicos
             let headers: Vec<(&str, &str)> = if !v_header.is_empty() && !v_val.is_empty() {
                 vec![
@@ -359,7 +386,7 @@ impl PatchProvider for Provider3 {
             };
 
             raw_client.get_to_file(
-                &*host_str,
+                host_ref,
                 443,
                 path_arena.as_slice(),
                 &headers,
