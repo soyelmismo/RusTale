@@ -1141,7 +1141,7 @@ async fn handle_repair(
             &base_dir,
             "stable", // Assuming stable or detect from settings
             Some(version as i32),
-            crate::game::install::InstallPolicy::Repair,
+            crate::game::InstallPolicy::Repair,
             reporter,
             Some(cancel_token),
             &loc,

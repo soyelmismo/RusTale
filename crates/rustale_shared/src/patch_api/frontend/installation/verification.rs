@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
-use rustale_shared::{WeightedProgressTracker, GamePaths};
-use crate::game::patch_api::frontend::PatchApiFrontend;
+use crate::{WeightedProgressTracker, GamePaths};
+use super::super::PatchApiFrontend;
+use crate::patch_api::{is_game_installed, save_local_version, IntegrityChecker};
 
 impl PatchApiFrontend {
     /// Phase 7: Final verification and completion
@@ -32,11 +33,11 @@ impl PatchApiFrontend {
         // Multiple verification attempts
         let mut verification_passed = false;
         for attempt in 1..=3 {
-            if crate::game::install::is_game_installed(base_dir, channel, &install_dir_name).await {
+            if is_game_installed(base_dir, channel, &install_dir_name).await {
                 let game_dir = GamePaths::new(base_dir.clone())
                     .version_dir(channel, &install_dir_name);
 
-                let integrity_checker = crate::game::patch_api::IntegrityChecker::new();
+                let integrity_checker = IntegrityChecker::new();
                 match integrity_checker
                     .verify_extraction_integrity(&game_dir)
                     .await
@@ -71,7 +72,7 @@ impl PatchApiFrontend {
             
             // Save version.json only for latest installations and only after successful verification
             if is_latest {
-                if let Err(e) = crate::game::install::save_local_version(
+                if let Err(e) = save_local_version(
                     base_dir,
                     channel,
                     target_ver_val,

@@ -9,6 +9,7 @@ pub mod tracking;
 pub mod win_job;
 
 pub use installer::JreInstaller;
+pub use detection::{JavaInfo, ensure_java_available, get_java_version_sync};
 
 pub use proxy::{setup_java_proxy, remove_java_proxy, find_free_port, save_active_port, get_saved_port, run_java_proxy_logic, get_runtime_port_file, is_running_as_java_proxy};
 

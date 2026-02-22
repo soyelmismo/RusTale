@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 use tokio::fs;
 
+use crate::paths::GamePaths;
+use super::types::{get_local_version, save_local_version};
+
 /// Installation policy - defines the intent of the installation operation
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum InstallPolicy {
@@ -16,13 +19,10 @@ pub enum InstallPolicy {
 
 /// Checks if the game is installed for a specific version
 pub async fn is_game_installed(base_dir: &PathBuf, channel: &str, version: &str) -> bool {
-    let paths = crate::game::paths::GamePaths::new(base_dir.clone());
+    let paths = GamePaths::new(base_dir.clone());
     let client_path = paths.client_exe(channel, version);
     fs::metadata(&client_path).await.is_ok()
 }
-
-/// Gets the local installed version (from latest folder metadata)
-pub use crate::game::patch_api::{get_local_version, save_local_version};
 
 /// Helper to get all installed versions by scanning the directory
 /// Returns a Vec of (version_number, is_latest_folder)

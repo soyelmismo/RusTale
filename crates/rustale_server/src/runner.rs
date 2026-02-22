@@ -323,7 +323,7 @@ pub async fn run_server_flow_internal(
             let latest = main_app_dir.join(&config.branch).join("latest");
             if latest.exists() {
                 if let Ok(ver) =
-                    rustale_engine::game::install::get_local_version(&main_app_dir, &config.branch).await
+                    rustale_engine::game::get_local_version(&main_app_dir, &config.branch).await
                 {
                     if ver.to_string() == config.game_version {
                         source_candidate = Some(latest);

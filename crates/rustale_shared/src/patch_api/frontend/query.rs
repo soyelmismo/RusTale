@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::path::PathBuf;
 use super::PatchApiFrontend;
+use crate::patch_api::GameVersionInfo;
 
 impl PatchApiFrontend {
     /// Gets comprehensive version information
@@ -10,7 +11,7 @@ impl PatchApiFrontend {
         base_dir: &PathBuf,
         channel: &str,
         user_version: i32,
-    ) -> Result<crate::game::patch_api::GameVersionInfo> {
+    ) -> Result<GameVersionInfo> {
         self.version_manager
             .get_version_info(base_dir, channel, user_version)
             .await

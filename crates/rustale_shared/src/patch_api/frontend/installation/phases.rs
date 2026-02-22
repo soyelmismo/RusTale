@@ -1,6 +1,9 @@
 use std::sync::{Arc, atomic::AtomicBool, Mutex};
-use rustale_shared::{WeightedProgressTracker, DownloadStats};
-use crate::game::patch_api::frontend::PatchApiFrontend;
+use crate::{WeightedProgressTracker, DownloadStats};
+use super::super::PatchApiFrontend;
+use crate::patch_api::InstallPolicy;
+use crate::patch_api::is_game_installed;
+use crate::patch_api::GameVersionInfo;
 
 impl PatchApiFrontend {
     /// Phase 1: Initial checking phase
@@ -10,13 +13,13 @@ impl PatchApiFrontend {
         base_dir: &std::path::PathBuf,
         channel: &str,
         target_version: Option<i32>,
-        policy: crate::game::install::InstallPolicy,
+        policy: InstallPolicy,
     ) -> anyhow::Result<bool> {
         WeightedProgressTracker::set_phase(tracker, "check");
         WeightedProgressTracker::report_simple(tracker, 0.0, "launcher.status.checking", None);
 
         // Fast offline path - only if game is actually installed
-        if policy == crate::game::install::InstallPolicy::OfflineVerify {
+        if policy == InstallPolicy::OfflineVerify {
             let is_latest = target_version.unwrap_or(0) == 0;
             let install_dir_name = if is_latest {
                 "latest".to_string()
@@ -24,7 +27,7 @@ impl PatchApiFrontend {
                 target_version.unwrap_or(0).to_string()
             };
 
-            if crate::game::install::is_game_installed(base_dir, channel, &install_dir_name).await {
+            if is_game_installed(base_dir, channel, &install_dir_name).await {
                 WeightedProgressTracker::report(
                     tracker,
                     1.0,
@@ -55,7 +58,7 @@ impl PatchApiFrontend {
         );
 
         // Bridge the legacy JRE callback to our new system
-        let java_info = crate::java::detection::ensure_java_available(base_dir).await?;
+        let java_info = crate::java::ensure_java_available(base_dir).await?;
         println!("[JRE] Detected Java version: {}", java_info.version);
         Ok(())
     }
@@ -118,7 +121,7 @@ impl PatchApiFrontend {
         base_dir: &std::path::PathBuf,
         channel: &str,
         target_version: Option<i32>,
-    ) -> anyhow::Result<(crate::game::patch_api::GameVersionInfo, String, i32, i32, bool)> {
+    ) -> anyhow::Result<(GameVersionInfo, String, i32, i32, bool)> {
         WeightedProgressTracker::set_phase(tracker, "version");
         WeightedProgressTracker::report_simple(tracker, 0.5, "launcher.status.checking", None);
 
@@ -141,7 +144,7 @@ impl PatchApiFrontend {
             user_version
         };
         let files_exist =
-            crate::game::install::is_game_installed(base_dir, channel, &install_dir_name).await;
+            is_game_installed(base_dir, channel, &install_dir_name).await;
         let start_version = if is_latest && files_exist {
             version_info.current_local
         } else {

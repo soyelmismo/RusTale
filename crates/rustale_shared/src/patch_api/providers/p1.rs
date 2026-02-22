@@ -1,3 +1,5 @@
+//! Provider1 - Backup mirror
+
 use anyhow::Result;
 use async_trait::async_trait;
 use zeroize::Zeroizing;
@@ -9,42 +11,27 @@ use crate::patch_api::traits::PatchProvider;
 #[cfg(feature = "security")]
 use crate::patch_api::utils::{get_pinned_cert_hash, get_private_var};
 
-/// Z API provider (private mirror API)
-///
-/// Este proveedor utiliza el sistema de seguridad RusTale Security Suite
-/// para proteger las credenciales y la integridad de las peticiones.
-///
-/// Características de seguridad activas:
-/// 1. Ofuscación de strings Procedural (sec_str! v2).
-/// 2. Micro-cliente HTTP/TLS Blindado (RawSecureClient) para pings críticos.
-/// 3. Zeroize Arena para construcción de headers volátiles.
-/// 4. Honeypots y Degradación Retardada ante Tampering.
+/// Provider1 - mirror
 #[cfg(feature = "security")]
-pub struct ZProvider {
+pub struct Provider1 {
     client: SecureClient,
     raw_client: RawSecureClient,
 }
 
 #[cfg(feature = "security")]
-impl ZProvider {
+impl Provider1 {
     pub fn new() -> Self {
-        // Inicializar el sistema de defensa activa (Watchdog)
         init_shield();
 
         Self {
-            // Cliente estándar para descargas grandes (reqwest)
             client: SecureClient::builder()
                 .with_pinning(get_pinned_cert_hash)
                 .build(),
-            // Micro-cliente para peticiones HEAD de metadatos (rustls crudo)
             raw_client: RawSecureClient::new(get_pinned_cert_hash),
         }
     }
 
-    /// Verifica si un archivo existe con modo específico (availability vs patch check)
-    #[cfg(feature = "security")]
     async fn check_file_exists_secure_with_mode(&self, url_str: &str, is_patch: bool) -> bool {
-        // Parse manual
         let without_scheme = if url_str.starts_with("https://") {
             &url_str[8..]
         } else if url_str.starts_with("http://") {
@@ -72,16 +59,14 @@ impl ZProvider {
         let mut host = host_str.to_string();
         let mut path = path_str.to_string();
 
-        // Extraemos las credenciales como SafeStrings.
-        // No usamos .to_string() para evitar dejar copias en texto plano en el heap.
-        let v_header = get_private_var("Z_B");
-        let v_val = get_private_var("Z_C");
-        let b_header = get_private_var("Z_E");
-        let b_val = get_private_var("Z_D");
-        let ua_header = get_private_var("Z_G");
-        let ua_val = get_private_var("Z_F");
+        // Z_S_* variables for Provider1
+        let v_header = get_private_var("Z_S_B");
+        let v_val = get_private_var("Z_S_C");
+        let b_header = get_private_var("Z_S_E");
+        let b_val = get_private_var("Z_S_D");
+        let ua_header = get_private_var("Z_S_G");
+        let ua_val = get_private_var("Z_S_F");
 
-        // Crash si alguna variable crítica no está configurada
         if v_header.is_empty()
             || v_val.is_empty()
             || b_header.is_empty()
@@ -89,33 +74,24 @@ impl ZProvider {
             || ua_header.is_empty()
             || ua_val.is_empty()
         {
-            panic!("[ZProvider] Security configuration incomplete");
+            // Configuration not available - return false instead of panicking
+            // This allows the provider to gracefully report as unavailable
+            return false;
         }
 
-        // Ejecutamos la petición HEAD en un hilo de bloqueo para no colgar el runtime async.
-        // Movemos los SafeStrings al closure; se limpiarán con zeroize al terminar el bloque.
         let raw_client = self.raw_client.clone();
 
         tokio::task::spawn_blocking(move || {
-            // Reconstruimos el array de referencias dentro del hilo.
-            // Esto es seguro porque movemos la propiedad de los SafeStrings al hilo.
             let headers = [
                 (&*v_header, &*v_val),
                 (&*b_header, &*b_val),
                 (&*ua_header, &*ua_val),
             ];
 
-            // DEBUG: Mostrar headers que se envían
-            //println!("[DEBUG] Sending headers:");
-            //for (k, v) in &headers {
-            //    println!("[DEBUG]   {}: {}", k, v);
-            //}
-
             let success = raw_client
-                .head(&host, port, &path, &headers, !is_patch) // patches: solo 200, availability: 200 y 301
+                .head(&host, port, &path, &headers, !is_patch)
                 .unwrap_or(false);
 
-            // WIPE HEAP DATA SECURELY
             use zeroize::Zeroize;
             host.zeroize();
             path.zeroize();
@@ -126,7 +102,6 @@ impl ZProvider {
         .unwrap_or(false)
     }
 
-    /// Try to guess the patch URL for the given parameters.
     fn guess_patch_url_no_auth(
         &self,
         architecture: &str,
@@ -146,23 +121,12 @@ impl ZProvider {
             _ => operating_system,
         };
 
-        // Keep base URL as SafeString until used
-        let base = get_private_var("Z_A");
+        let base = get_private_var("Z_S_A");
         
-        // Build URL directly into Zeroizing<String>
-        let url = Zeroizing::new(format!(
-            "{}/patches/{}/{}/{}/{}/{}.pwr",
-            &*base,
-            os,   // linux
-            arch, // amd64
-            channel,
-            from_version,
-            to_version
-        ));
-
-        // DEBUG: Verificar URL generada
-        //println!("[DEBUG] Generated URL: {}", url);
-        url
+        Zeroizing::new(format!(
+            "{}/patches/{}/{}/{}/{}_to_{}.pwr",
+            &*base, os, arch, channel, from_version, to_version
+        ))
     }
 
     async fn check_version_exists(
@@ -186,55 +150,44 @@ impl ZProvider {
 
 #[cfg(feature = "security")]
 #[async_trait]
-impl PatchProvider for ZProvider {
+impl PatchProvider for Provider1 {
     fn name(&self) -> &str {
-        "Z"
+        "S"
     }
 
     fn priority(&self) -> i32 {
-        100 // Mayor prioridad ahora que es Blindada
+        90
     }
 
     async fn is_available(&self) -> bool {
-        // Probar con un patch específico que sabemos que funciona
-        let base = get_private_var("Z_A");
-        let test_url = Zeroizing::new(format!("{}/", &*base));
+        let base = get_private_var("Z_S_A");
+        let test_url = Zeroizing::new(format!("{}/api/patches-config", &*base));
         self.check_file_exists_secure_with_mode(&test_url, false).await
     }
 
     async fn get_latest_version(&self, channel: &str, os: &str, arch: &str) -> Result<i32> {
-        //println!("[ZProvider] Starting exponential search for {}/{}/{}", os, arch, channel);
-
-        // Fase 1: Búsqueda exponencial para encontrar el rango
         let mut last_found = 0;
         let mut next_check = 1;
         let mut step = 2;
 
         while next_check <= 100 {
-            // Límite más razonable
-            //println!("[ZProvider] Exponential check: {}", next_check);
-
-            // Buscar patch desde 0 hasta next_check (0->N)
             let exists = self
                 .check_version_exists(0, next_check, arch, os, channel)
                 .await;
-            //println!("[ZProvider] Version 0->{} exists: {}", next_check, exists);
 
             if exists {
                 last_found = next_check;
                 next_check += step;
-                step += 1; // Incremento creciente: 2, 3, 4, 5...
+                step += 1;
             } else {
-                // Encontramos el límite superior, ahora búsqueda binaria
                 break;
             }
         }
 
         if last_found == 0 {
-            anyhow::bail!("Z Server is unreachable or invalid credentials");
+            anyhow::bail!("Provider1 unreachable or invalid credentials");
         }
 
-        // Fase 2: Búsqueda binaria entre last_found y next_check-1
         let mut low = last_found;
         let mut high = next_check - 1;
         let mut result = last_found;
@@ -246,9 +199,7 @@ impl PatchProvider for ZProvider {
                 continue;
             }
 
-            //println!("[ZProvider] Binary search check: {}", mid);
             let exists = self.check_version_exists(0, mid, arch, os, channel).await;
-            //println!("[ZProvider] Version 0->{} exists: {}", mid, exists);
 
             if exists {
                 result = mid;
@@ -258,7 +209,6 @@ impl PatchProvider for ZProvider {
             }
         }
 
-        //println!("[ZProvider] Latest version found: {}", result);
         Ok(result)
     }
 
@@ -270,18 +220,11 @@ impl PatchProvider for ZProvider {
     ) -> Result<Vec<i32>> {
         let latest = self.get_latest_version(channel, os, arch).await?;
 
-        // Optimized: Instead of checking every patch, use dynamic milestones
         let mut versions = Vec::new();
+        let mut milestones = vec![1, 3, 6, 10];
 
-        // Generate dynamic milestones based on the latest version
-        let mut milestones = Vec::new();
-
-        // Always include early versions
-        milestones.extend_from_slice(&[1, 3, 6, 10]);
-
-        // Add intermediate milestones for larger versions
         if latest > 10 {
-            let step = (latest / 10).max(5); // Step of 5 or 1/10 of latest, whichever is larger
+            let step = (latest / 10).max(5);
             let mut current = 10 + step;
             while current < latest {
                 milestones.push(current);
@@ -289,14 +232,12 @@ impl PatchProvider for ZProvider {
             }
         }
 
-        // Check all milestones
         for &v in &milestones {
             if v <= latest && self.check_version_exists(v - 1, v, arch, os, channel).await {
                 versions.push(v);
             }
         }
 
-        // Always include the latest version if we can reach it
         if latest > 0
             && self
                 .check_version_exists(latest - 1, latest, arch, os, channel)
@@ -305,7 +246,6 @@ impl PatchProvider for ZProvider {
             versions.push(latest);
         }
 
-        // Sort and deduplicate
         versions.sort();
         versions.dedup();
 
@@ -324,7 +264,7 @@ impl PatchProvider for ZProvider {
         if self.check_file_exists_secure_with_mode(&url, true).await {
             Ok(url)
         } else {
-            anyhow::bail!("Patch check failed on Z")
+            anyhow::bail!("Patch check failed on Provider1")
         }
     }
 
@@ -335,7 +275,6 @@ impl PatchProvider for ZProvider {
         arch: &str,
         version: i32,
     ) -> Result<bool> {
-        // Check if complete patch 0->version exists
         let exists = self
             .check_version_exists(0, version, arch, os, channel)
             .await;
@@ -353,13 +292,12 @@ impl PatchProvider for ZProvider {
         if self.check_file_exists_secure_with_mode(&url, false).await {
             Ok(url)
         } else {
-            anyhow::bail!("Complete version check failed on Z")
+            anyhow::bail!("Complete version check failed on Provider1")
         }
     }
 }
 
-// Implementación de Clone manual necesaria para spawn_blocking
-impl Clone for ZProvider {
+impl Clone for Provider1 {
     fn clone(&self) -> Self {
         Self {
             client: self.client.clone(),
@@ -368,7 +306,7 @@ impl Clone for ZProvider {
     }
 }
 
-impl Default for ZProvider {
+impl Default for Provider1 {
     fn default() -> Self {
         Self::new()
     }

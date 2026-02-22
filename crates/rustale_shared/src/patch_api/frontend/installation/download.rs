@@ -1,7 +1,7 @@
 use std::sync::{Arc, atomic::AtomicBool, Mutex};
-use rustale_shared::{WeightedProgressTracker, DownloadStats};
-use crate::game::patch_api::frontend::PatchApiFrontend;
-use crate::game::patch_api::frontend::utils;
+use crate::{WeightedProgressTracker, DownloadStats, Localization};
+use super::super::PatchApiFrontend;
+use super::super::utils;
 
 impl PatchApiFrontend {
     /// Phase 5: Download patch phase
@@ -12,7 +12,7 @@ impl PatchApiFrontend {
         start_version: i32,
         target_ver_val: i32,
         cancel_token: Option<Arc<AtomicBool>>,
-        localization: &crate::lang::Localization,
+        localization: &Localization,
     ) -> anyhow::Result<std::path::PathBuf> {
         WeightedProgressTracker::set_phase(tracker, "download");
         WeightedProgressTracker::report(
@@ -71,7 +71,8 @@ impl PatchApiFrontend {
         Ok(patch_path)
     }
 
-    /// Phase 6: Install patch phase
+    /// Phase 6: Install patch phase  
+    /// Note: This requires patcher functionality - should be implemented by the engine
     pub async fn phase_install(
         &self,
         tracker: &Arc<Mutex<WeightedProgressTracker>>,
@@ -80,7 +81,7 @@ impl PatchApiFrontend {
         install_dir_name: &str,
         patch_path: &std::path::PathBuf,
         cancel_token: Option<Arc<AtomicBool>>,
-        localization: &crate::lang::Localization,
+        localization: &Localization,
     ) -> anyhow::Result<()> {
         WeightedProgressTracker::set_phase(tracker, "install");
         WeightedProgressTracker::report(
@@ -93,8 +94,9 @@ impl PatchApiFrontend {
 
         let tracker_clone = tracker.clone();
         let localization_clone = localization.clone();
-        let localization_for_patcher = localization.clone();
-        crate::game::patcher::apply_pwr(
+        
+        // Use the patcher module to apply the patch
+        crate::patcher::apply_pwr(
             base_dir,
             channel,
             install_dir_name,
@@ -153,7 +155,7 @@ impl PatchApiFrontend {
                 }
             }),
             cancel_token.clone(),
-            &localization_for_patcher,
+            localization,
         )
         .await?;
 

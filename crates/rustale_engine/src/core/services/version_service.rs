@@ -51,7 +51,7 @@ impl VersionService {
 
     /// Scans disk for installed versions and broadcasts.
     pub async fn scan_local_versions(&self, channel: &str, tx: &mpsc::Sender<FromCore>) -> Result<()> {
-        let installed = crate::game::install::get_installed_versions(&self.paths.root, channel).await;
+        let installed = crate::game::get_installed_versions(&self.paths.root, channel).await;
         tx.send(FromCore::InstalledVersionsLoaded(installed)).await?;
         Ok(())
     }

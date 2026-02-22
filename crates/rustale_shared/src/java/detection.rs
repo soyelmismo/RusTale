@@ -5,6 +5,18 @@ pub struct JavaInfo {
     pub version: String,
 }
 
+/// Ensures Java is available and returns version info
+pub async fn ensure_java_available(base_dir: &std::path::Path) -> anyhow::Result<JavaInfo> {
+    let jre_dir = crate::paths::GamePaths::new(base_dir.to_path_buf()).jre();
+    
+    if !jre_dir.exists() {
+        anyhow::bail!("JRE not installed at: {}", jre_dir.display());
+    }
+
+    let version = get_java_version_sync(&jre_dir)?;
+    Ok(JavaInfo { version })
+}
+
 /// Obtiene version de Java de forma sincrona (para ejecutar en blocking task)
 pub fn get_java_version_sync(jre_dir: &std::path::Path) -> anyhow::Result<String> {
     let java_bin = if cfg!(windows) {

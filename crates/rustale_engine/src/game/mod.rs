@@ -5,8 +5,9 @@ pub mod auth;
 #[cfg(feature = "patching")]
 pub mod patch_api;
 
+// Re-export install from rustale_shared
+pub use rustale_shared::patch_api::{InstallPolicy, is_game_installed, get_installed_versions, get_local_version, save_local_version};
 
-pub mod install;
 pub mod launch;
 #[cfg(feature = "modding")]
 pub mod mods;

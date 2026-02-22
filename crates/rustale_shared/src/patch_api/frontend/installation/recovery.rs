@@ -1,7 +1,7 @@
 use std::sync::{Arc, atomic::AtomicBool, Mutex};
-use rustale_shared::{WeightedProgressTracker, DownloadStats};
-use crate::game::patch_api::frontend::PatchApiFrontend;
-use crate::game::patch_api::frontend::utils;
+use crate::{WeightedProgressTracker, DownloadStats, Localization, GamePaths};
+use super::super::PatchApiFrontend;
+use super::super::utils;
 
 impl PatchApiFrontend {
     /// Enhanced recovery logic when patch installation fails
@@ -14,7 +14,7 @@ impl PatchApiFrontend {
         target_version: i32,
         original_error: anyhow::Error,
         cancel_token: Option<Arc<AtomicBool>>,
-        localization: &crate::lang::Localization,
+        localization: &Localization,
     ) -> anyhow::Result<()> {
         // 1. CRITICAL ROBUSTNESS: Check cancellation token FIRST
         if let Some(token) = &cancel_token {
@@ -36,7 +36,7 @@ impl PatchApiFrontend {
         );
 
         // Clean up corrupted installation
-        let game_dir = rustale_shared::GamePaths::new(base_dir.clone())
+        let game_dir = GamePaths::new(base_dir.clone())
             .version_dir(channel, install_dir_name);
         if game_dir.exists() {
             println!("[RECOVERY] Removing corrupted installation for fallback");
@@ -99,8 +99,7 @@ impl PatchApiFrontend {
                 // Try applying the complete patch
                 let tracker_clone = tracker.clone();
                 let localization_clone = localization.clone();
-                let localization_for_patcher = localization.clone();
-                crate::game::patcher::apply_pwr(
+                crate::patcher::apply_pwr(
                     base_dir,
                     channel,
                     install_dir_name,
@@ -148,7 +147,7 @@ impl PatchApiFrontend {
                         }
                     }),
                     cancel_token.clone(),
-                    &localization_for_patcher,
+                    localization,
                 )
                 .await?;
 

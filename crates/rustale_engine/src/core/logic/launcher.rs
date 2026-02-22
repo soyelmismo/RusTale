@@ -99,7 +99,7 @@ async fn launch_flow_internal(
             } else {
                 version_hint
             },
-            crate::game::install::InstallPolicy::NetworkUpdate,
+            crate::game::InstallPolicy::NetworkUpdate,
             reporter,
             Some(cancel_token.clone()),
             &loc,

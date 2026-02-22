@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::path::PathBuf;
 use std::sync::{Arc, atomic::AtomicBool};
-use rustale_shared::ProgressCallback;
+use crate::ProgressCallback;
 use super::PatchApiFrontend;
 
 impl PatchApiFrontend {

@@ -66,7 +66,7 @@ pub async fn calculate_status(
     // Step 3: Check for updates (PURE LOGIC)
     if is_latest_mode {
         if let Some(remote_latest) = cached_remote_latest {
-            let local_version = crate::game::install::get_local_version(&paths.root, channel).await.unwrap_or(0);
+            let local_version = crate::game::get_local_version(&paths.root, channel).await.unwrap_or(0);
             println!("[Status] Version check - local: {}, remote: {}", local_version, remote_latest);
             if local_version < remote_latest {
                 println!("[Status] Update available: {} -> {}", local_version, remote_latest);

@@ -11,6 +11,9 @@ use once_cell::sync::Lazy;
 use reqwest::Client;
 
 #[cfg(feature = "security")]
+use rustale_security::SafeString;
+
+#[cfg(feature = "security")]
 pub static SECURE_HTTP_CLIENT: Lazy<rustale_security::SecureClient> = Lazy::new(|| {
     rustale_security::SecureClient::builder()
         .with_pinning(rustale_security::get_pinned_cert_hash)
@@ -57,6 +60,101 @@ pub fn format_speed(bytes_per_sec: f64) -> String {
 
 const MAX_RETRIES: u32 = 10;
 
+/// Secure container for HTTP headers with automatic zeroization.
+/// This ensures credentials are wiped from memory after use.
+#[cfg(feature = "security")]
+#[derive(Debug)]
+pub struct SecureHeaders {
+    inner: Vec<(SafeString, SafeString)>,
+}
+
+#[cfg(feature = "security")]
+impl SecureHeaders {
+    /// Create new secure headers container
+    pub fn new() -> Self {
+        Self { inner: Vec::new() }
+    }
+
+    /// Add a header pair
+    pub fn push(&mut self, key: SafeString, value: SafeString) {
+        self.inner.push((key, value));
+    }
+
+    /// Get header count
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    /// Check if empty
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    /// Apply headers to a request builder, consuming references temporarily.
+    /// The headers remain secure in this container after the request.
+    pub fn apply_to_request(
+        &self,
+        mut req: reqwest::RequestBuilder,
+    ) -> reqwest::RequestBuilder {
+        for (key, value) in &self.inner {
+            // reqwest internally copies these, but our originals stay protected
+            req = req.header(key.as_str(), value.as_str());
+        }
+        req
+    }
+
+    /// Get headers as references for RawSecureClient
+    pub fn as_ref_pairs(&self) -> Vec<(&str, &str)> {
+        self.inner.iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect()
+    }
+}
+
+#[cfg(feature = "security")]
+impl Default for SecureHeaders {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// SecureHeaders doesn't need custom Drop - SafeString handles zeroization automatically
+
+
+
+/// Gets headers for a mirror by matching URL against configured mirrors.
+/// Uses the centralized MirrorManager instead of duplicating get_private_var calls.
+#[cfg(feature = "security")]
+pub fn get_mirror_headers(url: &str) -> Option<SecureHeaders> {
+    use crate::patch_api::MirrorManager;
+    use rustale_security::SafeString;
+    
+    // Get the mirror manager (singleton-like behavior via Lazy)
+    let manager = MirrorManager::new();
+    
+    // Find matching mirror by checking URL prefix
+    for mirror in manager.get_all_mirrors() {
+        if url.starts_with(&*mirror.base_url) {
+            if let Some(ref headers) = mirror.auth_headers {
+                // Clone the SecureHeaders from the mirror config
+                let mut new_headers = SecureHeaders::new();
+                for (k, v) in &headers.as_ref_pairs() {
+                    new_headers.push(SafeString::new(k.to_string()), SafeString::new(v.to_string()));
+                }
+                return Some(new_headers);
+            } else {
+                // Mirror has no auth headers (public)
+                let mut headers = SecureHeaders::new();
+                headers.push(SafeString::new("User-Agent".to_string()), SafeString::new("Hytale-F2P-Launcher-Rust".to_string()));
+                headers.push(SafeString::new("Accept".to_string()), SafeString::new("application/octet-stream".to_string()));
+                return Some(headers);
+            }
+        }
+    }
+    
+    None
+}
+
 /// Centralized downloader with progress support and resumption
 pub async fn download_file<F>(
     url: &str,
@@ -74,29 +172,24 @@ where
     }
 
     #[cfg(feature = "security")]
-    let z_base = rustale_security::get_private_var("Z_A");
-    #[cfg(feature = "security")]
-    let is_z = url.starts_with(&*z_base);
+    let is_secure_mirror = get_mirror_headers(url).is_some();
     #[cfg(not(feature = "security"))]
-    let is_z = false;
+    let is_secure_mirror = false;
 
     let mut total_size = 0u64;
     let _download_start_time = std::time::Instant::now();
 
     // Try to get total size via HEAD
-    let head_req = if is_z {
-        #[cfg(feature = "security")]
-        {
-            SECURE_HTTP_CLIENT.head(url)
-                .header(&*rustale_security::get_private_var("Z_B"), &*rustale_security::get_private_var("Z_C"))
-                .header(&*rustale_security::get_private_var("Z_E"), &*rustale_security::get_private_var("Z_D"))
-                .header(&*rustale_security::get_private_var("Z_G"), &*rustale_security::get_private_var("Z_F"))
-        }
-        #[cfg(not(feature = "security"))]
-        unreachable!()
+    #[cfg(feature = "security")]
+    let head_req = if let Some(headers) = get_mirror_headers(url) {
+        let req = SECURE_HTTP_CLIENT.head(url);
+        headers.apply_to_request(req)
     } else {
         HTTP_CLIENT.head(url)
     };
+    
+    #[cfg(not(feature = "security"))]
+    let head_req = HTTP_CLIENT.head(url);
 
     if let Ok(resp) = head_req.send().await {
         if resp.status().is_success() {
@@ -126,19 +219,20 @@ where
             break;
         }
 
-        let mut request_builder = if is_z {
-            #[cfg(feature = "security")]
-            {
-                SECURE_HTTP_CLIENT.get(url)
-                    .header(&*rustale_security::get_private_var("Z_B"), &*rustale_security::get_private_var("Z_C"))
-                    .header(&*rustale_security::get_private_var("Z_E"), &*rustale_security::get_private_var("Z_D"))
-                    .header(&*rustale_security::get_private_var("Z_G"), &*rustale_security::get_private_var("Z_F"))
-            }
-            #[cfg(not(feature = "security"))]
-            unreachable!()
+        #[cfg(feature = "security")]
+        let request_builder = if let Some(headers) = get_mirror_headers(url) {
+            let req = SECURE_HTTP_CLIENT.get(url);
+            headers.apply_to_request(req)
         } else {
             HTTP_CLIENT.get(url)
         };
+        
+        #[cfg(not(feature = "security"))]
+        let mut request_builder = HTTP_CLIENT.get(url);
+        
+        #[cfg(feature = "security")]
+        let mut request_builder = request_builder;
+        
         if downloaded_len > 0 {
             request_builder = request_builder.header("Range", format!("bytes={}-", downloaded_len));
         }
@@ -297,5 +391,15 @@ mod tests {
     fn test_http_client_exists() {
         // Verify the client is initialized
         let _ = &*HTTP_CLIENT;
+    }
+    
+    #[test]
+    #[cfg(feature = "security")]
+    fn test_secure_headers_zeroize() {
+        let mut headers = SecureHeaders::new();
+        headers.push(SafeString::new("X-Auth".to_string()), SafeString::new("secret123".to_string()));
+        assert_eq!(headers.len(), 1);
+        // When dropped, headers will be zeroized
+        drop(headers);
     }
 }

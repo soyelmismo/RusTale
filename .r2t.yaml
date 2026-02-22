@@ -14,9 +14,13 @@ ignore-tree-and-content:
   - "*.log"
   - ".terraform/"
   - "*/.git/"
+  - "rustale_security/"
+  - "crates/rustale_security/"
 
 # Ignore files only for the content section (they will still appear in the tree).
 ignore-content:
   - "LICENSE"
   - "*.lock"
   - ".r2t.yaml"
+  - "rustale_security/"
+  - "crates/rustale_security/"

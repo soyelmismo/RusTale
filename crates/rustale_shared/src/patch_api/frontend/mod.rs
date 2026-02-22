@@ -1,6 +1,6 @@
 use std::sync::OnceLock;
-use super::{ButlerInstaller, JreInstaller, PatchDownloader, VersionManager};
-use rustale_shared::{ProgressPayload, OperationPhase, WeightedProgressTracker};
+use super::{ButlerInstaller, JreInstaller, PatchDownloader, VersionManager, InstallPolicy, is_game_installed};
+use crate::{ProgressPayload, OperationPhase, WeightedProgressTracker, Localization};
 
 pub mod components;
 pub mod installation;
@@ -18,7 +18,7 @@ pub struct PatchApiFrontend {
     pub(crate) jre_installer: JreInstaller,
     pub(crate) version_manager: VersionManager,
     pub(crate) patch_downloader: PatchDownloader,
-    pub(crate) localization: std::sync::Arc<rustale_shared::lang::Localization>,
+    pub(crate) localization: std::sync::Arc<Localization>,
 }
 
 impl PatchApiFrontend {
@@ -34,7 +34,7 @@ impl PatchApiFrontend {
             jre_installer: JreInstaller::new(),
             version_manager: VersionManager::new(),
             patch_downloader: PatchDownloader::new(),
-            localization: std::sync::Arc::new(rustale_shared::lang::Localization::new()),
+            localization: std::sync::Arc::new(Localization::new()),
         }
     }
 
@@ -44,21 +44,21 @@ impl PatchApiFrontend {
         base_dir: &std::path::PathBuf,
         channel: &str,
         target_version: Option<i32>,
-        policy: crate::game::install::InstallPolicy,
+        policy: InstallPolicy,
         progress_callback: impl Fn(ProgressPayload) + Send + Sync + 'static,
         cancel_token: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-        localization: &crate::lang::Localization,
+        localization: &Localization,
     ) -> anyhow::Result<()> {
 
         // ── Pre-evaluation: determine which phases are actually needed ──────────
         // This ensures total_steps reflects reality instead of always being 7.
 
         // Is Java already installed?
-        let jre_dir = rustale_shared::paths::GamePaths::new(base_dir.clone()).jre();
-        let jre_already_installed = rustale_shared::java::is_jre_installed_at(&jre_dir);
+        let jre_dir = crate::paths::GamePaths::new(base_dir.clone()).jre();
+        let jre_already_installed = crate::java::is_jre_installed_at(&jre_dir);
 
         // Is Butler already installed?
-        let butler_path = rustale_shared::paths::GamePaths::new(base_dir.clone()).butler();
+        let butler_path = crate::paths::GamePaths::new(base_dir.clone()).butler();
         let butler_already_installed = butler_path.exists();
 
         // Is the game already up-to-date?  We do a lightweight version probe here
@@ -75,8 +75,7 @@ impl PatchApiFrontend {
             target_version.unwrap_or(0).to_string()
         };
         let game_files_exist =
-            crate::game::install::is_game_installed(base_dir, channel, &install_dir_name_hint)
-                .await;
+            is_game_installed(base_dir, channel, &install_dir_name_hint).await;
 
         // Build the phase list dynamically.
         // "check" is always first; "finalize" is always last.
