@@ -323,6 +323,9 @@ async fn handle_ui_message(
                 let _ = tx_clone.send(FromCore::StatusChanged(status)).await;
                 let _ = tx_clone.send(FromCore::ReadyToDisplay).await;
                 println!("[Core] RequestInitialStatus flow completed");
+                crate::util::scrub_heap();
+                
+                crate::util::trim_memory_with_level(crate::util::TrimLevel::Aggressive);
             });
         }
         ToCore::LaunchGame => {

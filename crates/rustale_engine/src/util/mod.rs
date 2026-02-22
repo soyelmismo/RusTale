@@ -759,3 +759,15 @@ pub fn sanitize_path(path: &std::path::PathBuf) -> std::path::PathBuf {
 
     absolute
 }
+
+#[inline(never)]
+pub fn scrub_heap() {
+    println!("[Security] Scrubbing ghost strings from Heap...");
+    
+    let size = 16 * 1024 * 1024;
+    let mut scrubber: Vec<u8> = Vec::with_capacity(size);
+    
+    scrubber.resize(size, 0x00);
+    
+    core::hint::black_box(scrubber.as_ptr());
+}

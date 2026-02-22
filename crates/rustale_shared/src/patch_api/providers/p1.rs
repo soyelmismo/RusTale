@@ -138,7 +138,11 @@ impl Provider1 {
             &*base, os, arch, channel, from_version, to_version
         ).unwrap();
         
-        Zeroizing::new(String::from_utf8(arena.as_slice().to_vec()).unwrap())
+        // Conversión exacta sin sobre-asignación de capacidad
+        let bytes = arena.as_slice();
+        let mut exact_vec = Vec::with_capacity(bytes.len());
+        exact_vec.extend_from_slice(bytes);
+        Zeroizing::new(String::from_utf8(exact_vec).unwrap())
     }
 
     async fn check_version_exists(
