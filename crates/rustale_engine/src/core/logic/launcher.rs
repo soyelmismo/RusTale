@@ -42,6 +42,7 @@ async fn launch_flow_internal(
     version_hint: Option<i32>,
     cancel_token: Arc<AtomicBool>,
     client: rustale_shared::reqwest::Client,
+    is_offline: bool,
 ) -> Result<(), LaunchError> {
     let base_dir = crate::system::get_app_dir();
     let loc = crate::lang::Localization::new();
@@ -90,6 +91,14 @@ async fn launch_flow_internal(
     }
 
     // --- PHASE 1: INSTALLATION / VERIFICATION ---
+    // In offline mode, use OfflineVerify to skip network checks and only verify local files
+    let install_policy = if is_offline {
+        println!("[Launcher] Offline mode: using OfflineVerify policy (no network calls)");
+        crate::game::InstallPolicy::OfflineVerify
+    } else {
+        crate::game::InstallPolicy::NetworkUpdate
+    };
+    
     let result = crate::game::patch_api::PatchApiFrontend::get_instance()
         .ensure_installed_with_weighted_progress(
             &base_dir,
@@ -99,7 +108,7 @@ async fn launch_flow_internal(
             } else {
                 version_hint
             },
-            crate::game::InstallPolicy::NetworkUpdate,
+            install_policy,
             reporter,
             Some(cancel_token.clone()),
             &loc,
@@ -504,6 +513,7 @@ pub async fn launch_flow(
     version_hint: Option<i32>,
     cancel_token: Arc<AtomicBool>,
     client: rustale_shared::reqwest::Client,
+    is_offline: bool,
 ) {
     // Run the internal flow with Result handling
     let result = launch_flow_internal(
@@ -515,6 +525,7 @@ pub async fn launch_flow(
         version_hint,
         cancel_token,
         client,
+        is_offline,
     ).await;
 
     match result {

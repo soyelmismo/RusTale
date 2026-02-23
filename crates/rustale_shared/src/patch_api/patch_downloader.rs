@@ -5,11 +5,11 @@ use std::sync::{Arc, atomic::AtomicBool};
 use crate::ProgressCallback;
 use crate::patch_api::integrity_checker::IntegrityChecker;
 use crate::patch_api::mod_manager::PatchApiManager;
-use crate::patch_api::traits::PatchProvider;
 use crate::patch_api::utils::*;
 
+// Use the provider registry instead of importing individual providers
 #[cfg(feature = "security")]
-use crate::patch_api::providers::{Provider0, Provider1, Provider2, Provider3};
+use crate::patch_api::providers::get_all_providers;
 
 /// Downloader for game patches
 #[derive(Clone)]
@@ -217,13 +217,8 @@ impl PatchDownloader {
             #[cfg(feature = "security")]
             {
                 // SECURITY: Intentar descarga segura con cada provider en orden de prioridad
-                // No hardcodear un provider específico - tratar todos igual
-                let providers: Vec<Box<dyn PatchProvider>> = vec![
-                    Box::new(Provider0::new()),
-                    Box::new(Provider1::new()),
-                    Box::new(Provider2::new()),
-                    Box::new(Provider3::new()),
-                ];
+                // Usar el registro de providers (plug-and-play)
+                let providers = get_all_providers();
 
                 let cancel_token_clone = cancel_token.clone().unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
                 let mut download_success = false;

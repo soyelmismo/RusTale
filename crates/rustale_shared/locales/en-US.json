@@ -30,7 +30,11 @@
             "migrating": "Migrating...",
             "step": "Current step",
             "verified": "Installation verified",
-            "working": "Working..."
+            "working": "Working...",
+            "offline_ready": "Ready to play (offline)"
+        },
+        "error": {
+            "offline_mode": "Offline mode: Could not connect to server. Playing with installed version."
         },
         "info": {
             "channel": "Channel",

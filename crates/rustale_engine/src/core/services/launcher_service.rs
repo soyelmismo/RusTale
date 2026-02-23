@@ -50,6 +50,12 @@ impl LauncherService {
             None // Launcher flow resolverá "latest"
         };
 
+        // D. Check offline mode
+        let is_offline = state.is_offline;
+        if is_offline {
+            println!("[LauncherService] Launching in OFFLINE mode - skipping network checks");
+        }
+
         let _ = tx.send(FromCore::StatusChanged(LauncherStatus::Busy)).await;
         
         let tx_clone = tx.clone();
@@ -67,7 +73,8 @@ impl LauncherService {
                 p_uuid,
                 version_hint,
                 cancel_token, // Passed down from registry
-                client
+                client,
+                is_offline,   // Pass offline mode flag
              ).await;
         });
     }

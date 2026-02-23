@@ -306,17 +306,26 @@ async fn handle_ui_message(
                         Some(v)
                     },
                     Err(e) => {
-                        println!("[Core] Remote fetch failed: {}", e);
+                        println!("[Core] Remote fetch failed: {}. Assuming offline mode.", e);
+                        // Notify UI about offline mode
+                        let _ = tx_clone.send(FromCore::Error {
+                            message: format!("launcher.error.offline_mode"), // Localization key
+                            fatal: false,
+                        }).await;
                         None
                     }
                 };
+                
+                // Determine if we're in offline mode
+                let is_offline = latest_remote.is_none();
 
                 // 3. Calculate Status with new data
-                println!("[Core] Calculating status with remote: {:?}", latest_remote);
+                println!("[Core] Calculating status with remote: {:?}, offline: {}", latest_remote, is_offline);
                 let (status, _) = game::status::calculate_status(
                     &settings_clone, 
                     &paths, 
-                    latest_remote
+                    latest_remote,
+                    is_offline
                 ).await;
 
                 println!("[Core] Status calculated: {:?}, sending to UI", status);

@@ -20,27 +20,21 @@ pub mod version_manager;
 // Frontend (high-level API)
 pub mod frontend;
 
-// Re-export providers from the providers subdirectory
+// Re-export provider registry functions (plug-and-play)
+// Consumers should use get_all_providers() instead of importing specific providers
 pub use providers::{
-    HytaleProvider,
-    PROVIDER_PRIORITIES,
-    get_provider_priority,
+    get_all_providers,
+    provider_count,
 };
 
-#[cfg(feature = "security")]
-pub use providers::{
-    Provider0,
-    Provider1,
-    Provider2,
-    Provider3,
-};
+// Note: Individual providers (Provider0, Provider1, etc.) are NOT re-exported here.
+// They should only be accessed through the provider registry functions above.
+// This makes the system truly plug-and-play: add a new provider in providers/mod.rs
+// and it automatically becomes available everywhere.
 
-// Re-export from mod_manager (now includes MirrorManager and utilities)
+// Re-export from mod_manager (utilities and manager)
 pub use mod_manager::{
     PatchApiManager,
-    MirrorManager,
-    MirrorConfig,
-    MirrorStats,
     ProviderVersionInfo,
     normalize_architecture,
     normalize_os,

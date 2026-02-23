@@ -11,6 +11,7 @@ pub enum LauncherStatus {
     Busy,
     Downloading,
     Migrating,
+    OfflineReady, // Installed, but no internet connection - can play offline
 }
 
 /// Calculates current launcher status based on settings and file system state
@@ -20,19 +21,21 @@ pub enum LauncherStatus {
 /// 3. If update available, return NeedsUpdate
 /// 4. If specific version selected, just verify it exists
 /// 5. ENHANCED: Verify installation integrity, not just file existence
+/// 6. OFFLINE MODE: If no remote version available but game is installed, allow offline play
 ///
 /// Returns: (Status, Optional<remote_version>)
 pub async fn calculate_status(
     settings: &GameSettings,
     paths: &GamePaths,
     cached_remote_latest: Option<i32>,
+    is_offline: bool,
 ) -> (LauncherStatus, Option<i32>) {
     let channel = &settings.channel;
     let is_latest_mode = settings.game_version == 0;
 
     println!(
-        "[Status] Calculating status - channel: {}, is_latest: {}, cached: {:?}",
-        channel, is_latest_mode, cached_remote_latest
+        "[Status] Calculating status - channel: {}, is_latest: {}, cached: {:?}, offline: {}",
+        channel, is_latest_mode, cached_remote_latest, is_offline
     );
 
     // Determine version string for folder lookup
@@ -49,6 +52,10 @@ pub async fn calculate_status(
 
     if !is_installed {
         println!("[Status] Game not installed at {}", exe_path.display());
+        // If offline and not installed, we can't install - show error state
+        if is_offline {
+            println!("[Status] Offline mode and game not installed - cannot proceed");
+        }
         return (LauncherStatus::NeedsInstall, cached_remote_latest);
     }
     println!("[Status] Game executable found and accessible");
@@ -73,8 +80,17 @@ pub async fn calculate_status(
                 return (LauncherStatus::NeedsUpdate, Some(remote_latest));
             }
         } else {
-            println!("[Status] Latest mode but no remote version cached");
+            // No remote version available - we're in offline mode or network failed
+            println!("[Status] Latest mode but no remote version cached (offline mode)");
+            // Game is installed and verified, allow offline play
+            return (LauncherStatus::OfflineReady, None);
         }
+    }
+
+    // If we're in offline mode, return OfflineReady instead of Ready
+    if is_offline {
+        println!("[Status] Final status: OfflineReady (offline mode, game installed)");
+        return (LauncherStatus::OfflineReady, cached_remote_latest);
     }
 
     println!("[Status] Final status: Ready");

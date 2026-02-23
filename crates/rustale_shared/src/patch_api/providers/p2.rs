@@ -184,6 +184,14 @@ impl PatchProvider for Provider2 {
         80
     }
 
+    fn is_cloudflare(&self) -> bool {
+        false
+    }
+
+    fn base_url(&self) -> Option<zeroize::Zeroizing<String>> {
+        Some(get_private_var("Z_H_A").into_zeroizing())
+    }
+
     async fn is_available(&self) -> bool {
         let base = get_private_var("Z_H_A");
         

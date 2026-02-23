@@ -118,44 +118,11 @@ impl Default for SecureHeaders {
     }
 }
 
-// SecureHeaders doesn't need custom Drop - SafeString handles zeroization automatically
-
-
-
-/// Gets headers for a mirror by matching URL against configured mirrors.
-/// Uses the centralized MirrorManager instead of duplicating get_private_var calls.
-#[cfg(feature = "security")]
-pub fn get_mirror_headers(url: &str) -> Option<SecureHeaders> {
-    use crate::patch_api::MirrorManager;
-    use rustale_security::SafeString;
-    
-    // Get the mirror manager (singleton-like behavior via Lazy)
-    let manager = MirrorManager::new();
-    
-    // Find matching mirror by checking URL prefix
-    for mirror in manager.get_all_mirrors() {
-        if url.starts_with(&*mirror.base_url) {
-            if let Some(ref headers) = mirror.auth_headers {
-                // Clone the SecureHeaders from the mirror config
-                let mut new_headers = SecureHeaders::new();
-                for (k, v) in &headers.as_ref_pairs() {
-                    new_headers.push(SafeString::new(k.to_string()), SafeString::new(v.to_string()));
-                }
-                return Some(new_headers);
-            } else {
-                // Mirror has no auth headers (public)
-                let mut headers = SecureHeaders::new();
-                headers.push(SafeString::new("User-Agent".to_string()), SafeString::new("Hytale-F2P-Launcher-Rust".to_string()));
-                headers.push(SafeString::new("Accept".to_string()), SafeString::new("application/octet-stream".to_string()));
-                return Some(headers);
-            }
-        }
-    }
-    
-    None
-}
-
 /// Centralized downloader with progress support and resumption
+/// 
+/// Note: For secure downloads with auth headers, use the provider's 
+/// `download_patch_secure` method instead. This function is for 
+/// generic/public downloads only.
 pub async fn download_file<F>(
     url: &str,
     destination: &Path,
@@ -171,24 +138,10 @@ where
         tokio::fs::create_dir_all(parent).await?;
     }
 
-    #[cfg(feature = "security")]
-    let _is_secure_mirror = get_mirror_headers(url).is_some();
-    #[cfg(not(feature = "security"))]
-    let _is_secure_mirror = false;
-
     let mut total_size = 0u64;
     let _download_start_time = std::time::Instant::now();
 
-    // Try to get total size via HEAD
-    #[cfg(feature = "security")]
-    let head_req = if let Some(headers) = get_mirror_headers(url) {
-        let req = SECURE_HTTP_CLIENT.head(url);
-        headers.apply_to_request(req)
-    } else {
-        HTTP_CLIENT.head(url)
-    };
-    
-    #[cfg(not(feature = "security"))]
+    // Try to get total size via HEAD (generic public request)
     let head_req = HTTP_CLIENT.head(url);
 
     if let Ok(resp) = head_req.send().await {
@@ -219,19 +172,8 @@ where
             break;
         }
 
-        #[cfg(feature = "security")]
-        let request_builder = if let Some(headers) = get_mirror_headers(url) {
-            let req = SECURE_HTTP_CLIENT.get(url);
-            headers.apply_to_request(req)
-        } else {
-            HTTP_CLIENT.get(url)
-        };
-        
-        #[cfg(not(feature = "security"))]
+        // Generic public download - use standard HTTP client
         let mut request_builder = HTTP_CLIENT.get(url);
-        
-        #[cfg(feature = "security")]
-        let mut request_builder = request_builder;
         
         if downloaded_len > 0 {
             request_builder = request_builder.header("Range", format!("bytes={}-", downloaded_len));

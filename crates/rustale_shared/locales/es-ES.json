@@ -30,7 +30,11 @@
             "migrating": "Migrando...",
             "step": "Paso actual",
             "verified": "Instalación verificada",
-            "working": "Trabajando..."
+            "working": "Trabajando...",
+            "offline_ready": "Listo para jugar (sin conexión)"
+        },
+        "error": {
+            "offline_mode": "Modo sin conexión: No se pudo conectar al servidor. Jugando con versión instalada."
         },
         "info": {
             "channel": "Canal",

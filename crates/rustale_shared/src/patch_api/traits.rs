@@ -12,6 +12,14 @@ pub trait PatchProvider: Send + Sync {
     /// Priority of the provider (higher is preferred)
     fn priority(&self) -> i32;
 
+    /// Whether this provider uses Cloudflare
+    fn is_cloudflare(&self) -> bool { false }
+
+    /// Get the base URL for this provider (for URL matching purposes)
+    /// Returns None if the provider doesn't have a fixed base URL
+    #[cfg(feature = "security")]
+    fn base_url(&self) -> Option<zeroize::Zeroizing<String>> { None }
+
     /// Check if the provider is currently available (online)
     async fn is_available(&self) -> bool;
 

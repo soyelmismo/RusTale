@@ -27,6 +27,7 @@ pub fn view<'a>(
         LauncherStatus::NeedsInstall => localization.t("launcher.play"),
         LauncherStatus::NeedsUpdate => localization.t("launcher.update"),
         LauncherStatus::Busy => localization.t("launcher.status.busy"),
+        LauncherStatus::OfflineReady => localization.t("launcher.status.offline_ready"),
         _ => localization.t("launcher.play"),
     };
 

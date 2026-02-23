@@ -125,13 +125,13 @@ impl Provider0 {
         };
 
         let base = get_private_var("Z_E_A");
+        println!("Getting patch url for {} {} {} {} {}", os, arch, channel, from_version, to_version);
         
-        // ¡REEMPLAZO CLAVE DE FORMAT!: Usamos ZeroizeArena que NO CREA FRAGMENTOS en Heap
         let mut arena = rustale_security::memory::ZeroizeArena::<512>::new();
         use std::io::Write;
         write!(
             &mut arena,
-            "{}/patches/{}/{}/{}/{}_to_{}.pwr",
+            "{}/patches/{}/{}/{}/{}/{}.pwr",
             &*base, os, arch, channel, from_version, to_version
         ).unwrap();
         
@@ -163,11 +163,12 @@ impl Provider0 {
 
         let base = get_private_var("Z_E_A");
         
-        // BUGFIX: Construimos la URL en el stack en lugar de en el Heap.
+        println!("Checking for version {}/{}", start_version, end_version);
+
         let mut arena = ZeroizeArena::<512>::new();
         write!(
             &mut arena,
-            "{}/patches/{}/{}/{}/{}_to_{}.pwr",
+            "{}/patches/{}/{}/{}/{}/{}.pwr",
             &*base, os, arch, channel, start_version, end_version
         ).unwrap();
         
@@ -205,15 +206,24 @@ impl PatchProvider for Provider0 {
         100
     }
 
+    fn is_cloudflare(&self) -> bool {
+        true
+    }
+
+    fn base_url(&self) -> Option<zeroize::Zeroizing<String>> {
+        Some(get_private_var("Z_E_A").into_zeroizing())
+    }
+
     async fn is_available(&self) -> bool {
+        // Check availability by testing a known patch path
+        // Using version 0/1.pwr as a simple availability check
         let base = get_private_var("Z_E_A");
         
-        // EVITAR format! - Usamos el Arena seguro del Stack
         let mut arena = rustale_security::memory::ZeroizeArena::<512>::new();
-        write!(&mut arena, "{}/", &*base).unwrap();
+        write!(&mut arena, "{}/patches/linux/amd64/release/0/1.pwr", &*base).unwrap();
         
         let test_url = Zeroizing::new(String::from_utf8(arena.as_slice().to_vec()).unwrap());
-        self.check_file_exists_secure_with_mode(&test_url, false).await
+        self.check_file_exists_secure_with_mode(&test_url, true).await
     }
 
     async fn get_latest_version(&self, channel: &str, os: &str, arch: &str) -> Result<i32> {
@@ -372,6 +382,8 @@ impl PatchProvider for Provider0 {
         // 2. Armar el Path SIN asignar memoria en el Heap
         let mut path_arena = ZeroizeArena::<512>::new();
         
+
+        println!("Downloading patch from {} {} {} {} {}", os, arch, channel, from_version, to_version);
         let arch_str = match arch {
             "x86_64" => "amd64",
             "aarch64" => "arm64",
@@ -384,7 +396,7 @@ impl PatchProvider for Provider0 {
 
         write!(
             path_arena,
-            "/patches/{}/{}/{}/{}_to_{}.pwr",
+            "/patches/{}/{}/{}/{}/{}.pwr",
             os_str, arch_str, channel, from_version, to_version
         )?;
 
@@ -394,6 +406,7 @@ impl PatchProvider for Provider0 {
         let b_header = get_private_var("Z_E_E");
         let b_val = get_private_var("Z_E_D");
         let ua_val = get_private_var("Z_E_F");
+        let ua_header = get_private_var("Z_E_G");
 
         // BUGFIX: Usamos ZeroizeArena para el host en lugar de Zeroizing<String>
         let mut host_arena = ZeroizeArena::<256>::new();
@@ -408,7 +421,7 @@ impl PatchProvider for Provider0 {
             let headers = [
                 (v_header.as_str(), v_val.as_str()),
                 (b_header.as_str(), b_val.as_str()),
-                ("User-Agent", ua_val.as_str()),
+                (ua_header.as_str(), ua_val.as_str()),
             ];
 
             raw_client.get_to_file(

@@ -60,6 +60,9 @@ pub struct LogicState {
     
     // NEW: Localization instance for localized strings
     pub localization: rustale_shared::lang::Localization,
+    
+    // NEW: Offline mode flag - set when network fails but game is installed
+    pub is_offline: bool,
 }
 
 impl LogicState {
@@ -77,6 +80,7 @@ impl LogicState {
             version_service: None,
             settings: rustale_shared::config::GameSettings::default(),
             localization: rustale_shared::lang::Localization::new(),
+            is_offline: false,
         }
     }
 
