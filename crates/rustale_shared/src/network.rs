@@ -172,9 +172,9 @@ where
     }
 
     #[cfg(feature = "security")]
-    let is_secure_mirror = get_mirror_headers(url).is_some();
+    let _is_secure_mirror = get_mirror_headers(url).is_some();
     #[cfg(not(feature = "security"))]
-    let is_secure_mirror = false;
+    let _is_secure_mirror = false;
 
     let mut total_size = 0u64;
     let _download_start_time = std::time::Instant::now();

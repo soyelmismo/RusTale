@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use tokio::fs;
 
 use crate::paths::GamePaths;
-use super::types::{get_local_version, save_local_version};
+use super::types::get_local_version;
 
 /// Installation policy - defines the intent of the installation operation
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

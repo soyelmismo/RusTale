@@ -175,7 +175,7 @@ impl PatchDownloader {
         tokio::fs::create_dir_all(&cache_dir).await?;
 
         // Multi-level fallback strategy
-        let (patch_url, actual_from_version, strategy) = self
+        let (_patch_url, actual_from_version, strategy) = self
             .try_patch_strategies(channel, from_version, to_version)
             .await?;
 
