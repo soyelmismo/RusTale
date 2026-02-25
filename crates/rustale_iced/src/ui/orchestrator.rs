@@ -1,16 +1,16 @@
-use crate::messages::Message;
 use crate::config::{GameSettings, ProfilesConfig};
 use crate::game::LauncherStatus;
-use rustale_shared::lang::Localization;
+use crate::messages::Message;
 use crate::settings::SettingsState;
+use crate::theme;
 use crate::ui::mods_modal::ModsState;
 use crate::ui::news_section::NewsSection;
+use crate::ui::resources::UiResources;
 use crate::ui::server_panel::ServerPanelState;
 use crate::ui::visuals::VisualState;
 use crate::util::MemoryStats;
-use crate::ui::resources::UiResources;
-use crate::theme;
 use iced::{Task, mouse};
+use rustale_shared::lang::Localization;
 #[cfg(all(feature = "tray", windows))]
 use rustale_tray;
 
@@ -66,12 +66,14 @@ pub struct UiOrchestrator {
     // Internal Logic Flags
     pub is_dragging: bool,
     pub quickplay: bool,
-    
+
     // BACKUP for transactional settings rollback
     pub last_known_safe_settings: Option<GameSettings>,
 
     // Engine → GUI channel bridge
-    pub core_receiver: std::sync::Arc<std::sync::Mutex<Option<tokio::sync::mpsc::Receiver<crate::core::signals::FromCore>>>>,
+    pub core_receiver: std::sync::Arc<
+        std::sync::Mutex<Option<tokio::sync::mpsc::Receiver<crate::core::signals::FromCore>>>,
+    >,
     pub window_id: Option<iced::window::Id>,
 }
 
@@ -112,7 +114,9 @@ impl UiOrchestrator {
     pub fn initialize(
         initial_settings: GameSettings,
         to_core: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>,
-        core_receiver: std::sync::Arc<std::sync::Mutex<Option<tokio::sync::mpsc::Receiver<crate::core::signals::FromCore>>>>,
+        core_receiver: std::sync::Arc<
+            std::sync::Mutex<Option<tokio::sync::mpsc::Receiver<crate::core::signals::FromCore>>>,
+        >,
         quickplay: bool,
     ) -> (Self, Task<Message>) {
         // 1. CARGA INICIAL DE SHADERS
@@ -138,7 +142,8 @@ impl UiOrchestrator {
 
         // 2. Load background
         let bg_url = "https://hytale.com/static/images/backgrounds/content-upper-new-1920.jpg";
-        let initial_bg_bytes = crate::util::image_cache::load_background_optimized_bytes_sync(bg_url);
+        let initial_bg_bytes =
+            crate::util::image_cache::load_background_optimized_bytes_sync(bg_url);
         let bg_task = if let Some(bytes) = initial_bg_bytes {
             visuals.background_blur = Some(crate::ui::background_blur::BackgroundBlur::new(bytes));
             Task::none()
@@ -146,7 +151,8 @@ impl UiOrchestrator {
             let bg_url_clone = bg_url.to_string();
             Task::perform(
                 async move {
-                    let _ = crate::util::image_cache::process_background_async_path(&bg_url_clone).await?;
+                    let _ = crate::util::image_cache::process_background_async_path(&bg_url_clone)
+                        .await?;
                     crate::util::image_cache::load_background_optimized_bytes_sync(&bg_url_clone)
                         .ok_or_else(|| anyhow::anyhow!("Failed to reload processed background"))
                 },
@@ -190,31 +196,35 @@ impl UiOrchestrator {
             Task::batch(vec![Task::done(Message::Initialize), bg_task]),
         )
     }
-    
+
     // Global Memory Trim integration
     pub fn trim_memory_ui(&mut self) {
         self.resources.global_thumbnails.clear();
         // This is much safer than clearing HashMaps scattered everywhere
     }
-    
 
-    
     /// Handle visual and UI effect events
-    fn handle_visual_events(&mut self, message: &Message, _core_tx: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>) -> Option<Task<Message>> {
+    fn handle_visual_events(
+        &mut self,
+        message: &Message,
+        _core_tx: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>,
+    ) -> Option<Task<Message>> {
         use crate::messages::Message;
-        
+
         match message {
             Message::CursorMoved(pos) => {
                 self.cursor_position = *pos;
                 let is_modal = self.views.settings.is_open || self.views.mods.is_open;
-                self.visuals.handle_cursor_moved(*pos, is_modal, &self.settings);
+                self.visuals
+                    .handle_cursor_moved(*pos, is_modal, &self.settings);
                 None
             }
             Message::Tick(now) => {
                 let is_modal = self.views.settings.is_open || self.views.mods.is_open;
                 self.visuals.handle_tick(is_modal, &self.settings);
                 // Actualizar tiempo actual para efectos visuales que lo necesiten
-                self.visuals.current_time = now.duration_since(self.visuals.start_time).as_secs_f32();
+                self.visuals.current_time =
+                    now.duration_since(self.visuals.start_time).as_secs_f32();
                 None
             }
             Message::MousePressed => {
@@ -230,17 +240,19 @@ impl UiOrchestrator {
             Message::NextShader => {
                 let now = std::time::Instant::now();
                 let time_since_last_change = now.duration_since(self.visuals.shader_click_time);
-                
+
                 // Solo permitir cambio cada 2 segundos
                 if time_since_last_change >= std::time::Duration::from_secs(2) {
-                    self.visuals.next_shader_idx = (self.visuals.next_shader_idx + 1) % self.visuals.total_shaders_available;
+                    self.visuals.next_shader_idx =
+                        (self.visuals.next_shader_idx + 1) % self.visuals.total_shaders_available;
                     self.visuals.shader_click_time = now;
                     self.visuals.shader_transition = 0.0;
                 }
                 None
             }
             Message::NextShaderManual => {
-                self.visuals.next_shader_idx = (self.visuals.next_shader_idx + 1) % self.visuals.total_shaders_available;
+                self.visuals.next_shader_idx =
+                    (self.visuals.next_shader_idx + 1) % self.visuals.total_shaders_available;
                 self.visuals.shader_click_time = std::time::Instant::now();
                 self.visuals.shader_transition = 0.0;
                 None
@@ -288,11 +300,15 @@ impl UiOrchestrator {
             _ => None,
         }
     }
-    
+
     /// Handle initialization and loading events
-    fn handle_initialization_events(&mut self, message: &Message, to_core: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>) -> Option<Task<Message>> {
+    fn handle_initialization_events(
+        &mut self,
+        message: &Message,
+        to_core: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>,
+    ) -> Option<Task<Message>> {
         use crate::messages::Message;
-        
+
         match message {
             Message::Initialize => {
                 // Shaders and background are already initialized in Self::initialize()
@@ -303,24 +319,32 @@ impl UiOrchestrator {
                 self.profiles = p.clone();
                 self.settings = s.clone();
                 self.localization = loc.clone();
-                
+
                 // Aplicar configuraciones visuales inmediatas
                 self.visuals.palette = crate::theme::generate_palette(&self.settings.theme);
-                
+
                 // Disparar sincronización con Core
-                let _ = to_core.try_send(crate::core::signals::ToCore::InitializeProfiles(self.profiles.clone()));
-                let _ = to_core.try_send(crate::core::signals::ToCore::RequestInitialStatus(self.settings.clone()));
-                
+                let _ = to_core.try_send(crate::core::signals::ToCore::InitializeProfiles(
+                    self.profiles.clone(),
+                ));
+                let _ = to_core.try_send(crate::core::signals::ToCore::RequestInitialStatus(
+                    self.settings.clone(),
+                ));
+
                 // Iniciar carga automática de noticias
                 Some(Task::batch(vec![
                     Task::done(Message::CheckStatus),
-                    Task::done(Message::News(crate::ui::news_section::NewsMessage::LoadNews))
+                    Task::done(Message::News(
+                        crate::ui::news_section::NewsMessage::LoadNews,
+                    )),
                 ]))
             }
             Message::BackgroundLoaded(result) => {
                 match result {
                     Ok(bytes) => {
-                        self.visuals.background_blur = Some(crate::ui::background_blur::BackgroundBlur::new(bytes.clone()));
+                        self.visuals.background_blur = Some(
+                            crate::ui::background_blur::BackgroundBlur::new(bytes.clone()),
+                        );
                     }
                     Err(e) => {
                         eprintln!("Failed to load background: {}", e);
@@ -331,13 +355,15 @@ impl UiOrchestrator {
             _ => None,
         }
     }
-    
 
-    
     /// Handle progress and status update events
-    fn handle_progress_events(&mut self, message: &Message, _to_core: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>) -> Option<Task<Message>> {
+    fn handle_progress_events(
+        &mut self,
+        message: &Message,
+        _to_core: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>,
+    ) -> Option<Task<Message>> {
         use crate::messages::Message;
-        
+
         match message {
             Message::ProgressUpdate(payload) => {
                 self.displayed_progress = payload.global_progress;
@@ -354,16 +380,17 @@ impl UiOrchestrator {
             _ => None,
         }
     }
-    
 
-    
     /// Handle profile management events
 
-    
     /// Handle modal and window events
-    fn handle_modal_events(&mut self, message: &Message, to_core: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>) -> Option<Task<Message>> {
+    fn handle_modal_events(
+        &mut self,
+        message: &Message,
+        to_core: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>,
+    ) -> Option<Task<Message>> {
         use crate::messages::Message;
-        
+
         match message {
             Message::Settings(msg) => {
                 use crate::settings::SettingsMessage;
@@ -373,11 +400,18 @@ impl UiOrchestrator {
                     }
                     SettingsMessage::LsdHovered(val) => {
                         // If we are hovering, show preview, otherwise revert to temp_settings (the checkbox state)
-                        self.visuals.lsd_preview_override = if *val { Some(true) } else { Some(self.views.settings.temp_settings.theme.lsd_mode) };
+                        self.visuals.lsd_preview_override = if *val {
+                            Some(true)
+                        } else {
+                            Some(self.views.settings.temp_settings.theme.lsd_mode)
+                        };
                     }
                     _ => {}
                 }
-                self.views.settings.update(msg.clone(), &self.localization).map(Task::done)
+                self.views
+                    .settings
+                    .update(msg.clone(), &self.localization)
+                    .map(Task::done)
             }
             Message::Mods(msg) => {
                 // Handle mods modal messages with proper client and resources
@@ -388,13 +422,11 @@ impl UiOrchestrator {
                     client,
                     base_dir,
                     self.settings.clone(),
-                    &mut self.resources
+                    &mut self.resources,
                 );
                 Some(task.map(crate::Message::Mods))
             }
-            Message::CoreEvent(evt) => {
-                self.handle_core_event(evt.clone())
-            }
+            Message::CoreEvent(evt) => self.handle_core_event(evt.clone()),
             Message::ModsLoaded(result) => {
                 match result {
                     Ok(mods) => {
@@ -427,9 +459,14 @@ impl UiOrchestrator {
             Message::OpenSettings => {
                 self.views.settings.open(self.settings.clone());
                 // Sync current known versions to the modal early
-                self.views.settings.available_versions = self.available_versions.iter().map(|&v| v as i32).collect();
-                self.views.settings.installed_versions = self.installed_versions.iter().map(|&(v, l)| (v as i32, l)).collect();
-                
+                self.views.settings.available_versions =
+                    self.available_versions.iter().map(|&v| v as i32).collect();
+                self.views.settings.installed_versions = self
+                    .installed_versions
+                    .iter()
+                    .map(|&(v, l)| (v as i32, l))
+                    .collect();
+
                 let channel = self.settings.channel.clone();
                 return Some(Task::done(Message::RequestVersionCheck(channel)));
             }
@@ -445,11 +482,15 @@ impl UiOrchestrator {
             _ => None,
         }
     }
-    
+
     /// Handle news events
-    fn handle_news_events(&mut self, message: &Message, _to_core: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>) -> Option<Task<Message>> {
+    fn handle_news_events(
+        &mut self,
+        message: &Message,
+        _to_core: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>,
+    ) -> Option<Task<Message>> {
         use crate::messages::Message;
-        
+
         match message {
             Message::News(msg) => {
                 // Manejar mensajes de news a través del news view
@@ -458,20 +499,27 @@ impl UiOrchestrator {
             _ => None,
         }
     }
-    
+
     /// Handle updater events
-    fn handle_updater_events(&mut self, message: &Message, _to_core: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>) -> Option<Task<Message>> {
+    fn handle_updater_events(
+        &mut self,
+        message: &Message,
+        _to_core: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>,
+    ) -> Option<Task<Message>> {
         use crate::messages::Message;
-        
+
         match message {
             Message::LauncherUpdate(msg) => {
                 use crate::core::updater::UpdaterMessage;
                 match msg {
                     UpdaterMessage::CheckForUpdates => {
-                        let _ = _to_core.try_send(crate::core::signals::ToCore::CheckForLauncherUpdates);
+                        let _ = _to_core
+                            .try_send(crate::core::signals::ToCore::CheckForLauncherUpdates);
                     }
                     UpdaterMessage::StartUpdate(url) => {
-                        let _ = _to_core.try_send(crate::core::signals::ToCore::PerformLauncherUpdate(url.clone()));
+                        let _ = _to_core.try_send(
+                            crate::core::signals::ToCore::PerformLauncherUpdate(url.clone()),
+                        );
                         self.views.update_release = None;
                     }
                     UpdaterMessage::UpdateProgress(progress, message) => {
@@ -491,12 +539,6 @@ impl UiOrchestrator {
             _ => None,
         }
     }
-    
-
-    
-
-    
-
 
     /// Reconcile local server when profile changes
     fn reconcile_local_server(&mut self) {
@@ -506,21 +548,29 @@ impl UiOrchestrator {
         // - Updating server configuration
         // - Restarting if necessary
     }
-    
+
     /// Helper to log a message to the launcher tab of the logs panel
     fn log_to_launcher(&mut self, entry: crate::ui::server_panel::LogEntry) {
         // Use ServerMessage::LauncherLog to add the entry
-        let _ = self.views.server.update(crate::ui::server_panel::ServerMessage::LauncherLog(entry));
+        let _ = self
+            .views
+            .server
+            .update(crate::ui::server_panel::ServerMessage::LauncherLog(entry));
     }
-    
+
     /// Save settings and exit application
-    fn save_and_exit(&self, core_tx: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>) -> Task<Message> {
+    fn save_and_exit(
+        &self,
+        core_tx: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>,
+    ) -> Task<Message> {
         // Enviar señal de guardado al core para que los cambios se persistian
-        let _ = core_tx.try_send(crate::core::signals::ToCore::SaveSettings(self.settings.clone()));
-        
+        let _ = core_tx.try_send(crate::core::signals::ToCore::SaveSettings(
+            self.settings.clone(),
+        ));
+
         // Notificar al core que debe cerrarse
         let _ = core_tx.try_send(crate::core::signals::ToCore::ExitApp);
-        
+
         // Cerrar la ventana de Iced
         if let Some(id) = self.window_id {
             iced::window::close(id)
@@ -528,23 +578,24 @@ impl UiOrchestrator {
             Task::none()
         }
     }
-    
 
-    
     /// Handle events from the core logic
-    pub fn handle_core_event(&mut self, event: crate::core::signals::FromCore) -> Option<Task<Message>> {
+    pub fn handle_core_event(
+        &mut self,
+        event: crate::core::signals::FromCore,
+    ) -> Option<Task<Message>> {
         use crate::core::signals::FromCore;
-        
+
         match event {
             FromCore::BootstrapCompleted { settings, profiles } => {
                 self.settings = settings;
                 self.profiles = profiles;
                 self.views.settings = SettingsState::new(&self.settings);
-                
+
                 // Initialize localization
                 self.localization.load_available_languages();
                 self.localization.load_language(&self.settings.language);
-                
+
                 // Update palette based on loaded settings
                 self.visuals.palette = crate::theme::generate_palette(&self.settings.theme);
 
@@ -552,11 +603,15 @@ impl UiOrchestrator {
                 self.rebuild_tray_menu();
 
                 // Log to launcher panel
-                self.log_to_launcher(crate::ui::server_panel::LogEntry::success("Bootstrap completed successfully."));
+                self.log_to_launcher(crate::ui::server_panel::LogEntry::success(
+                    "Bootstrap completed successfully.",
+                ));
 
                 return Some(Task::batch(vec![
-                    Task::done(Message::News(crate::ui::news_section::NewsMessage::LoadNews)),
-                    Task::done(Message::CheckStatus)
+                    Task::done(Message::News(
+                        crate::ui::news_section::NewsMessage::LoadNews,
+                    )),
+                    Task::done(Message::CheckStatus),
                 ]));
             }
             FromCore::BootstrapFailed(err) => {
@@ -585,7 +640,15 @@ impl UiOrchestrator {
                     _ => {}
                 }
             }
-            FromCore::ProgressUpdate { phase, progress, step_progress, current_step, total_steps, msg_args, stats } => {
+            FromCore::ProgressUpdate {
+                phase,
+                progress,
+                step_progress,
+                current_step,
+                total_steps,
+                msg_args,
+                stats,
+            } => {
                 self.displayed_progress = progress;
                 self.displayed_step_progress = step_progress;
                 self.displayed_current_step = Some(current_step);
@@ -607,7 +670,7 @@ impl UiOrchestrator {
                 self.status_text = message.clone();
                 self.views.mods.error = Some(message);
                 self.displayed_status = crate::game::LauncherStatus::Ready;
-                
+
                 // If saving failed, rollback visuals to last known safe state
                 if let Some(backup) = self.last_known_safe_settings.take() {
                     println!("[UI] Save failed, rolling back settings.");
@@ -628,22 +691,36 @@ impl UiOrchestrator {
                 return None;
             }
             FromCore::ModsSearchLoaded(result) | FromCore::ModSearchCompleted(result) => {
-                return Some(self.views.mods.update(
-                    crate::ui::mods_modal::ModsMessage::SearchLoaded(result.map_err(|e| e.to_string())),
-                    rustale_shared::network::HTTP_CLIENT.clone(),
-                    crate::config::get_app_dir(),
-                    self.settings.clone(),
-                    &mut self.resources
-                ).map(Message::Mods));
+                return Some(
+                    self.views
+                        .mods
+                        .update(
+                            crate::ui::mods_modal::ModsMessage::SearchLoaded(
+                                result.map_err(|e| e.to_string()),
+                            ),
+                            rustale_shared::network::HTTP_CLIENT.clone(),
+                            crate::config::get_app_dir(),
+                            self.settings.clone(),
+                            &mut self.resources,
+                        )
+                        .map(Message::Mods),
+                );
             }
             FromCore::LocalModsLoaded(result) => {
-                return Some(self.views.mods.update(
-                    crate::ui::mods_modal::ModsMessage::ModsLoadedComplex(result.map_err(|e| e.to_string())),
-                    rustale_shared::network::HTTP_CLIENT.clone(),
-                    crate::config::get_app_dir(),
-                    self.settings.clone(),
-                    &mut self.resources
-                ).map(Message::Mods));
+                return Some(
+                    self.views
+                        .mods
+                        .update(
+                            crate::ui::mods_modal::ModsMessage::ModsLoadedComplex(
+                                result.map_err(|e| e.to_string()),
+                            ),
+                            rustale_shared::network::HTTP_CLIENT.clone(),
+                            crate::config::get_app_dir(),
+                            self.settings.clone(),
+                            &mut self.resources,
+                        )
+                        .map(Message::Mods),
+                );
             }
             FromCore::NewsLoaded(result) => {
                 // FIX: Previously this arm directly mutated self.views.news.posts, which:
@@ -654,14 +731,12 @@ impl UiOrchestrator {
                 // all three concerns correctly.
                 // NOTE: NewsSection::update already returns Task<Message> (not Task<NewsMessage>),
                 // so no additional .map() wrapping is needed here.
-                return Some(
-                    self.views.news.update(
-                        crate::ui::news_section::NewsMessage::NewsLoaded(
-                            result.map_err(|e| e.to_string()),
-                        ),
-                        &mut self.resources,
-                    )
-                );
+                return Some(self.views.news.update(
+                    crate::ui::news_section::NewsMessage::NewsLoaded(
+                        result.map_err(|e| e.to_string()),
+                    ),
+                    &mut self.resources,
+                ));
             }
             FromCore::UpdatesLoaded(result) => {
                 self.views.mods.checking_updates = false;
@@ -676,17 +751,15 @@ impl UiOrchestrator {
                     }
                 }
             }
-            FromCore::VersionsLoaded(result) => {
-                match result {
-                    Ok((mod_id, versions)) => {
-                        self.views.mods.loading_versions.remove(&mod_id);
-                        self.views.mods.cached_versions.insert(mod_id, versions);
-                    }
-                    Err(error) => {
-                        self.views.mods.error = Some(error.to_string());
-                    }
+            FromCore::VersionsLoaded(result) => match result {
+                Ok((mod_id, versions)) => {
+                    self.views.mods.loading_versions.remove(&mod_id);
+                    self.views.mods.cached_versions.insert(mod_id, versions);
                 }
-            }
+                Err(error) => {
+                    self.views.mods.error = Some(error.to_string());
+                }
+            },
 
             // Confirmaciones
             FromCore::SettingsSaved => {
@@ -727,15 +800,20 @@ impl UiOrchestrator {
                 match result {
                     Ok(stats) => {
                         // Cache stats loaded - could be displayed in settings or debug panel
-                        println!("[Cache] Files: {}, Size: {}, Oldest: {} days, Newest: {} days", 
-                               stats.file_count, stats.size_formatted(), stats.oldest_age_days, stats.newest_age_days);
+                        println!(
+                            "[Cache] Files: {}, Size: {}, Oldest: {} days, Newest: {} days",
+                            stats.file_count,
+                            stats.size_formatted(),
+                            stats.oldest_age_days,
+                            stats.newest_age_days
+                        );
                     }
                     Err(e) => {
                         self.error = Some(format!("Failed to load cache stats: {}", e));
                     }
                 }
             }
-            
+
             // Launcher Update Events
             FromCore::LauncherUpdateCheckResult(result) => {
                 // FIX: Also update the settings modal's update_btn_status so the
@@ -750,7 +828,8 @@ impl UiOrchestrator {
                     }
                     Ok(None) => {
                         self.status_text = "No updates available".to_string();
-                        self.views.settings.update_btn_status = crate::settings::UpdateStatus::UpToDate;
+                        self.views.settings.update_btn_status =
+                            crate::settings::UpdateStatus::UpToDate;
                     }
                     Err(error) => {
                         self.error = Some(format!("Update check failed: {}", error));
@@ -767,26 +846,22 @@ impl UiOrchestrator {
                 self.status_text = self.localization.t("status.update_completed").to_string();
                 self.displayed_progress = 0.0;
             }
-            FromCore::MigrationFinished(result) => {
-                match result {
-                    Ok(new_path) => {
-                        self.status_text = format!("Migration completed to: {}", new_path.display());
-                    }
-                    Err(error) => {
-                        self.error = Some(format!("Migration failed: {}", error));
-                    }
+            FromCore::MigrationFinished(result) => match result {
+                Ok(new_path) => {
+                    self.status_text = format!("Migration completed to: {}", new_path.display());
                 }
-            }
-            FromCore::RepairOperationFinished(result) => {
-                match result {
-                    Ok(_) => {
-                        self.status_text = "Repair completed successfully".to_string();
-                    }
-                    Err(error) => {
-                        self.error = Some(format!("Repair failed: {}", error));
-                    }
+                Err(error) => {
+                    self.error = Some(format!("Migration failed: {}", error));
                 }
-            }
+            },
+            FromCore::RepairOperationFinished(result) => match result {
+                Ok(_) => {
+                    self.status_text = "Repair completed successfully".to_string();
+                }
+                Err(error) => {
+                    self.error = Some(format!("Repair failed: {}", error));
+                }
+            },
             FromCore::UpdateAvailable(release) => {
                 if let Some(r) = release {
                     self.status_text = format!("Update available: {}", r.tag_name);
@@ -809,13 +884,18 @@ impl UiOrchestrator {
                     self.latest_version = Some(latest);
                 }
                 // Sincronizar con el estado del modal de settings
-                self.views.settings.available_versions = self.available_versions.iter().map(|&v| v as i32).collect();
+                self.views.settings.available_versions =
+                    self.available_versions.iter().map(|&v| v as i32).collect();
                 self.views.settings.is_loading_versions = false;
             }
             FromCore::InstalledVersionsLoaded(versions) => {
                 self.installed_versions = versions;
                 // Sincronizar con el estado del modal de settings
-                self.views.settings.installed_versions = self.installed_versions.iter().map(|&(v, l)| (v as i32, l)).collect();
+                self.views.settings.installed_versions = self
+                    .installed_versions
+                    .iter()
+                    .map(|&(v, l)| (v as i32, l))
+                    .collect();
             }
             FromCore::ModInstallProgress(mod_id, progress) => {
                 self.status_text = format!("Installing {}... {:.1}%", mod_id, progress * 100.0);
@@ -866,7 +946,7 @@ impl UiOrchestrator {
                 self.views.settings.is_loading_versions = false;
             }
         }
-        
+
         Some(Task::none())
     }
 
@@ -874,7 +954,7 @@ impl UiOrchestrator {
     pub fn ui_alpha_actual(&self) -> f32 {
         let elapsed_idle = self.visuals.last_mouse_move_time.elapsed().as_secs_f32();
         let stillness = (elapsed_idle / 3.0).clamp(0.0, 1.0);
-        
+
         if let Some(t) = self.visuals.lsd_enabled_time {
             let elapsed = t.elapsed().as_secs_f32();
             let ramp_alpha = (elapsed / theme::LSD_RAMP_UP_SECONDS).clamp(0.0, 1.0);
@@ -896,20 +976,20 @@ impl UiOrchestrator {
 
     /// Handle optimistic settings updates with rollback support
     pub fn save_settings_with_optimistic_update(
-        &mut self, 
+        &mut self,
         new_settings: GameSettings,
-        to_core: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>
+        to_core: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>,
     ) -> Option<Task<Message>> {
         // 1. Snapshot safe state before making changes
         self.last_known_safe_settings = Some(self.settings.clone());
-        
+
         // 2. Optimistic Update (Visuals reflect immediately for better UX)
         self.settings = new_settings.clone();
         self.visuals.palette = crate::theme::generate_palette(&self.settings.theme);
 
         // 3. Command Core to persist the changes
         let _ = to_core.try_send(crate::core::signals::ToCore::SaveSettings(new_settings));
-        
+
         // 4. Trigger status check after save to reflect potential channel/version changes
         Some(Task::done(Message::CheckStatus))
     }
@@ -919,12 +999,12 @@ impl UiOrchestrator {
     pub fn rebuild_tray_menu(&mut self) {
         let is_playing = self.displayed_status == LauncherStatus::Playing;
         let icon = crate::util::icons::load_tray_icon();
-        
+
         if let Err(e) = self.visuals.tray_manager.create_tray(
-            is_playing, 
-            icon, 
+            is_playing,
+            icon,
             &self.localization.t("tray.tooltip"),
-            &self.localization
+            &self.localization,
         ) {
             eprintln!("ERROR: Failed to update tray icon: {}", e);
         }
@@ -934,7 +1014,7 @@ impl UiOrchestrator {
     pub fn view(&self, _orchestrator: &UiOrchestrator) -> iced::Element<'_, Message> {
         use iced::widget::{Space, column, container, mouse_area, row, shader, stack};
         use iced::{Color, Element, Length};
-        
+
         // Live theme preview: when the settings modal is open, render every frame
         // using the in-progress (unsaved) theme so changes to accent, saturation,
         // contrast, and base-mode are reflected immediately without needing to Save.
@@ -957,7 +1037,10 @@ impl UiOrchestrator {
             0.0
         };
 
-        let lsd_active = self.visuals.lsd_preview_override.unwrap_or(self.settings.theme.lsd_mode);
+        let lsd_active = self
+            .visuals
+            .lsd_preview_override
+            .unwrap_or(self.settings.theme.lsd_mode);
 
         let click_decay = (self.visuals.shader_click_time.elapsed().as_secs_f32() * 8.0).exp();
         let click_pulse = self.visuals.shader_click_intensity / click_decay;
@@ -970,7 +1053,8 @@ impl UiOrchestrator {
         }
         .min(3.0);
 
-        let is_modal_active = self.views.settings.is_open || self.views.mods.is_open || self.views.server.is_open;
+        let is_modal_active =
+            self.views.settings.is_open || self.views.mods.is_open || self.views.server.is_open;
 
         let ui_alpha = if is_modal_active {
             1.0
@@ -1003,9 +1087,9 @@ impl UiOrchestrator {
             mouse_stillness: stillness,
             is_resizing: false,
         };
-        
+
         let tint_color = crate::theme::background_tint_color(&palette);
-        
+
         let tint_overlay = container(Space::new())
             .width(Length::Fill)
             .height(Length::Fill)
@@ -1021,10 +1105,10 @@ impl UiOrchestrator {
             });
 
         let is_interaction_disabled = self.views.settings.is_open || self.views.mods.is_open;
-        
+
         // Calculate compact mode for server panel (consistent with settings.rs threshold)
         let is_compact = self.visuals.window_size.width < 600.0;
-        
+
         let left_column_content = column![
             crate::ui::profile_card::view(
                 &self.profiles,
@@ -1069,7 +1153,12 @@ impl UiOrchestrator {
                 container(
                     self.views
                         .news
-                        .view(&self.localization, is_interaction_disabled, &self.resources, ctx)
+                        .view(
+                            &self.localization,
+                            is_interaction_disabled,
+                            &self.resources,
+                            ctx,
+                        )
                         .map(Message::News),
                 )
                 .width(Length::FillPortion(2))
@@ -1107,7 +1196,7 @@ impl UiOrchestrator {
                     .into(),
                 ctx,
             );
-            
+
             if self.visuals.window_size.width > 500.0 {
                 Into::<Element<'_, Message>>::into(
                     container(
@@ -1172,11 +1261,11 @@ impl UiOrchestrator {
                 shader.update_time(self.visuals.current_time);
                 shader
             };
-            
+
             if click_pulse > 0.01 {
                 shader_instance.trigger_click();
             }
-            
+
             Some(
                 iced::widget::shader(shader_instance.clone())
                     .width(Length::Fill)
@@ -1197,7 +1286,7 @@ impl UiOrchestrator {
             .width(Length::Fill)
             .height(Length::Fill)
             .into();
-            
+
         let final_view = stack![bg, tint_overlay, visual_content];
 
         let modal_layer = if self.views.settings.is_open {
@@ -1218,12 +1307,15 @@ impl UiOrchestrator {
         } else if self.views.mods.is_open {
             Some(
                 container(
-                    self.views.mods.view(
-                        &self.localization,
-                        self.visuals.window_size,
-                        &self.resources,
-                        ctx
-                    ).map(Message::Mods),
+                    self.views
+                        .mods
+                        .view(
+                            &self.localization,
+                            self.visuals.window_size,
+                            &self.resources,
+                            ctx,
+                        )
+                        .map(Message::Mods),
                 )
                 .style(move |t| crate::theme::container_style_transparent(&palette, t))
                 .width(Length::Fill)
@@ -1234,9 +1326,12 @@ impl UiOrchestrator {
             )
         } else if self.views.server.is_open {
             Some(
-                container(
-                    crate::ui::server_panel::view(&self.views.server, &self.localization, ctx, is_compact)
-                )
+                container(crate::ui::server_panel::view(
+                    &self.views.server,
+                    &self.localization,
+                    ctx,
+                    is_compact,
+                ))
                 .style(move |t| crate::theme::container_style_transparent(&palette, t))
                 .width(Length::Fill)
                 .height(Length::Fill)
@@ -1280,7 +1375,11 @@ impl UiOrchestrator {
     }
 
     /// Main update method that orchestrates all message handling
-    pub fn update(&mut self, message: Message, core_tx: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>) -> Task<Message> {
+    pub fn update(
+        &mut self,
+        message: Message,
+        core_tx: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>,
+    ) -> Task<Message> {
         // 0. INTERCEPTOR LAYER: Catch ToCore signals bubbling up from sub-modules
         match &message {
             Message::Mods(crate::ui::mods_modal::ModsMessage::ToCore(signal)) => {
@@ -1295,121 +1394,140 @@ impl UiOrchestrator {
         }
 
         // 1. Handle visual effects (STATE ONLY)
-        self.visuals.process_message(&message, self.views.settings.is_open || self.views.mods.is_open, &self.settings);
-        
+        self.visuals.process_message(
+            &message,
+            self.views.settings.is_open || self.views.mods.is_open,
+            &self.settings,
+        );
+
         // 2. Route to Logic Handlers (TASKS/IO)
         if let Some(task) = self.handle_ui_event_with_core(&message, core_tx) {
             return task;
         }
-        
+
         Task::none()
     }
-    
+
     /// Handle UI events with to_core channel access
-    fn handle_ui_event_with_core(&mut self, message: &Message, core_tx: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>) -> Option<Task<Message>> {
+    fn handle_ui_event_with_core(
+        &mut self,
+        message: &Message,
+        core_tx: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>,
+    ) -> Option<Task<Message>> {
         use crate::messages::Message;
-        
+
         // Route to specialized handlers with to_core access
         match message {
             // === VISUALS (HANDLED IN UPDATE, TASKS ONLY HERE) ===
             #[cfg(all(feature = "tray", windows))]
-            Message::TrayMenuEvent(_) => {
-                self.handle_visual_events(message, core_tx)
-            }
-            
+            Message::TrayMenuEvent(_) => self.handle_visual_events(message, core_tx),
+
             // === EVENTOS DE INICIALIZACIÓN Y CARGA ===
             Message::Initialize | Message::ConfigLoaded(_, _, _) | Message::BackgroundLoaded(_) => {
                 self.handle_initialization_events(message, core_tx)
             }
-            
+
             // === EVENTOS DE JUEGO ===
-            Message::StartGame | Message::GameLaunched(_) | Message::GameStopped | 
-            Message::CheckStatus | Message::DryRunFinished(_, _, _) => {
+            Message::StartGame
+            | Message::GameLaunched(_)
+            | Message::GameStopped
+            | Message::CheckStatus
+            | Message::DryRunFinished(_, _, _) => {
                 self.handle_game_events_with_core(message, core_tx)
             }
-            
+
             // === EVENTOS DE PROGRESO ===
             Message::ProgressUpdate(_) | Message::UpdateTotalSteps { .. } => {
                 self.handle_progress_events(message, core_tx)
             }
-            
+
             // === EVENTOS DE VERSIONES ===
-            Message::RequestVersionCheck(_) | Message::RequestDeleteVersion(_) | 
-            Message::RequestRepairVersion(_) | Message::RepairFinished(_) |
-            Message::OpenVersionFolder(_) => {
+            Message::RequestVersionCheck(_)
+            | Message::RequestDeleteVersion(_)
+            | Message::RequestRepairVersion(_)
+            | Message::RepairFinished(_)
+            | Message::OpenVersionFolder(_) => {
                 self.handle_version_events_with_core(message, core_tx)
             }
-            
+
             // === EVENTOS DE PERFILES ===
-            Message::ProfileSelected(_) | Message::AddProfile | Message::EditProfile(_) |
-            Message::DeleteProfile(_) | Message::ProfileNameChanged(_) | 
-            Message::SaveProfileName | Message::CancelProfileEdit | 
-            Message::EditProfileUUID(_) | Message::ProfileUUIDChanged(_) | 
-            Message::SaveProfileUUID | Message::CancelProfileUUIDEdit | 
-            Message::CopyUUID(_) | Message::GenerateRandomUUID | 
-            Message::ToggleProfileDropdown => {
+            Message::ProfileSelected(_)
+            | Message::AddProfile
+            | Message::EditProfile(_)
+            | Message::DeleteProfile(_)
+            | Message::ProfileNameChanged(_)
+            | Message::SaveProfileName
+            | Message::CancelProfileEdit
+            | Message::EditProfileUUID(_)
+            | Message::ProfileUUIDChanged(_)
+            | Message::SaveProfileUUID
+            | Message::CancelProfileUUIDEdit
+            | Message::CopyUUID(_)
+            | Message::GenerateRandomUUID
+            | Message::ToggleProfileDropdown => {
                 self.handle_profile_events_with_core(message, core_tx)
             }
-            
+
             // === EVENTOS DE MODALS ===
-            Message::Settings(_) | Message::Mods(_) | Message::CoreEvent(_) |
-            Message::ModsLoaded(_) | Message::ModsLoadedComplex(_) | Message::OpenMods |
-            Message::OpenSettings | Message::CloseSettings | Message::SaveSettings(_) => {
-                self.handle_modal_events(message, core_tx)
-            }
-            
+            Message::Settings(_)
+            | Message::Mods(_)
+            | Message::CoreEvent(_)
+            | Message::ModsLoaded(_)
+            | Message::ModsLoadedComplex(_)
+            | Message::OpenMods
+            | Message::OpenSettings
+            | Message::CloseSettings
+            | Message::SaveSettings(_) => self.handle_modal_events(message, core_tx),
+
             // === EVENTOS DE SERVER PANEL ===
             Message::OpenServerPanel | Message::CloseServerPanel | Message::Server(_) => {
                 self.handle_server_panel_events(message)
             }
-            
+
             // === EVENTOS DE NEWS ===
-            Message::News(_) => {
-                self.handle_news_events(message, core_tx)
-            }
-            
+            Message::News(_) => self.handle_news_events(message, core_tx),
+
             // === EVENTOS DE UPDATER ===
-            Message::LauncherUpdate(_) => {
-                self.handle_updater_events(message, core_tx)
-            }
-            
+            Message::LauncherUpdate(_) => self.handle_updater_events(message, core_tx),
+
             // === EVENTOS DE DATOS Y MIGRACIÓN ===
-            Message::RequestMoveData(_) | Message::RequestUseDataLocation(_) |
-            Message::DataMoveStarted | Message::DataMoveFinished(_) |
-            Message::MigrationProgress(_) | Message::StartMigrationActual(_, _) |
-            Message::CancelAction => {
-                self.handle_migration_events_with_core(message, core_tx)
-            }
-            
+            Message::RequestMoveData(_)
+            | Message::RequestUseDataLocation(_)
+            | Message::DataMoveStarted
+            | Message::DataMoveFinished(_)
+            | Message::MigrationProgress(_)
+            | Message::StartMigrationActual(_, _)
+            | Message::CancelAction => self.handle_migration_events_with_core(message, core_tx),
+
             // === EVENTOS DE JAVA ===
             Message::LoadJavaInfo | Message::JavaInfoLoaded => {
                 self.handle_java_events_with_core(message, core_tx)
             }
-            
+
             // === EVENTOS DE VENTANA ===
-            Message::ToggleFullscreen | Message::WindowEvent(_, _) | 
-            Message::WindowResized(_) | Message::WindowResizedWithMaximized(_, _) => {
+            Message::ToggleFullscreen
+            | Message::WindowEvent(_, _)
+            | Message::WindowResized(_)
+            | Message::WindowResizedWithMaximized(_, _) => {
                 self.handle_window_events_with_core(message, core_tx)
             }
-            
+
             // === EVENTOS DE SISTEMA ===
             Message::AppExit | Message::ToggleWindowVisibility | Message::CloseRequested => {
                 self.handle_system_events_with_core(message, core_tx)
             }
-            
+
             // === CAMBIO DE IDIOMA ===
             // FIX: Previously fell to `_ => None`, so the localization was never updated
             // at runtime when the user changed language in Settings. Now properly routed
             // to handle_visual_events which calls self.localization.load_language(lang).
-            Message::LanguageChangedInSettings(_) => {
-                self.handle_visual_events(message, core_tx)
-            }
-            
+            Message::LanguageChangedInSettings(_) => self.handle_visual_events(message, core_tx),
+
             // === EVENTOS MISCELÁNEOS ===
             Message::OpenFolder | Message::RequestCacheStats => {
                 self.handle_misc_events_with_core(message, core_tx)
             }
-            
+
             // === EVENTOS DE WATCHDOG ===
             Message::WatchdogCheck => {
                 // Request status check from core to verify game process health
@@ -1428,15 +1546,17 @@ impl UiOrchestrator {
             _ => None,
         }
     }
-    
+
     /// Handle system-level events with to_core access
-    fn handle_system_events_with_core(&mut self, message: &Message, core_tx: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>) -> Option<Task<Message>> {
+    fn handle_system_events_with_core(
+        &mut self,
+        message: &Message,
+        core_tx: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>,
+    ) -> Option<Task<Message>> {
         use crate::messages::Message;
-        
+
         match message {
-            Message::AppExit | Message::CloseRequested => {
-                Some(self.save_and_exit(core_tx))
-            }
+            Message::AppExit | Message::CloseRequested => Some(self.save_and_exit(core_tx)),
             Message::ToggleWindowVisibility => {
                 if let Some(id) = self.window_id {
                     self.visuals.is_visible = !self.visuals.is_visible;
@@ -1453,11 +1573,15 @@ impl UiOrchestrator {
             _ => None,
         }
     }
-    
+
     /// Handle miscellaneous events that don't fit other categories
-    fn handle_misc_events_with_core(&mut self, message: &Message, to_core: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>) -> Option<Task<Message>> {
+    fn handle_misc_events_with_core(
+        &mut self,
+        message: &Message,
+        to_core: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>,
+    ) -> Option<Task<Message>> {
         use crate::messages::Message;
-        
+
         match message {
             Message::OpenFolder => {
                 // Open the game folder in the system file manager
@@ -1472,11 +1596,11 @@ impl UiOrchestrator {
             _ => None,
         }
     }
-    
+
     /// Handle server panel events
     fn handle_server_panel_events(&mut self, message: &Message) -> Option<Task<Message>> {
         use crate::messages::Message;
-        
+
         match message {
             Message::OpenServerPanel => {
                 let config = rustale_server::config::ServerConfig::default();
@@ -1486,17 +1610,19 @@ impl UiOrchestrator {
                 self.views.server.close();
                 None
             }
-            Message::Server(msg) => {
-                Some(self.views.server.update(msg.clone()))
-            }
+            Message::Server(msg) => Some(self.views.server.update(msg.clone())),
             _ => None,
         }
     }
-    
+
     /// Handle game-related events with to_core access
-    fn handle_game_events_with_core(&mut self, message: &Message, to_core: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>) -> Option<Task<Message>> {
+    fn handle_game_events_with_core(
+        &mut self,
+        message: &Message,
+        to_core: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>,
+    ) -> Option<Task<Message>> {
         use crate::messages::Message;
-        
+
         match message {
             Message::StartGame => {
                 // FIX (STOP button bug): The play/stop button always emits Message::StartGame.
@@ -1543,7 +1669,9 @@ impl UiOrchestrator {
                 None
             }
             Message::CheckStatus => {
-                let _ = to_core.try_send(crate::core::signals::ToCore::RequestInitialStatus(self.settings.clone()));
+                let _ = to_core.try_send(crate::core::signals::ToCore::RequestInitialStatus(
+                    self.settings.clone(),
+                ));
                 None
             }
             Message::DryRunFinished(settings, status, exit_code) => {
@@ -1560,18 +1688,30 @@ impl UiOrchestrator {
             _ => None,
         }
     }
-    
+
     /// Handle version management events with to_core access
-    fn handle_version_events_with_core(&mut self, message: &Message, to_core: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>) -> Option<Task<Message>> {
+    fn handle_version_events_with_core(
+        &mut self,
+        message: &Message,
+        to_core: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>,
+    ) -> Option<Task<Message>> {
         use crate::messages::Message;
-        
+
         match message {
             Message::RequestVersionCheck(version) => {
-                let _ = to_core.try_send(crate::core::signals::ToCore::RequestVersionCheck(version.clone()));
+                let _ = to_core.try_send(crate::core::signals::ToCore::RequestVersionCheck(
+                    version.clone(),
+                ));
+                // Also request installed versions for the same channel
+                let _ = to_core.try_send(crate::core::signals::ToCore::RequestInstalledVersions(
+                    version.clone(),
+                ));
                 None
             }
             Message::RequestDeleteVersion(version) => {
-                let _ = to_core.try_send(crate::core::signals::ToCore::RequestDeleteVersion(version.clone()));
+                let _ = to_core.try_send(crate::core::signals::ToCore::RequestDeleteVersion(
+                    version.clone(),
+                ));
                 // FIX: After deleting a version the coordinator only sends StatusChanged(Ready),
                 // it never re-scans local versions. We dispatch CheckStatus which sends
                 // RequestInitialStatus → scan_local_versions → InstalledVersionsLoaded so
@@ -1579,7 +1719,9 @@ impl UiOrchestrator {
                 Some(Task::done(Message::CheckStatus))
             }
             Message::RequestRepairVersion(version) => {
-                let _ = to_core.try_send(crate::core::signals::ToCore::RequestRepairVersion(version.clone()));
+                let _ = to_core.try_send(crate::core::signals::ToCore::RequestRepairVersion(
+                    version.clone(),
+                ));
                 None
             }
             Message::RepairFinished(result) => {
@@ -1609,16 +1751,21 @@ impl UiOrchestrator {
             _ => None,
         }
     }
-    
+
     /// Handle profile management events with to_core access
-    fn handle_profile_events_with_core(&mut self, message: &Message, to_core: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>) -> Option<Task<Message>> {
+    fn handle_profile_events_with_core(
+        &mut self,
+        message: &Message,
+        to_core: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>,
+    ) -> Option<Task<Message>> {
         use crate::messages::Message;
-        
+
         match message {
             Message::ProfileSelected(profile) => {
                 // Update current profile via Core
-                let _ = to_core.try_send(crate::core::signals::ToCore::SetCurrentProfile(profile.id));
-                
+                let _ =
+                    to_core.try_send(crate::core::signals::ToCore::SetCurrentProfile(profile.id));
+
                 self.profiles.current_profile = profile.id;
                 self.visuals.profile_dropdown_open = false;
 
@@ -1642,7 +1789,7 @@ impl UiOrchestrator {
                 if self.profiles.profiles.len() > 1 {
                     // Delete via Core
                     let _ = to_core.try_send(crate::core::signals::ToCore::DeleteProfile(*uuid));
-                    
+
                     self.profiles.profiles.retain(|p| p.id != *uuid);
 
                     // If we deleted the current profile, switch to the first one
@@ -1669,10 +1816,13 @@ impl UiOrchestrator {
                             Some(existing_id) => {
                                 // Edit existing profile via Core
                                 let name_clone = name.clone();
-                                let _ = to_core.try_send(crate::core::signals::ToCore::UpdateProfileName(
-                                    existing_id, name_clone
-                                ));
-                                
+                                let _ = to_core.try_send(
+                                    crate::core::signals::ToCore::UpdateProfileName(
+                                        existing_id,
+                                        name_clone,
+                                    ),
+                                );
+
                                 // Update local state for immediate UI feedback
                                 if let Some(profile) = self
                                     .profiles
@@ -1686,9 +1836,9 @@ impl UiOrchestrator {
                             None => {
                                 // Create new profile via Core
                                 let name_clone = name.clone();
-                                let _ = to_core.try_send(crate::core::signals::ToCore::CreateProfile(
-                                    name_clone
-                                ));
+                                let _ = to_core.try_send(
+                                    crate::core::signals::ToCore::CreateProfile(name_clone),
+                                );
                             }
                         }
                         return Some(Task::none());
@@ -1717,9 +1867,9 @@ impl UiOrchestrator {
                     if let Ok(new_uuid) = uuid::Uuid::parse_str(&uuid_str) {
                         // Update profile UUID via Core
                         let _ = to_core.try_send(crate::core::signals::ToCore::UpdateProfileUuid(
-                            id, new_uuid
+                            id, new_uuid,
                         ));
-                        
+
                         // Update local state for immediate UI feedback
                         if let Some(profile) =
                             self.profiles.profiles.iter_mut().find(|p| p.id == id)
@@ -1740,9 +1890,7 @@ impl UiOrchestrator {
                 self.visuals.editing_uuid = None;
                 Some(Task::none())
             }
-            Message::CopyUUID(uuid) => {
-                Some(iced::clipboard::write(uuid.clone()))
-            }
+            Message::CopyUUID(uuid) => Some(iced::clipboard::write(uuid.clone())),
             Message::GenerateRandomUUID => {
                 if let Some((_, ref mut uuid_str)) = self.visuals.editing_uuid {
                     *uuid_str = uuid::Uuid::new_v4().to_string();
@@ -1756,11 +1904,15 @@ impl UiOrchestrator {
             _ => None,
         }
     }
-    
+
     /// Handle data migration events with to_core access
-    fn handle_migration_events_with_core(&mut self, message: &Message, to_core: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>) -> Option<Task<Message>> {
+    fn handle_migration_events_with_core(
+        &mut self,
+        message: &Message,
+        to_core: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>,
+    ) -> Option<Task<Message>> {
         use crate::messages::Message;
-        
+
         match message {
             Message::RequestMoveData(path) => {
                 // Use StartMigrationActual instead - redirect to it
@@ -1771,7 +1923,8 @@ impl UiOrchestrator {
             }
             Message::RequestUseDataLocation(path) => {
                 // Use existing data from a different location without moving
-                let _ = to_core.try_send(crate::core::signals::ToCore::UseDataLocation { path: path.clone() });
+                let _ = to_core
+                    .try_send(crate::core::signals::ToCore::UseDataLocation { path: path.clone() });
                 None
             }
             Message::DataMoveStarted => {
@@ -1782,12 +1935,16 @@ impl UiOrchestrator {
                 match result {
                     Ok(new_path) => {
                         // Actualizar configuración con nueva ruta
-                        self.status_text = format!("Data migration completed to: {}", new_path.display());
-                        
+                        self.status_text =
+                            format!("Data migration completed to: {}", new_path.display());
+
                         // Guardar la nueva ruta en el bootstrap config para persistencia
                         if let Err(e) = crate::config::save_bootstrap_path(new_path) {
                             eprintln!("Failed to save bootstrap path after migration: {}", e);
-                            self.error = Some(format!("Migration completed but failed to save path: {}", e));
+                            self.error = Some(format!(
+                                "Migration completed but failed to save path: {}",
+                                e
+                            ));
                         }
                     }
                     Err(e) => {
@@ -1803,7 +1960,10 @@ impl UiOrchestrator {
                 None
             }
             Message::StartMigrationActual(from, to) => {
-                let _ = to_core.try_send(crate::core::signals::ToCore::MigrateData { from: from.clone(), to: to.clone() });
+                let _ = to_core.try_send(crate::core::signals::ToCore::MigrateData {
+                    from: from.clone(),
+                    to: to.clone(),
+                });
                 None
             }
             Message::CancelAction => {
@@ -1816,11 +1976,15 @@ impl UiOrchestrator {
             _ => None,
         }
     }
-    
+
     /// Handle Java-related events with to_core access
-    fn handle_java_events_with_core(&mut self, message: &Message, to_core: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>) -> Option<Task<Message>> {
+    fn handle_java_events_with_core(
+        &mut self,
+        message: &Message,
+        to_core: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>,
+    ) -> Option<Task<Message>> {
         use crate::messages::Message;
-        
+
         match message {
             Message::LoadJavaInfo => {
                 let _ = to_core.try_send(crate::core::signals::ToCore::LoadJavaInfo);
@@ -1833,11 +1997,15 @@ impl UiOrchestrator {
             _ => None,
         }
     }
-    
+
     /// Handle window events with to_core access
-    fn handle_window_events_with_core(&mut self, message: &Message, core_tx: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>) -> Option<Task<Message>> {
+    fn handle_window_events_with_core(
+        &mut self,
+        message: &Message,
+        core_tx: &tokio::sync::mpsc::Sender<crate::core::signals::ToCore>,
+    ) -> Option<Task<Message>> {
         use crate::messages::Message;
-        
+
         match message {
             Message::ToggleFullscreen => {
                 if let Some(id) = self.window_id {
@@ -1864,7 +2032,7 @@ impl UiOrchestrator {
                         return Some(iced::window::minimize(*id, true));
                     }
                 }
-                
+
                 // Manejar eventos de ventana a nivel de UI
                 match event {
                     iced::window::Event::Focused => {
@@ -1902,7 +2070,7 @@ impl UiOrchestrator {
     /// Subscription method for handling system events
     pub fn subscription(&self) -> iced::Subscription<Message> {
         use iced::Subscription;
-        
+
         let is_interactive = self.visuals.is_focused && !self.visuals.is_minimized;
         // Also activate cursor tracking when the LSD preview override is on (settings modal open).
         let lsd_active = self.settings.theme.lsd_mode
@@ -1950,7 +2118,7 @@ impl UiOrchestrator {
         } else {
             Subscription::none()
         };
-        
+
         let keyboard_sub = if is_interactive || lsd_active {
             crate::ui::subscriptions::listen_keyboard()
         } else {
@@ -2005,3 +2173,4 @@ fn menu_events_internal() -> impl iced::futures::Stream<Item = Message> {
         },
     )
 }
+

@@ -1,11 +1,11 @@
-use rustale_shared::config::GameSettings;
-use rustale_shared::profiles::ProfilesConfig;
+use crate::core::errors::CoreError;
 use crate::game::{
     LauncherStatus, mods::ModInfo, mods::ModInstallationRequest, mods_api::SearchResults,
     zip_mods::PatchManifest,
 };
 use crate::news::BlogPost;
-use crate::core::errors::CoreError;
+use rustale_shared::config::GameSettings;
+use rustale_shared::profiles::ProfilesConfig;
 use std::path::PathBuf;
 
 /// COMMANDS: Frontend -> Backend
@@ -23,6 +23,7 @@ pub enum ToCore {
     CheckForLauncherUpdates,
     PerformLauncherUpdate(String),
     RequestVersionCheck(String), // Kept for compatibility
+    RequestInstalledVersions(String),
 
     // --- Game Logic ---
     LaunchGame,
@@ -67,7 +68,7 @@ pub enum ToCore {
     UninstallMod(String),
     ToggleMod(String, bool),
     ToggleZipPatch(String, bool),
-    CheckForUpdates, // Verificar actualizaciones de mods instalados
+    CheckForUpdates,      // Verificar actualizaciones de mods instalados
     LoadVersions(String), // Cargar versiones disponibles de un mod específico
 
     // --- News ---
@@ -77,12 +78,12 @@ pub enum ToCore {
     TrimMemory,
     OpenGameFolder,
     GetCacheStats,
-    
+
     // --- Data Location Management ---
     UseDataLocation {
         path: PathBuf,
     },
-    
+
     // --- Watchdog ---
     WatchdogCheck,
 }
@@ -117,7 +118,15 @@ pub enum FromCore {
     ModsSearchLoaded(Result<SearchResults, CoreError>),
     LocalModsLoaded(Result<(Vec<ModInfo>, Vec<PatchManifest>), CoreError>),
     NewsLoaded(Result<Vec<BlogPost>, CoreError>),
-    UpdatesLoaded(Result<(Vec<String>, std::collections::HashMap<String, Vec<crate::game::mods_api::GenericFile>>), CoreError>),
+    UpdatesLoaded(
+        Result<
+            (
+                Vec<String>,
+                std::collections::HashMap<String, Vec<crate::game::mods_api::GenericFile>>,
+            ),
+            CoreError,
+        >,
+    ),
     VersionsLoaded(Result<(String, Vec<crate::game::mods_api::GenericFile>), CoreError>),
     // Note: Las imágenes se cargan en UI directamente o el core devuelve paths locales.
     // Por simplicidad, imágenes en UI vía async load está bien si es solo lectura,

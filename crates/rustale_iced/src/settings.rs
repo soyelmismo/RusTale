@@ -1,5 +1,5 @@
-use crate::messages::Message;
 use crate::config::GameSettings;
+use crate::messages::Message;
 use crate::{theme, util};
 use iced::widget::{
     Id, Space, button, checkbox, column, container, pick_list, row, scrollable, slider, svg,
@@ -854,7 +854,11 @@ impl SettingsState {
         .into()
     }
 
-    pub fn update(&mut self, message: SettingsMessage, localization: &rustale_shared::lang::Localization) -> Option<Message> {
+    pub fn update(
+        &mut self,
+        message: SettingsMessage,
+        localization: &rustale_shared::lang::Localization,
+    ) -> Option<Message> {
         match message {
             SettingsMessage::TabSelected(tab) => {
                 self.current_tab = tab.clone();
@@ -887,11 +891,11 @@ impl SettingsState {
                 {
                     if let Some(path) = rfd::FileDialog::new()
                         .set_title(localization.t("dialog.select_folder_move").to_string())
-                        .pick_folder() 
+                        .pick_folder()
                     {
                         Some(Message::StartMigrationActual(
                             crate::config::get_app_dir(),
-                            path
+                            path,
                         ))
                     } else {
                         None
@@ -908,7 +912,7 @@ impl SettingsState {
                 {
                     if let Some(path) = rfd::FileDialog::new()
                         .set_title(localization.t("dialog.select_folder_use").to_string())
-                        .pick_folder() 
+                        .pick_folder()
                     {
                         Some(Message::RequestUseDataLocation(path))
                     } else {
@@ -1092,7 +1096,9 @@ impl SettingsState {
                 self.temp_settings.channel = val.clone();
                 self.is_loading_versions = true;
                 self.available_versions.clear();
-                Some(Message::RequestVersionCheck(val))
+                self.installed_versions.clear();
+                // Request both available versions and installed versions for the selected channel
+                return Some(Message::RequestVersionCheck(val.clone()));
             }
             SettingsMessage::VersionSelected(version) => {
                 self.temp_settings.game_version = version;
@@ -1483,7 +1489,7 @@ mod tests {
     fn test_settings_state_new() {
         let settings = GameSettings::default();
         let state = SettingsState::new(&settings);
-        
+
         assert!(!state.is_open);
         assert_eq!(state.current_tab, Tab::Game);
         assert!(state.available_versions.is_empty());
@@ -1494,9 +1500,9 @@ mod tests {
     fn test_settings_state_open() {
         let settings = GameSettings::default();
         let mut state = SettingsState::new(&settings);
-        
+
         state.open(settings.clone());
-        
+
         assert!(state.is_open);
         assert_eq!(state.current_tab, Tab::Launcher);
     }
@@ -1508,15 +1514,15 @@ mod tests {
         let settings = GameSettings::default();
         let mut state = SettingsState::new(&settings);
         let loc = test_localization();
-        
+
         // Navigate to Video tab
         state.update(SettingsMessage::TabSelected(Tab::Video), &loc);
         assert_eq!(state.current_tab, Tab::Video);
-        
+
         // Navigate to Java tab
         state.update(SettingsMessage::TabSelected(Tab::Java), &loc);
         assert_eq!(state.current_tab, Tab::Java);
-        
+
         // Navigate to Game tab
         state.update(SettingsMessage::TabSelected(Tab::Game), &loc);
         assert_eq!(state.current_tab, Tab::Game);
@@ -1529,11 +1535,11 @@ mod tests {
         let settings = GameSettings::default();
         let mut state = SettingsState::new(&settings);
         let loc = test_localization();
-        
+
         // Set min memory to 8, max should auto-adjust
         state.update(SettingsMessage::MaxMemoryChanged(4.0), &loc);
         state.update(SettingsMessage::MinMemoryChanged(8.0), &loc);
-        
+
         assert_eq!(state.temp_settings.min_memory, 8);
         assert_eq!(state.temp_settings.max_memory, 8);
     }
@@ -1543,14 +1549,14 @@ mod tests {
         let settings = GameSettings::default();
         let mut state = SettingsState::new(&settings);
         let loc = test_localization();
-        
+
         // Set max to 8, then min to 4
         state.update(SettingsMessage::MaxMemoryChanged(8.0), &loc);
         state.update(SettingsMessage::MinMemoryChanged(4.0), &loc);
-        
+
         // Now try to set max below min
         state.update(SettingsMessage::MaxMemoryChanged(2.0), &loc);
-        
+
         assert_eq!(state.temp_settings.min_memory, 2);
         assert_eq!(state.temp_settings.max_memory, 2);
     }
@@ -1562,12 +1568,12 @@ mod tests {
         let settings = GameSettings::default();
         let mut state = SettingsState::new(&settings);
         let loc = test_localization();
-        
+
         assert!(!state.temp_settings.fullscreen);
-        
+
         state.update(SettingsMessage::FullscreenToggled(true), &loc);
         assert!(state.temp_settings.fullscreen);
-        
+
         state.update(SettingsMessage::FullscreenToggled(false), &loc);
         assert!(!state.temp_settings.fullscreen);
     }
@@ -1577,9 +1583,9 @@ mod tests {
         let settings = GameSettings::default();
         let mut state = SettingsState::new(&settings);
         let loc = test_localization();
-        
+
         assert!(!state.temp_settings.quickplay);
-        
+
         state.update(SettingsMessage::QuickplayToggled(true), &loc);
         assert!(state.temp_settings.quickplay);
     }
@@ -1589,15 +1595,21 @@ mod tests {
         let settings = GameSettings::default();
         let mut state = SettingsState::new(&settings);
         let loc = test_localization();
-        
-        assert_eq!(state.temp_settings.online_fix_mode, crate::config::OnlineFixMode::Local);
-        
+
+        assert_eq!(
+            state.temp_settings.online_fix_mode,
+            crate::config::OnlineFixMode::Local
+        );
+
         state.update(
             SettingsMessage::OnlineFixModeChanged(crate::config::OnlineFixMode::Sanasol),
             &loc,
         );
-        
-        assert_eq!(state.temp_settings.online_fix_mode, crate::config::OnlineFixMode::Sanasol);
+
+        assert_eq!(
+            state.temp_settings.online_fix_mode,
+            crate::config::OnlineFixMode::Sanasol
+        );
     }
 
     // === Theme Preset Tests ===
@@ -1607,10 +1619,13 @@ mod tests {
         let settings = GameSettings::default();
         let mut state = SettingsState::new(&settings);
         let loc = test_localization();
-        
+
         // Select Crimson preset
-        state.update(SettingsMessage::ThemePresetSelected(ThemePreset::Crimson), &loc);
-        
+        state.update(
+            SettingsMessage::ThemePresetSelected(ThemePreset::Crimson),
+            &loc,
+        );
+
         assert_eq!(state.temp_settings.theme.accent_hex, "#FF4545");
         assert_eq!(state.temp_settings.theme.saturation, 1.0);
         assert_eq!(state.temp_settings.theme.contrast, 1.0);
@@ -1621,9 +1636,12 @@ mod tests {
         let settings = GameSettings::default();
         let mut state = SettingsState::new(&settings);
         let loc = test_localization();
-        
-        state.update(SettingsMessage::ThemeHexChanged("#00FF00".to_string()), &loc);
-        
+
+        state.update(
+            SettingsMessage::ThemeHexChanged("#00FF00".to_string()),
+            &loc,
+        );
+
         assert_eq!(state.temp_settings.theme.accent_hex, "#00FF00");
     }
 
@@ -1632,10 +1650,13 @@ mod tests {
         let settings = GameSettings::default();
         let mut state = SettingsState::new(&settings);
         let loc = test_localization();
-        
+
         // Try to set hex longer than 7 chars - should be ignored
-        state.update(SettingsMessage::ThemeHexChanged("#00FF00FF".to_string()), &loc);
-        
+        state.update(
+            SettingsMessage::ThemeHexChanged("#00FF00FF".to_string()),
+            &loc,
+        );
+
         // Should not update because length > 7
         assert_eq!(state.temp_settings.theme.accent_hex, "#FFA845"); // default
     }
@@ -1645,9 +1666,9 @@ mod tests {
         let settings = GameSettings::default();
         let mut state = SettingsState::new(&settings);
         let loc = test_localization();
-        
+
         state.update(SettingsMessage::ThemeSaturationChanged(1.5), &loc);
-        
+
         assert!((state.temp_settings.theme.saturation - 1.5).abs() < 0.01);
     }
 
@@ -1658,9 +1679,9 @@ mod tests {
         let settings = GameSettings::default();
         let mut state = SettingsState::new(&settings);
         let loc = test_localization();
-        
+
         state.update(SettingsMessage::VersionSelected(42), &loc);
-        
+
         assert_eq!(state.temp_settings.game_version, 42);
     }
 
@@ -1683,10 +1704,10 @@ mod tests {
         let settings = GameSettings::default();
         let mut state = SettingsState::new(&settings);
         let loc = test_localization();
-        
+
         state.is_open = true;
         let result = state.update(SettingsMessage::CloseModal, &loc);
-        
+
         assert!(!state.is_open);
         assert!(matches!(result, Some(Message::CloseSettings)));
     }
@@ -1696,12 +1717,12 @@ mod tests {
         let settings = GameSettings::default();
         let mut state = SettingsState::new(&settings);
         let loc = test_localization();
-        
+
         state.is_open = true;
         state.temp_settings.channel = "pre-release".to_string();
-        
+
         let result = state.update(SettingsMessage::SaveSettings, &loc);
-        
+
         assert!(!state.is_open);
         match result {
             Some(Message::SaveSettings(s)) => {
@@ -1735,7 +1756,7 @@ mod tests {
     fn test_update_status_idle() {
         let settings = GameSettings::default();
         let state = SettingsState::new(&settings);
-        
+
         assert!(matches!(state.update_btn_status, UpdateStatus::Idle));
     }
 
@@ -1746,12 +1767,12 @@ mod tests {
         let settings = GameSettings::default();
         let mut state = SettingsState::new(&settings);
         let loc = test_localization();
-        
+
         let result = state.update(
             SettingsMessage::ChannelChanged("pre-release".to_string()),
             &loc,
         );
-        
+
         assert_eq!(state.temp_settings.channel, "pre-release");
         assert!(state.is_loading_versions);
         assert!(matches!(

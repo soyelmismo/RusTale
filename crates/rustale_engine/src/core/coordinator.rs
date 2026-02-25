@@ -414,6 +414,21 @@ async fn handle_ui_message(
                 let _ = svc.refresh_versions(&channel, &tx_clone).await;
             });
         }
+        ToCore::RequestInstalledVersions(channel) => {
+            if state.version_service.is_none() {
+                state.version_service =
+                    Some(crate::core::services::version_service::VersionService::new(
+                        system::get_app_dir(),
+                    ));
+            }
+
+            let tx_clone = tx.clone();
+            let base_dir = system::get_app_dir();
+            state.spawn_managed(TaskType::GenericIO, move |_| async move {
+                let svc = crate::core::services::version_service::VersionService::new(base_dir);
+                let _ = svc.scan_local_versions(&channel, &tx_clone).await;
+            });
+        }
         ToCore::RequestRepairVersion(version) => {
             let tx_clone = tx.clone();
             state.spawn_managed(TaskType::GenericIO, move |cancel_token| {
