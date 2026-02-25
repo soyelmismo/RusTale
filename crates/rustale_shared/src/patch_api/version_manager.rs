@@ -5,7 +5,7 @@ use crate::patch_api::mod_manager::PatchApiManager;
 use crate::patch_api::utils::get_arch_name;
 use crate::patch_api::types::{GameVersionInfo, get_local_version};
 
-/// Manager for game version operations
+/// Manager para operaciones de versión del juego
 #[derive(Clone)]
 pub struct VersionManager {}
 
@@ -14,7 +14,7 @@ impl VersionManager {
         Self {}
     }
 
-    /// Gets comprehensive version information for a channel
+    /// Obtiene información completa de versión para un canal
     pub async fn get_version_info(
         &self,
         base_dir: &PathBuf,
@@ -25,7 +25,7 @@ impl VersionManager {
             .await
             .unwrap_or(0);
 
-        // Get latest version from patch API
+        // Obtener última versión mediante el manager de la API (vía security)
         let latest = PatchApiManager::get_latest_version_static(
             channel,
             std::env::consts::OS,
@@ -33,11 +33,11 @@ impl VersionManager {
         )
         .await?;
 
-        // Generate default list
+        // Generar lista por defecto
         let mut available: Vec<i32> = (1..=latest).collect();
         available.reverse();
 
-        // Try to get real available versions
+        // Intentar obtener versiones disponibles reales (si el provider lo soporta)
         let available_versions_from_fallback = match PatchApiManager::get_available_versions_static(
             channel,
             std::env::consts::OS,
@@ -59,19 +59,12 @@ impl VersionManager {
         })
     }
 
-    /// Finds the latest available game version
-    pub async fn find_latest_version(&self, channel: &str, start_hint: Option<i32>) -> Result<i32> {
+    /// Encuentra la última versión disponible
+    pub async fn find_latest_version(&self, channel: &str, _start_hint: Option<i32>) -> Result<i32> {
         let os = std::env::consts::OS;
         let arch = get_arch_name();
 
-        if let Some(hint) = start_hint {
-            if hint > 0
-                && PatchApiManager::has_complete_version_static(channel, os, arch, hint).await
-            {
-                return Ok(hint);
-            }
-        }
-
+        // El hint ya no se usa para comprobaciones manuales; se delega todo al manager/security
         PatchApiManager::get_latest_version_static(channel, os, arch).await
     }
 }

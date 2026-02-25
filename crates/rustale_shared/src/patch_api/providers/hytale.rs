@@ -7,7 +7,6 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use zeroize::Zeroizing;
 
 #[cfg(feature = "security")]
 use rustale_security::init_shield;
@@ -83,31 +82,7 @@ impl HytaleProvider {
         false
     }
 
-    /// Build patch URL for the given parameters
-    fn build_patch_url(
-        &self,
-        architecture: &str,
-        operating_system: &str,
-        channel: &str,
-        from_version: i32,
-        to_version: i32,
-    ) -> Zeroizing<String> {
-        let arch = match architecture {
-            "x86_64" => "amd64",
-            "aarch64" => "arm64",
-            _ => architecture,
-        };
 
-        let os = match operating_system {
-            "darwin" => "mac",
-            _ => operating_system,
-        };
-
-        Zeroizing::new(format!(
-            "https://account-data.hytale.com/patches/{}/{}/{}/{}/{}.pwr",
-            os, arch, channel, from_version, to_version
-        ))
-    }
 }
 
 #[async_trait]
@@ -210,37 +185,7 @@ impl PatchProvider for HytaleProvider {
         Ok(versions)
     }
 
-    async fn get_patch_url(
-        &self,
-        channel: &str,
-        os: &str,
-        arch: &str,
-        from_version: i32,
-        to_version: i32,
-    ) -> Result<Zeroizing<String>> {
-        let url = self.build_patch_url(arch, os, channel, from_version, to_version);
-        
-        // Verify the URL exists before returning
-        if self.check_version_exists(from_version, to_version, arch, os, channel).await {
-            Ok(url)
-        } else {
-            anyhow::bail!(
-                "Patch {}->{} not found on official servers for {}/{}",
-                from_version, to_version, channel, os
-            )
-        }
-    }
 
-    async fn has_complete_version(
-        &self,
-        channel: &str,
-        os: &str,
-        arch: &str,
-        version: i32,
-    ) -> Result<bool> {
-        let exists = self.check_version_exists(0, version, arch, os, channel).await;
-        Ok(exists)
-    }
 
     /// HytaleProvider no soporta descarga segura directa.
     /// Usar get_patch_url() + download_file() en su lugar.

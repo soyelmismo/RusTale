@@ -1,4 +1,4 @@
-//! Provider1 - Backup mirror (Sanasol)
+//! Provider1 - Backup mirror (S)
 //! 
 //! Este provider usa un flujo de dos pasos:
 //! 1. GET /api/patches-config → obtiene URL real del CDN
@@ -21,7 +21,6 @@ use rustale_security::{RawSecureClient, SecureClient, init_shield, memory::Zeroi
 
 use crate::patch_api::traits::PatchProvider;
 #[cfg(feature = "security")]
-use crate::patch_api::utils::{get_pinned_cert_hash, get_private_var};
 
 /// Cache para la URL del CDN obtenida de /api/patches-config
 #[cfg(feature = "security")]
@@ -41,7 +40,7 @@ static PATCHES_CONFIG_CACHE: Lazy<Mutex<PatchesConfigCache>> = Lazy::new(|| {
 /// TTL del caché de patches-config (5 minutos)
 const PATCHES_CONFIG_TTL_SECS: u64 = 300;
 
-/// Provider1 - mirror Sanasol con descubrimiento dinámico de CDN
+/// Provider1
 #[cfg(feature = "security")]
 pub struct Provider1 {
     client: SecureClient,
@@ -55,9 +54,8 @@ impl Provider1 {
 
         Self {
             client: SecureClient::builder()
-                .with_pinning(get_pinned_cert_hash)
                 .build(),
-            raw_client: RawSecureClient::new(get_pinned_cert_hash),
+            raw_client: RawSecureClient::new(),
         }
     }
 
@@ -75,30 +73,18 @@ impl Provider1 {
             }
         }
 
-        // Obtener del endpoint - TODO en Zeroizing
-        let auth_domain = get_private_var("Z_S_A");
-        
-        // Construir URL sin format! - usar ZeroizeArena
-        let mut arena = ZeroizeArena::<512>::new();
-        write!(&mut arena, "{}/api/patches-config", &*auth_domain)?;
-        
-        let config_url = Zeroizing::new(String::from_utf8(arena.as_slice().to_vec())?);
-        
         println!("[Provider1] Fetching patches-config");
         
-        let response = self.client
-            .get(&config_url)
-            .header("User-Agent", "Hytale-F2P-Launcher")
-            .timeout(std::time::Duration::from_secs(10))
-            .send()
-            .await?;
-        
-        if !response.status().is_success() {
-            anyhow::bail!("patches-config returned: {}", response.status());
-        }
+        let header_keys = [
+            ("Z_S_B", "Z_S_C"),
+            ("Z_S_E", "Z_S_D"),
+            ("Z_S_G", "Z_S_F"),
+        ];
+
+        let text_response = self.client.fetch_json_with_keys("Z_S_A", "/api/patches-config", &header_keys).await?;
         
         // El texto de respuesta también es sensible
-        let text = Zeroizing::new(response.text().await?);
+        let text = Zeroizing::new(text_response);
         
         // Parsear JSON de forma simple
         let patches_url = self.extract_patches_url(&text)?;
@@ -136,95 +122,31 @@ impl Provider1 {
         anyhow::bail!("Failed to parse patches_url from JSON");
     }
 
-    async fn check_file_exists_secure_with_mode(&self, url_str: &str, is_patch: bool) -> bool {
-        let without_scheme = if url_str.starts_with("https://") {
-            &url_str[8..]
-        } else if url_str.starts_with("http://") {
-            &url_str[7..]
-        } else {
-            url_str
-        };
-
-        let slash_idx = without_scheme.find('/').unwrap_or(without_scheme.len());
-        let host_port = &without_scheme[..slash_idx];
-        let path_str = if slash_idx < without_scheme.len() {
-            &without_scheme[slash_idx..]
-        } else {
-            "/"
-        };
-
-        let (host_str, port) = if let Some(colon_idx) = host_port.find(':') {
-            let port_str = &host_port[colon_idx + 1..];
-            let p = port_str.parse::<u16>().unwrap_or(443);
-            (&host_port[..colon_idx], p)
-        } else {
-            (host_port, 443)
-        };
-
-        let mut host_arena = ZeroizeArena::<256>::new();
-        if host_arena.write_all(host_str.as_bytes()).is_err() {
-            return false;
-        }
-
+    async fn check_file_exists(&self, base_url: &str, path_str: &str, is_patch: bool) -> bool {
         let mut path_arena = ZeroizeArena::<512>::new();
         if path_arena.write_all(path_str.as_bytes()).is_err() {
             return false;
         }
 
-        // Headers mínimos para CDN público
-        let ua = Zeroizing::new("Hytale-F2P-Launcher".to_string());
-
         let raw_client = self.raw_client.clone();
+        let base_url_owned = base_url.to_string();
 
         tokio::task::spawn_blocking(move || {
-            let host_ref = std::str::from_utf8(host_arena.as_slice()).unwrap();
             let path_ref = path_arena.as_slice();
             
             let headers = [
-                ("User-Agent", ua.as_str()),
+                ("Z_S_B", "Z_S_C"),
             ];
 
             raw_client
-                .head(host_ref, port, path_ref, &headers, !is_patch)
+                .request_secure_head_dynamic(&base_url_owned, path_ref, &headers, !is_patch)
                 .unwrap_or(false)
         })
         .await
         .unwrap_or(false)
     }
 
-    fn build_patch_url(
-        &self,
-        base_url: &str,
-        architecture: &str,
-        operating_system: &str,
-        channel: &str,
-        from_version: i32,
-        to_version: i32,
-    ) -> Zeroizing<String> {
-        let arch = match architecture {
-            "x86_64" => "amd64",
-            "aarch64" => "arm64",
-            _ => architecture,
-        };
-
-        let os = match operating_system {
-            "darwin" => "mac",
-            _ => operating_system,
-        };
-
-        // Formato: {base_url}/{os}/{arch}/{channel}/{from}_to_{to}.pwr
-        let mut arena = ZeroizeArena::<512>::new();
-        write!(
-            &mut arena,
-            "{}/patches/{}/{}/{}/{}_to_{}.pwr",
-            base_url, os, arch, channel, from_version, to_version
-        ).unwrap();
-        
-        let bytes = arena.as_slice();
-        let mut exact_vec = Vec::with_capacity(bytes.len());
-        exact_vec.extend_from_slice(bytes);
-        Zeroizing::new(String::from_utf8(exact_vec).unwrap())
-    }
+    // Helper removido en favor de uso directo de arena en llamadas 
 
     async fn check_version_exists(
         &self,
@@ -235,8 +157,15 @@ impl Provider1 {
         operating_system: &str,
         channel: &str,
     ) -> bool {
-        let url = self.build_patch_url(base_url, architecture, operating_system, channel, start_version, end_version);
-        self.check_file_exists_secure_with_mode(&url, true).await
+        let mut path_arena = ZeroizeArena::<512>::new();
+        if crate::patch_api::utils::write_patch_path_to_arena(
+            &mut path_arena, operating_system, architecture, channel, start_version, end_version, true
+        ).is_err() {
+            return false;
+        }
+        
+        let path_str = std::str::from_utf8(path_arena.as_slice()).unwrap_or("");
+        self.check_file_exists(base_url, path_str, true).await
     }
 }
 
@@ -253,10 +182,6 @@ impl PatchProvider for Provider1 {
 
     fn is_cloudflare(&self) -> bool {
         true
-    }
-
-    fn base_url(&self) -> Option<zeroize::Zeroizing<String>> {
-        Some(get_private_var("Z_S_A").into_zeroizing())
     }
 
     async fn is_available(&self) -> bool {
@@ -354,54 +279,7 @@ impl PatchProvider for Provider1 {
         Ok(versions)
     }
 
-    async fn get_patch_url(
-        &self,
-        channel: &str,
-        os: &str,
-        arch: &str,
-        from_version: i32,
-        to_version: i32,
-    ) -> Result<Zeroizing<String>> {
-        let base_url = self.get_patches_base_url().await?;
-        let url = self.build_patch_url(&base_url, arch, os, channel, from_version, to_version);
-        
-        if self.check_file_exists_secure_with_mode(&url, true).await {
-            Ok(url)
-        } else {
-            anyhow::bail!("Patch check failed on Provider S")
-        }
-    }
 
-    async fn has_complete_version(
-        &self,
-        channel: &str,
-        os: &str,
-        arch: &str,
-        version: i32,
-    ) -> Result<bool> {
-        let base_url = self.get_patches_base_url().await?;
-        let exists = self
-            .check_version_exists(&base_url, 0, version, arch, os, channel)
-            .await;
-        Ok(exists)
-    }
-
-    async fn get_complete_url(
-        &self,
-        channel: &str,
-        os: &str,
-        arch: &str,
-        version: i32,
-    ) -> Result<Zeroizing<String>> {
-        let base_url = self.get_patches_base_url().await?;
-        let url = self.build_patch_url(&base_url, arch, os, channel, 0, version);
-        
-        if self.check_file_exists_secure_with_mode(&url, false).await {
-            Ok(url)
-        } else {
-            anyhow::bail!("Complete version check failed on mirror S")
-        }
-    }
 
     async fn download_patch_secure(
         &self,
@@ -414,55 +292,24 @@ impl PatchProvider for Provider1 {
         cancel_token: Arc<AtomicBool>,
         progress_callback: Box<dyn Fn(f64, u64, u64) + Send + Sync>,
     ) -> Result<()> {
-        // 1. Obtener URL base del CDN
         let patches_url = self.get_patches_base_url().await?;
         
-        // 2. Extraer host de la URL (en ZeroizeArena)
-        let host = if patches_url.starts_with("https://") {
-            &patches_url[8..]
-        } else if patches_url.starts_with("http://") {
-            &patches_url[7..]
-        } else {
-            &*patches_url
-        };
-
-        // 3. Construir path en ZeroizeArena
         let mut path_arena = ZeroizeArena::<512>::new();
-        
-        let arch_str = match arch {
-            "x86_64" => "amd64",
-            "aarch64" => "arm64",
-            _ => arch,
-        };
-        let os_str = match os {
-            "darwin" => "mac",
-            _ => os,
-        };
-
-        write!(
-            path_arena,
-            "/patches/{}/{}/{}/{}_to_{}.pwr",
-            os_str, arch_str, channel, from_version, to_version
+        crate::patch_api::utils::write_patch_path_to_arena(
+            &mut path_arena, os, arch, channel, from_version, to_version, true
         )?;
-
-        // 4. Preparar descarga con host en ZeroizeArena
-        let mut host_arena = ZeroizeArena::<256>::new();
-        host_arena.write_all(host.as_bytes()).unwrap();
-
-        let ua = Zeroizing::new("Hytale-F2P-Launcher".to_string());
 
         let raw_client = self.raw_client.clone();
         let dest_path_clone = dest_path.to_path_buf();
+        let patches_url_owned = patches_url.to_string();
         
         tokio::task::spawn_blocking(move || {
-            let host_ref = std::str::from_utf8(host_arena.as_slice()).unwrap();
             let headers = [
-                ("User-Agent", ua.as_str()),
+                ("Z_S_B", "Z_S_C"),
             ];
 
-            raw_client.get_to_file(
-                host_ref,
-                443,
+            raw_client.download_secure_file_dynamic(
+                &patches_url_owned,
                 path_arena.as_slice(),
                 &headers,
                 &dest_path_clone,

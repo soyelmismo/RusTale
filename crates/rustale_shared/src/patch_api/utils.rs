@@ -1,8 +1,6 @@
 /// Utility functions for patch API providers
 pub use crate::network::{format_bytes, format_speed};
 
-#[cfg(feature = "security")]
-pub use rustale_security::{get_pinned_cert_hash, get_private_var};
 
 /// Check if a filename looks like a JRE distribution file
 pub fn looks_like_jre_file(filename: &str) -> bool {
@@ -102,6 +100,42 @@ pub fn get_arch_name() -> &'static str {
         _ => std::env::consts::ARCH,
     }
 }
+/// Helper to write the standard patch path into a ZeroizeArena
+#[cfg(feature = "security")]
+pub fn write_patch_path_to_arena(
+    arena: &mut rustale_security::memory::ZeroizeArena<512>,
+    os: &str,
+    arch: &str,
+    channel: &str,
+    from_version: i32,
+    to_version: i32,
+    use_to_format: bool,
+) -> std::io::Result<()> {
+    use std::io::Write;
+    let arch_str = match arch {
+        "x86_64" => "amd64",
+        "aarch64" => "arm64",
+        _ => arch,
+    };
+    let os_str = match os {
+        "darwin" => "mac",
+        _ => os,
+    };
+
+    if use_to_format {
+        write!(
+            arena,
+            "/patches/{}/{}/{}/{}_to_{}.pwr",
+            os_str, arch_str, channel, from_version, to_version
+        )
+    } else {
+        write!(
+            arena,
+            "/patches/{}/{}/{}/{}/{}.pwr",
+            os_str, arch_str, channel, from_version, to_version
+        )
+    }
+}
 
 /// Get Butler download URL from itch.io CDN fallback
 /// This works as a universal fallback for all platforms
@@ -131,14 +165,6 @@ pub fn get_java_adoptium_url(os: &str, arch: &str) -> String {
         "https://api.adoptium.net/v3/binary/latest/25/ga/{}/{}/jre/hotspot/normal/adoptium",
         os_name, arch_name
     )
-}
-
-/// Check if a file exists by making a HEAD request
-pub async fn check_file_exists(url: &str) -> bool {
-    match crate::HTTP_CLIENT.head(url).send().await {
-        Ok(resp) => resp.status().is_success(),
-        Err(_) => false,
-    }
 }
 
 /// Generic version discovery using exponential and binary search

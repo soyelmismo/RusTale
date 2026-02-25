@@ -16,7 +16,6 @@ use rustale_security::SafeString;
 #[cfg(feature = "security")]
 pub static SECURE_HTTP_CLIENT: Lazy<rustale_security::SecureClient> = Lazy::new(|| {
     rustale_security::SecureClient::builder()
-        .with_pinning(rustale_security::get_pinned_cert_hash)
         .build()
 });
 

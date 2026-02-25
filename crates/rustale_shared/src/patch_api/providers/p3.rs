@@ -1,20 +1,13 @@
-//! Provider3 - Public fallback mirror
+#[cfg(feature = "security")]
+use rustale_security::RawSecureClient;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use std::io::Write;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use zeroize::Zeroizing;
-
-#[cfg(feature = "security")]
-use rustale_security::{RawSecureClient, memory::ZeroizeArena};
 
 use crate::patch_api::traits::PatchProvider;
-#[cfg(feature = "security")]
-use crate::patch_api::utils::{get_pinned_cert_hash, get_private_var};
 
-/// Provider3 - mirror
 #[cfg(feature = "security")]
 pub struct Provider3 {
     raw_client: RawSecureClient,
@@ -23,405 +16,125 @@ pub struct Provider3 {
 #[cfg(feature = "security")]
 impl Provider3 {
     pub fn new() -> Self {
-        Self {
-            raw_client: RawSecureClient::new(get_pinned_cert_hash),
-        }
+        Self { raw_client: RawSecureClient::new() }
     }
 
-    async fn check_file_exists_secure_with_mode(&self, url_str: &str, is_patch: bool) -> bool {
-        use rustale_security::memory::ZeroizeArena;
-
-        let without_scheme = if url_str.starts_with("https://") {
-            &url_str[8..]
-        } else if url_str.starts_with("http://") {
-            &url_str[7..]
-        } else {
-            url_str
-        };
-
-        let slash_idx = without_scheme.find('/').unwrap_or(without_scheme.len());
-        let host_port = &without_scheme[..slash_idx];
-        let path_str = if slash_idx < without_scheme.len() {
-            &without_scheme[slash_idx..]
-        } else {
-            "/"
-        };
-
-        let (host_str, port) = if let Some(colon_idx) = host_port.find(':') {
-            let port_str = &host_port[colon_idx + 1..];
-            let p = port_str.parse::<u16>().unwrap_or(443);
-            (&host_port[..colon_idx], p)
-        } else {
-            (host_port, 443)
-        };
-
-        // BUGFIX: Utilizamos ZeroizeArena estáticos en lugar de Strings en el Heap.
-        // Esto mantiene los datos sensibles atrapados en el Stack.
-        let mut host_arena = ZeroizeArena::<256>::new();
-        host_arena.write_all(host_str.as_bytes()).unwrap();
-
-        let mut path_arena = ZeroizeArena::<512>::new();
-        path_arena.write_all(path_str.as_bytes()).unwrap();
-
-        // Z_V_* variables for Provider3
-        let v_header = get_private_var("Z_V_B");
-        let v_val = get_private_var("Z_V_C");
-
+    #[inline]
+    async fn exec(
+        &self,
+        os: &str,
+        arch: &str,
+        channel: &str,
+        from: i32,
+        to: i32,
+        accept_exception: bool,
+        download: Option<(std::path::PathBuf, Arc<AtomicBool>, Box<dyn Fn(f64, u64, u64) + Send + Sync>)>,
+    ) -> bool {
         let raw_client = self.raw_client.clone();
+        let os      = os.to_string();
+        let arch    = arch.to_string();
+        let channel = channel.to_string();
 
-        // Al mover los Arenas al thread de Tokio, este se adueña de ellos
-        // y los zeroiza correctamente al finalizar el closure de manera automática.
         tokio::task::spawn_blocking(move || {
-            let host_ref = std::str::from_utf8(host_arena.as_slice()).unwrap();
-            let path_ref = path_arena.as_slice();
-            
-            // Public mirror - use basic headers if no auth configured
-            let headers: Vec<(&str, &str)> = if !v_header.is_empty() && !v_val.is_empty() {
-                vec![
-                    (&*v_header, &*v_val),
-                    ("User-Agent", "Hytale-F2P-Launcher-Rust"),
-                    ("Accept", "*/*"),
-                ]
+            const HDRS: &[(&str, &str)] = &[
+                ("Z_V_C", "Z_V_D"),
+            ];
+            if let Some((dest, token, cb)) = download {
+                raw_client.download_secure_file(
+                    "Z_V_A", "Z_V_T", &os, &arch, &channel, from, to,
+                    HDRS, dest.as_path(), token, cb,
+                ).is_ok()
             } else {
-                vec![
-                    ("User-Agent", "Hytale-F2P-Launcher-Rust"),
-                    ("Accept", "*/*"),
-                ]
-            };
-
-            raw_client
-                .head(host_ref, port, path_ref, &headers, !is_patch)
-                .unwrap_or(false)
+                raw_client.request_head(
+                    "Z_V_A", "Z_V_T", &os, &arch, &channel, from, to,
+                    HDRS, accept_exception,
+                ).unwrap_or(false)
+            }
         })
         .await
         .unwrap_or(false)
     }
 
-    fn guess_patch_url_no_auth(
-        &self,
-        architecture: &str,
-        operating_system: &str,
-        channel: &str,
-        from_version: i32,
-        to_version: i32,
-    ) -> Zeroizing<String> {
-        let arch = match architecture {
-            "x86_64" => "amd64",
-            "aarch64" => "arm64",
-            _ => architecture,
-        };
-
-        let os = match operating_system {
-            "darwin" => "mac",
-            _ => operating_system,
-        };
-
-        let base = get_private_var("Z_V_A");
-        
-        // ¡REEMPLAZO CLAVE DE FORMAT!: Usamos ZeroizeArena que NO CREA FRAGMENTOS en Heap
-        let mut arena = rustale_security::memory::ZeroizeArena::<512>::new();
-        write!(
-            &mut arena,
-            "{}/patches/{}/{}/{}/{}_to_{}.pwr",
-            &*base, os, arch, channel, from_version, to_version
-        ).unwrap();
-        
-        // Conversión exacta sin sobre-asignación de capacidad
-        let bytes = arena.as_slice();
-        let mut exact_vec = Vec::with_capacity(bytes.len());
-        exact_vec.extend_from_slice(bytes);
-        Zeroizing::new(String::from_utf8(exact_vec).unwrap())
+    async fn version_exists(&self, from: i32, to: i32, arch: &str, os: &str, ch: &str) -> bool {
+        self.exec(os, arch, ch, from, to, false, None).await
     }
 
-    async fn check_version_exists(
-        &self,
-        start_version: i32,
-        end_version: i32,
-        architecture: &str,
-        operating_system: &str,
-        channel: &str,
-    ) -> bool {
-        let arch = match architecture {
-            "x86_64" => "amd64",
-            "aarch64" => "arm64",
-            _ => architecture,
-        };
-
-        let os = match operating_system {
-            "darwin" => "mac",
-            _ => operating_system,
-        };
-
-        let base = get_private_var("Z_V_A");
-        
-        // BUGFIX: Construimos la URL en el stack en lugar de en el Heap.
-        let mut arena = ZeroizeArena::<512>::new();
-        write!(
-            &mut arena,
-            "{}/patches/{}/{}/{}/{}_to_{}.pwr",
-            &*base, os, arch, channel, start_version, end_version
-        ).unwrap();
-        
-        let url_str = std::str::from_utf8(arena.as_slice()).unwrap();
-        self.check_file_exists_secure_with_mode(url_str, true).await
+    async fn latest_version(&self, channel: &str, os: &str, arch: &str) -> Result<i32> {
+        let (mut last, mut next, mut step) = (0, 1, 2);
+        while next <= 100 {
+            if self.version_exists(0, next, arch, os, channel).await {
+                last = next; next += step; step += 1;
+            } else { break; }
+        }
+        if last == 0 { anyhow::bail!("unreachable"); }
+        let (mut lo, mut hi, mut res) = (last, next - 1, last);
+        while lo <= hi {
+            let mid = (lo + hi) / 2;
+            if mid <= res { lo = mid + 1; continue; }
+            if self.version_exists(0, mid, arch, os, channel).await { res = mid; lo = mid + 1; }
+            else { hi = mid - 1; }
+        }
+        Ok(res)
     }
 }
 
 #[cfg(feature = "security")]
 #[async_trait]
 impl PatchProvider for Provider3 {
-    fn name(&self) -> &str {
-        "V"
-    }
-
-    fn priority(&self) -> i32 {
-        50
-    }
-
-    fn is_cloudflare(&self) -> bool {
-        false
-    }
-
-    fn base_url(&self) -> Option<zeroize::Zeroizing<String>> {
-        Some(get_private_var("Z_V_A").into_zeroizing())
-    }
+    fn name(&self) -> &str { "V" }
+    fn priority(&self) -> i32 { 50 }
+    fn is_cloudflare(&self) -> bool { false }
 
     async fn is_available(&self) -> bool {
-        let base = get_private_var("Z_V_A");
-        
-        // EVITAR format! - Usamos el Arena seguro del Stack
-        let mut arena = rustale_security::memory::ZeroizeArena::<512>::new();
-        write!(&mut arena, "{}/manifest.json", &*base).unwrap();
-        
-        let test_url = Zeroizing::new(String::from_utf8(arena.as_slice().to_vec()).unwrap());
-        self.check_file_exists_secure_with_mode(&test_url, false).await
+        self.exec("linux", "amd64", "release", 0, 1, true, None).await
     }
 
     async fn get_latest_version(&self, channel: &str, os: &str, arch: &str) -> Result<i32> {
-        let mut last_found = 0;
-        let mut next_check = 1;
-        let mut step = 2;
-
-        while next_check <= 100 {
-            let exists = self
-                .check_version_exists(0, next_check, arch, os, channel)
-                .await;
-
-            if exists {
-                last_found = next_check;
-                next_check += step;
-                step += 1;
-            } else {
-                break;
-            }
-        }
-
-        if last_found == 0 {
-            anyhow::bail!("Provider3 unreachable");
-        }
-
-        let mut low = last_found;
-        let mut high = next_check - 1;
-        let mut result = last_found;
-
-        while low <= high {
-            let mid = (low + high) / 2;
-            if mid <= result {
-                low = mid + 1;
-                continue;
-            }
-
-            let exists = self.check_version_exists(0, mid, arch, os, channel).await;
-
-            if exists {
-                result = mid;
-                low = mid + 1;
-            } else {
-                high = mid - 1;
-            }
-        }
-
-        Ok(result)
+        self.latest_version(channel, os, arch).await
     }
 
-    async fn get_available_versions(
-        &self,
-        channel: &str,
-        os: &str,
-        arch: &str,
-    ) -> Result<Vec<i32>> {
-        let latest = self.get_latest_version(channel, os, arch).await?;
-
-        let mut versions = Vec::new();
+    async fn get_available_versions(&self, channel: &str, os: &str, arch: &str) -> Result<Vec<i32>> {
+        let latest = self.latest_version(channel, os, arch).await?;
         let mut milestones = vec![1, 3, 6, 10];
-
         if latest > 10 {
             let step = (latest / 10).max(5);
-            let mut current = 10 + step;
-            while current < latest {
-                milestones.push(current);
-                current += step;
-            }
+            let mut cur = 10 + step;
+            while cur < latest { milestones.push(cur); cur += step; }
         }
-
+        let mut versions = Vec::new();
         for &v in &milestones {
-            if v <= latest && self.check_version_exists(v - 1, v, arch, os, channel).await {
+            if v <= latest && self.version_exists(v - 1, v, arch, os, channel).await {
                 versions.push(v);
             }
         }
-
-        if latest > 0
-            && self
-                .check_version_exists(latest - 1, latest, arch, os, channel)
-                .await
-        {
+        if latest > 0 && self.version_exists(latest - 1, latest, arch, os, channel).await {
             versions.push(latest);
         }
-
-        versions.sort();
-        versions.dedup();
-
+        versions.sort(); versions.dedup();
         Ok(versions)
     }
 
-    async fn get_patch_url(
-        &self,
-        channel: &str,
-        os: &str,
-        arch: &str,
-        from_version: i32,
-        to_version: i32,
-    ) -> Result<Zeroizing<String>> {
-        let url = self.guess_patch_url_no_auth(arch, os, channel, from_version, to_version);
-        if self.check_file_exists_secure_with_mode(&url, true).await {
-            Ok(url)
-        } else {
-            anyhow::bail!("Patch check failed on Provider3")
-        }
-    }
 
-    async fn has_complete_version(
-        &self,
-        channel: &str,
-        os: &str,
-        arch: &str,
-        version: i32,
-    ) -> Result<bool> {
-        let exists = self
-            .check_version_exists(0, version, arch, os, channel)
-            .await;
-        Ok(exists)
-    }
 
-    async fn get_complete_url(
-        &self,
-        channel: &str,
-        os: &str,
-        arch: &str,
-        version: i32,
-    ) -> Result<Zeroizing<String>> {
-        let url = self.guess_patch_url_no_auth(arch, os, channel, 0, version);
-        if self.check_file_exists_secure_with_mode(&url, false).await {
-            Ok(url)
-        } else {
-            anyhow::bail!("Complete version check failed on mirror V")
-        }
-    }
-
-    /// Descarga un patch directamente a disco sin crear Strings en el Heap.
-    /// Implementación Zero-Trace para mirror público (Z_V_*)
     async fn download_patch_secure(
-        &self,
-        channel: &str,
-        os: &str,
-        arch: &str,
-        from_version: i32,
-        to_version: i32,
+        &self, channel: &str, os: &str, arch: &str,
+        from: i32, to: i32,
         dest_path: &std::path::Path,
         cancel_token: Arc<AtomicBool>,
         progress_callback: Box<dyn Fn(f64, u64, u64) + Send + Sync>,
     ) -> Result<()> {
-        // 1. Obtener el dominio base de forma segura (Z_V_A para Provider3)
-        let base_domain = get_private_var("Z_V_A");
-        
-        let host = if base_domain.starts_with("https://") {
-            &base_domain[8..]
-        } else if base_domain.starts_with("http://") {
-            &base_domain[7..]
+        if self.exec(os, arch, channel, from, to, false, Some((dest_path.to_path_buf(), cancel_token, progress_callback))).await {
+            Ok(())
         } else {
-            &*base_domain
-        };
-
-        // 2. Armar el Path SIN asignar memoria en el Heap
-        let mut path_arena = ZeroizeArena::<512>::new();
-        
-        let arch_str = match arch {
-            "x86_64" => "amd64",
-            "aarch64" => "arm64",
-            _ => arch,
-        };
-        let os_str = match os {
-            "darwin" => "mac",
-            _ => os,
-        };
-
-        write!(
-            path_arena,
-            "/patches/{}/{}/{}/{}_to_{}.pwr",
-            os_str, arch_str, channel, from_version, to_version
-        )?;
-
-        // 3. Extraer cabeceras (Provider3 es público, sin auth)
-        let v_header = get_private_var("Z_V_B");
-        let v_val = get_private_var("Z_V_C");
-
-        // BUGFIX: Usamos ZeroizeArena para el host en lugar de Zeroizing<String>
-        let mut host_arena = ZeroizeArena::<256>::new();
-        host_arena.write_all(host.as_bytes()).unwrap();
-
-        // 4. Ejecutar la descarga bloqueante
-        let raw_client = self.raw_client.clone();
-        let dest_path_clone = dest_path.to_path_buf();
-        
-        tokio::task::spawn_blocking(move || {
-            let host_ref = std::str::from_utf8(host_arena.as_slice()).unwrap();
-            // Public mirror - usar headers básicos
-            let headers: Vec<(&str, &str)> = if !v_header.is_empty() && !v_val.is_empty() {
-                vec![
-                    (v_header.as_str(), v_val.as_str()),
-                    ("User-Agent", "Hytale-F2P-Launcher-Rust"),
-                ]
-            } else {
-                vec![
-                    ("User-Agent", "Hytale-F2P-Launcher-Rust"),
-                ]
-            };
-
-            raw_client.get_to_file(
-                host_ref,
-                443,
-                path_arena.as_slice(),
-                &headers,
-                &dest_path_clone,
-                cancel_token,
-                progress_callback
-            )
-        }).await??;
-
-        Ok(())
-    }
-}
-
-impl Clone for Provider3 {
-    fn clone(&self) -> Self {
-        Self {
-            raw_client: self.raw_client.clone(),
+            anyhow::bail!("download failed")
         }
     }
 }
 
+impl Clone for Provider3 {
+    fn clone(&self) -> Self { Self { raw_client: self.raw_client.clone() } }
+}
+
 impl Default for Provider3 {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }

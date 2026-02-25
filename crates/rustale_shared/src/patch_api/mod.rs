@@ -39,8 +39,6 @@ pub use mod_manager::{
     normalize_architecture,
     normalize_os,
     extract_version_number,
-    build_manifest_path,
-    build_patch_path,
 };
 
 // Re-export install module

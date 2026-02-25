@@ -4,14 +4,12 @@ use std::sync::{Arc, atomic::AtomicBool};
 
 use crate::ProgressCallback;
 use crate::patch_api::integrity_checker::IntegrityChecker;
-use crate::patch_api::mod_manager::PatchApiManager;
 use crate::patch_api::utils::*;
 
-// Use the provider registry instead of importing individual providers
 #[cfg(feature = "security")]
 use crate::patch_api::providers::get_all_providers;
 
-/// Downloader for game patches
+/// Gestor de descargas de parches del juego
 #[derive(Clone)]
 pub struct PatchDownloader {}
 
@@ -20,149 +18,7 @@ impl PatchDownloader {
         Self {}
     }
 
-    /// Try different patch strategies in order: direct -> sequential -> complete
-    async fn try_patch_strategies(
-        &self,
-        channel: &str,
-        from_version: i32,
-        to_version: i32,
-    ) -> Result<(zeroize::Zeroizing<String>, i32, String)> {
-        // Strategy 1: Direct patch (from -> to)
-        println!(
-            "[Downloader] Strategy 1: Trying direct patch {}->{}",
-            from_version, to_version
-        );
-        match PatchApiManager::get_patch_url_static(
-            channel,
-            std::env::consts::OS,
-            get_arch_name(),
-            from_version,
-            to_version,
-        )
-        .await
-        {
-            Ok(url) => {
-                println!(
-                    "[Downloader] ✓ Direct patch {}->{} available",
-                    from_version, to_version
-                );
-                return Ok((url, from_version, "direct".to_string()));
-            }
-            Err(_) => {
-                println!(
-                    "[Downloader] ✗ Direct patch {}->{} failed",
-                    from_version, to_version
-                );
-            }
-        }
-
-        // Strategy 2: Sequential patches (find the shortest path)
-        if from_version > 0 && from_version < to_version {
-            println!(
-                "[Downloader] Strategy 2: Finding sequential path from {} to {}",
-                from_version, to_version
-            );
-
-            // Try to find the shortest sequential path
-            let mut path = Vec::new();
-            let mut current = from_version;
-
-            while current < to_version {
-                let next = current + 1;
-
-                // Check if patch current -> next exists
-                if PatchApiManager::get_patch_url_static(
-                    channel,
-                    std::env::consts::OS,
-                    get_arch_name(),
-                    current,
-                    next,
-                )
-                .await
-                .is_ok()
-                {
-                    path.push((current, next));
-                    current = next;
-                } else {
-                    // Try jumping further
-                    let mut found = false;
-                    for jump in 2..=5 {
-                        // Try jumps of 2, 3, 4, 5
-                        let jump_target = current + jump;
-                        if jump_target <= to_version
-                            && PatchApiManager::get_patch_url_static(
-                                channel,
-                                std::env::consts::OS,
-                                get_arch_name(),
-                                current,
-                                jump_target,
-                            )
-                            .await
-                            .is_ok()
-                        {
-                            path.push((current, jump_target));
-                            current = jump_target;
-                            found = true;
-                            break;
-                        }
-                    }
-
-                    if !found {
-                        println!("[Downloader] ✗ No sequential path found from {}", current);
-                        break;
-                    }
-                }
-            }
-
-            if current == to_version && !path.is_empty() {
-                println!("[Downloader] ✓ Sequential path found: {:?}", path);
-
-                // Return the first patch in the sequence
-                let (first_from, first_to) = path[0];
-                let url = PatchApiManager::get_patch_url_static(
-                    channel,
-                    std::env::consts::OS,
-                    get_arch_name(),
-                    first_from,
-                    first_to,
-                )
-                .await?;
-                return Ok((url, first_from, "sequential".to_string()));
-            } else {
-                println!("[Downloader] ✗ Sequential path not available");
-            }
-        }
-
-        // Strategy 3: Complete patch from 0 -> to
-        println!(
-            "[Downloader] Strategy 3: Trying complete patch 0->{}",
-            to_version
-        );
-        match PatchApiManager::get_patch_url_static(
-            channel,
-            std::env::consts::OS,
-            get_arch_name(),
-            0,
-            to_version,
-        )
-        .await
-        {
-            Ok(url) => {
-                println!("[Downloader] ✓ Complete patch 0->{} available", to_version);
-                return Ok((url, 0, "complete".to_string()));
-            }
-            Err(_) => {
-                anyhow::bail!(
-                    "All strategies failed. Direct: {}->{} failed. Sequential failed. Complete 0->{} failed",
-                    from_version,
-                    to_version,
-                    to_version
-                );
-            }
-        }
-    }
-
-    /// Downloads a patch for the specified version range with multi-level fallback
+    /// Descarga un parche para el rango de versiones especificado con fallback automático
     pub async fn download_patch(
         &self,
         channel: &str,
@@ -174,205 +30,96 @@ impl PatchDownloader {
         let cache_dir = crate::config::get_cache_dir("patches").await;
         tokio::fs::create_dir_all(&cache_dir).await?;
 
-        // Multi-level fallback strategy
-        let (_patch_url, actual_from_version, strategy) = self
-            .try_patch_strategies(channel, from_version, to_version)
-            .await?;
-
-        let filename = format!(
-            "{}~{}-{}-{}.pwr",
-            actual_from_version,
-            to_version,
-            std::env::consts::OS,
-            get_arch_name()
-        );
-        let patch_path = cache_dir.join(&filename);
-
-        let should_download = if !patch_path.exists() {
-            true
+        // Intentar primero el parche directo (from -> to)
+        // Si no existe o falla, intentar el parche completo (0 -> to)
+        let attempts = if from_version > 0 {
+            vec![(from_version, "direct"), (0, "complete")]
         } else {
-            let meta = std::fs::metadata(&patch_path)?;
-            if meta.len() == 0 {
-                let _ = tokio::fs::remove_file(&patch_path).await;
-                true
-            } else {
-                false
-            }
+            vec![(0, "direct/complete")]
         };
 
-        if should_download {
+        let mut last_error = None;
+
+        for (actual_from, strategy) in attempts {
+            let filename = format!(
+                "{}~{}-{}-{}.pwr",
+                actual_from,
+                to_version,
+                std::env::consts::OS,
+                get_arch_name()
+            );
+            let patch_path = cache_dir.join(&filename);
+
+            if patch_path.exists() {
+                if let Ok(meta) = std::fs::metadata(&patch_path) {
+                    if meta.len() > 0 {
+                        // Ya existe y no está vacío, verificar integridad
+                        if self.verify_integrity(&patch_path, progress_callback.clone(), cancel_token.clone()).await.is_ok() {
+                            return Ok(patch_path);
+                        }
+                    }
+                }
+                let _ = tokio::fs::remove_file(&patch_path).await;
+            }
+
             progress_callback(
                 "patch".to_string(),
                 0.0,
-                format!(
-                    "Downloading patch {}→{} ({})...",
-                    actual_from_version, to_version, strategy
-                ),
-                0,
-                0,
-                None,
-                Some(0),
+                format!("Downloading {} ({}→{})...", strategy, actual_from, to_version),
+                0, 0, None, Some(0),
             );
 
             #[cfg(feature = "security")]
             {
-                // SECURITY: Intentar descarga segura con cada provider en orden de prioridad
-                // Usar el registro de providers (plug-and-play)
                 let providers = get_all_providers();
-
-                let cancel_token_clone = cancel_token.clone().unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
+                let cancel_token_ref = cancel_token.clone().unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
                 let mut download_success = false;
-                let mut last_error: Option<anyhow::Error> = None;
 
                 for provider in providers {
-                    // Verificar disponibilidad antes de intentar
-                    if !provider.is_available().await {
-                        println!("[Downloader] Provider {} not available, skipping", provider.name());
-                        continue;
-                    }
+                    if !provider.is_available().await { continue; }
 
                     let progress_cb = Box::new({
-                        let from_v = actual_from_version;
-                        let to_v = to_version;
-                        let progress_callback_clone = progress_callback.clone();
+                        let p_cb = progress_callback.clone();
+                        let strat = strategy.to_string();
                         move |pct: f64, total: u64, downloaded: u64| {
-                            let speed_str = if downloaded > 0 {
-                                format!("{:.1} MB/s", downloaded as f64 / 1_048_576.0)
-                            } else {
-                                "Connecting...".to_string()
-                            };
-                            progress_callback_clone(
-                                "patch".to_string(),
-                                pct,
-                                format!("{} - {}→{}", speed_str, from_v, to_v),
-                                total,
-                                downloaded,
-                                None,
-                                Some(0),
-                            );
+                            p_cb("patch".to_string(), pct, format!("{}: {:.1} MB", strat, downloaded as f64 / 1_048_576.0), total, downloaded, None, Some(0));
                         }
                     });
 
-                    match provider
-                        .download_patch_secure(
-                            channel,
-                            std::env::consts::OS,
-                            get_arch_name(),
-                            actual_from_version,
-                            to_version,
-                            &patch_path,
-                            cancel_token_clone.clone(),
-                            progress_cb,
-                        )
-                        .await
-                    {
-                        Ok(()) => {
-                            println!("[Downloader] ✓ Download successful from provider {}", provider.name());
-                            download_success = true;
-                            break;
-                        }
-                        Err(e) => {
-                            println!("[Downloader] ✗ Provider {} failed: {}", provider.name(), e);
-                            last_error = Some(e);
-                            // Continuar con el siguiente provider
-                        }
+                    if provider.download_patch_secure(channel, std::env::consts::OS, get_arch_name(), actual_from, to_version, &patch_path, cancel_token_ref.clone(), progress_cb).await.is_ok() {
+                        download_success = true;
+                        break;
                     }
                 }
 
-                if !download_success {
-                    // Si todos fallaron, reportar el último error
-                    if let Some(e) = last_error {
-                        return Err(e);
-                    } else {
-                        anyhow::bail!("No providers available for download");
+                if download_success {
+                    if self.verify_integrity(&patch_path, progress_callback.clone(), cancel_token.clone()).await.is_ok() {
+                        return Ok(patch_path);
                     }
                 }
             }
-
-            #[cfg(not(feature = "security"))]
-            {
-                let progress_callback_clone = progress_callback.clone();
-                let from_v = actual_from_version;
-                let to_v = to_version;
-                crate::download_file(
-                    &patch_url,
-                    &patch_path,
-                    move |_phase, pct, speed, total, downloaded, eta, _step| {
-                        progress_callback_clone(
-                            "patch".to_string(),
-                            pct,
-                            format!("{} - {}→{}", speed, from_v, to_v),
-                            total,
-                            downloaded,
-                            eta,
-                            Some(0),
-                        );
-                    },
-                    cancel_token.clone(),
-                )
-                .await?;
-            }
-
-            progress_callback(
-                "patch".to_string(),
-                100.0,
-                format!(
-                    "Patch {}→{} downloaded ({})",
-                    actual_from_version, to_version, strategy
-                ),
-                0,
-                0,
-                None,
-                Some(0),
-            );
+            
+            last_error = Some(anyhow::anyhow!("Failed to download patch using strategy {}", strategy));
         }
 
-        let checker = IntegrityChecker::new();
-
-        let progress_callback_clone = progress_callback.clone();
-        let cancel_token_clone = cancel_token.clone();
-
-        let integrity_callback = move |p: f64, m: &str| {
-            let status = if m == "verifying_checksum" {
-                "Verifying integrity..."
-            } else {
-                m
-            };
-
-            progress_callback_clone(
-                "verify".to_string(),
-                p * 100.0,
-                status.to_string(),
-                0,
-                0,
-                None,
-                Some(1),
-            );
-        };
-
-        match checker
-            .verify_download_integrity(
-                &patch_path,
-                None,
-                None,
-                Some(integrity_callback),
-                cancel_token_clone,
-            )
-            .await?
-        {
-            integrity_res if integrity_res.is_valid() => {
-                println!("[Downloader] Patch integrity verified successfully");
-            }
-            integrity_res => {
-                let _ = tokio::fs::remove_file(&patch_path).await;
-                anyhow::bail!("Integrity check failed: {:?}", integrity_res.errors);
-            }
-        }
-
-        Ok(patch_path)
+        Err(last_error.unwrap_or_else(|| anyhow::anyhow!("All download attempts failed")))
     }
 
-    /// Downloads complete version
+    async fn verify_integrity(&self, path: &PathBuf, progress_callback: ProgressCallback, cancel_token: Option<Arc<AtomicBool>>) -> Result<()> {
+        let checker = IntegrityChecker::new();
+        let cb = move |p: f64, _m: &str| {
+            progress_callback("verify".to_string(), p * 100.0, "Verifying...".to_string(), 0, 0, None, Some(1));
+        };
+
+        if checker.verify_download_integrity(path, None, None, Some(cb), cancel_token).await?.is_valid() {
+            Ok(())
+        } else {
+            let _ = tokio::fs::remove_file(path).await;
+            anyhow::bail!("Integrity check failed")
+        }
+    }
+
+    /// Descarga una versión completa (alias de download_patch con from=0)
     pub async fn download_complete_version(
         &self,
         channel: &str,
@@ -380,41 +127,27 @@ impl PatchDownloader {
         progress_callback: ProgressCallback,
         cancel_token: Option<Arc<AtomicBool>>,
     ) -> Result<PathBuf> {
-        self.download_patch(channel, 0, target_version, progress_callback, cancel_token)
-            .await
+        self.download_patch(channel, 0, target_version, progress_callback, cancel_token).await
     }
 
-    /// Checks if patch is cached
+    /// Comprueba si el parche ya está en caché
     pub async fn is_patch_cached(&self, from_version: i32, to_version: i32) -> Result<bool> {
         let cache_dir = crate::config::get_cache_dir("patches").await;
+        let os = std::env::consts::OS;
+        let arch = get_arch_name();
 
-        // First check the requested patch (from->to)
-        let filename = format!(
-            "{}~{}-{}-{}.pwr",
-            from_version,
-            to_version,
-            std::env::consts::OS,
-            get_arch_name()
-        );
-        let patch_path = cache_dir.join(&filename);
-        if patch_path.exists() {
-            return Ok(true);
-        }
+        let paths = [
+            cache_dir.join(format!("{}~{}-{}-{}.pwr", from_version, to_version, os, arch)),
+            cache_dir.join(format!("0~{}-{}-{}.pwr", to_version, os, arch)),
+        ];
 
-        // If from > 0, also check fallback patch (0->to)
-        if from_version > 0 {
-            let fallback_filename = format!(
-                "0~{}-{}-{}.pwr",
-                to_version,
-                std::env::consts::OS,
-                get_arch_name()
-            );
-            let fallback_patch_path = cache_dir.join(&fallback_filename);
-            if fallback_patch_path.exists() {
-                return Ok(true);
+        for p in paths {
+            if p.exists() {
+                if let Ok(meta) = std::fs::metadata(&p) {
+                    if meta.len() > 0 { return Ok(true); }
+                }
             }
         }
-
         Ok(false)
     }
 }
