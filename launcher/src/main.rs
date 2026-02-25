@@ -1,8 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use mimalloc::MiMalloc;
+use rustale_security::memory::ZeroizeAllocator;
+
 #[global_allocator]
-static GLOBAL: MiMalloc = MiMalloc;
+static GLOBAL: ZeroizeAllocator<MiMalloc> = ZeroizeAllocator(MiMalloc);
 
 use rustale_engine::frontend::FrontendConfig;
 #[cfg(feature = "gui")]

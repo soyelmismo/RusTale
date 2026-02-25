@@ -53,7 +53,7 @@ pub fn get_app_dir() -> PathBuf {
     // If we are in the user's folder (appdata), we use that.
     // BUT, if we want default portable behavior for the server,
     // we could check if "server_config.toml" exists locally.
-    
+
     if let Ok(mut exe_path) = std::env::current_exe() {
         exe_path.pop();
         // If we detect a local server config, we stay here
@@ -177,7 +177,7 @@ pub struct GameSettings {
     pub java_args: String,
     #[serde(rename = "gameDir", default)]
     pub game_dir: String,
-    #[serde(default)]
+    #[serde(default = "default_channel")]
     pub channel: String,
     #[serde(rename = "gameVersion", default)]
     pub game_version: u32,
@@ -228,6 +228,10 @@ impl std::hash::Hash for GameSettings {
     }
 }
 
+fn default_channel() -> String {
+    "release".to_string()
+}
+
 fn default_lang() -> String {
     "en-US".to_string()
 }
@@ -266,4 +270,3 @@ impl Default for GameSettings {
         }
     }
 }
-

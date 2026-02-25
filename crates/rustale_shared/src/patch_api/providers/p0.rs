@@ -16,7 +16,9 @@ pub struct Provider0 {
 #[cfg(feature = "security")]
 impl Provider0 {
     pub fn new() -> Self {
-        Self { raw_client: RawSecureClient::new() }
+        Self {
+            raw_client: RawSecureClient::new(),
+        }
     }
 
     /// Único punto de contacto con la capa de red.
@@ -31,11 +33,15 @@ impl Provider0 {
         from: i32,
         to: i32,
         accept_exception: bool,
-        download: Option<(std::path::PathBuf, Arc<AtomicBool>, Box<dyn Fn(f64, u64, u64) + Send + Sync>)>,
+        download: Option<(
+            std::path::PathBuf,
+            Arc<AtomicBool>,
+            Box<dyn Fn(f64, u64, u64) + Send + Sync>,
+        )>,
     ) -> bool {
         let raw_client = self.raw_client.clone();
-        let os      = os.to_string();
-        let arch    = arch.to_string();
+        let os = os.to_string();
+        let arch = arch.to_string();
         let channel = channel.to_string();
 
         tokio::task::spawn_blocking(move || {
@@ -45,15 +51,27 @@ impl Provider0 {
                 ("Z_E_G", "Z_E_F"),
             ];
             if let Some((dest, token, cb)) = download {
-                raw_client.download_secure_file(
+                match raw_client.download_secure_file(
                     "Z_E_A", "Z_E_T", &os, &arch, &channel, from, to,
                     HDRS, dest.as_path(), token, cb,
-                ).is_ok()
+                ) {
+                    Ok(_) => true,
+                    Err(e) => {
+                        eprintln!("[Provider0] download_secure_file failed: {:#}", e);
+                        false
+                    }
+                }
             } else {
-                raw_client.request_head(
+                match raw_client.request_head(
                     "Z_E_A", "Z_E_T", &os, &arch, &channel, from, to,
                     HDRS, accept_exception,
-                ).unwrap_or(false)
+                ) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        eprintln!("[Provider0] request_head failed (from={}, to={}, os={}, arch={}, ch={}): {:#}", from, to, os, arch, channel, e);
+                        false
+                    }
+                }
             }
         })
         .await
@@ -68,16 +86,29 @@ impl Provider0 {
         let (mut last, mut next, mut step) = (0, 1, 2);
         while next <= 100 {
             if self.version_exists(0, next, arch, os, channel).await {
-                last = next; next += step; step += 1;
-            } else { break; }
+                last = next;
+                next += step;
+                step += 1;
+            } else {
+                break;
+            }
         }
-        if last == 0 { anyhow::bail!("unreachable"); }
+        if last == 0 {
+            anyhow::bail!("unreachable");
+        }
         let (mut lo, mut hi, mut res) = (last, next - 1, last);
         while lo <= hi {
             let mid = (lo + hi) / 2;
-            if mid <= res { lo = mid + 1; continue; }
-            if self.version_exists(0, mid, arch, os, channel).await { res = mid; lo = mid + 1; }
-            else { hi = mid - 1; }
+            if mid <= res {
+                lo = mid + 1;
+                continue;
+            }
+            if self.version_exists(0, mid, arch, os, channel).await {
+                res = mid;
+                lo = mid + 1;
+            } else {
+                hi = mid - 1;
+            }
         }
         Ok(res)
     }
@@ -86,25 +117,40 @@ impl Provider0 {
 #[cfg(feature = "security")]
 #[async_trait]
 impl PatchProvider for Provider0 {
-    fn name(&self) -> &str { "E" }
-    fn priority(&self) -> i32 { 100 }
-    fn is_cloudflare(&self) -> bool { true }
+    fn name(&self) -> &str {
+        "E"
+    }
+    fn priority(&self) -> i32 {
+        100
+    }
+    fn is_cloudflare(&self) -> bool {
+        true
+    }
 
     async fn is_available(&self) -> bool {
-        self.exec("linux", "amd64", "release", 0, 1, true, None).await
+        self.exec("linux", "amd64", "release", 0, 1, true, None)
+            .await
     }
 
     async fn get_latest_version(&self, channel: &str, os: &str, arch: &str) -> Result<i32> {
         self.latest_version(channel, os, arch).await
     }
 
-    async fn get_available_versions(&self, channel: &str, os: &str, arch: &str) -> Result<Vec<i32>> {
+    async fn get_available_versions(
+        &self,
+        channel: &str,
+        os: &str,
+        arch: &str,
+    ) -> Result<Vec<i32>> {
         let latest = self.latest_version(channel, os, arch).await?;
         let mut milestones = vec![1, 3, 6, 10];
         if latest > 10 {
             let step = (latest / 10).max(5);
             let mut cur = 10 + step;
-            while cur < latest { milestones.push(cur); cur += step; }
+            while cur < latest {
+                milestones.push(cur);
+                cur += step;
+            }
         }
         let mut versions = Vec::new();
         for &v in &milestones {
@@ -112,23 +158,41 @@ impl PatchProvider for Provider0 {
                 versions.push(v);
             }
         }
-        if latest > 0 && self.version_exists(latest - 1, latest, arch, os, channel).await {
+        if latest > 0
+            && self
+                .version_exists(latest - 1, latest, arch, os, channel)
+                .await
+        {
             versions.push(latest);
         }
-        versions.sort(); versions.dedup();
+        versions.sort();
+        versions.dedup();
         Ok(versions)
     }
 
-
-
     async fn download_patch_secure(
-        &self, channel: &str, os: &str, arch: &str,
-        from: i32, to: i32,
+        &self,
+        channel: &str,
+        os: &str,
+        arch: &str,
+        from: i32,
+        to: i32,
         dest_path: &std::path::Path,
         cancel_token: Arc<AtomicBool>,
         progress_callback: Box<dyn Fn(f64, u64, u64) + Send + Sync>,
     ) -> Result<()> {
-        if self.exec(os, arch, channel, from, to, false, Some((dest_path.to_path_buf(), cancel_token, progress_callback))).await {
+        if self
+            .exec(
+                os,
+                arch,
+                channel,
+                from,
+                to,
+                false,
+                Some((dest_path.to_path_buf(), cancel_token, progress_callback)),
+            )
+            .await
+        {
             Ok(())
         } else {
             anyhow::bail!("download failed")
@@ -138,10 +202,16 @@ impl PatchProvider for Provider0 {
 
 #[cfg(feature = "security")]
 impl Clone for Provider0 {
-    fn clone(&self) -> Self { Self { raw_client: self.raw_client.clone() } }
+    fn clone(&self) -> Self {
+        Self {
+            raw_client: self.raw_client.clone(),
+        }
+    }
 }
 
 #[cfg(feature = "security")]
 impl Default for Provider0 {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
