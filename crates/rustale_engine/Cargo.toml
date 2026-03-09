@@ -67,6 +67,7 @@ libc = "0.2.180"
 regex = "1.12"
 flate2 = "1.1"
 tar = "0.4"
+feed-rs = "2.1.0"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_System_ProcessStatus", "Win32_System_Threading"] }

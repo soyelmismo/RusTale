@@ -28,7 +28,8 @@ pub async fn load_image_bytes(url: &str) -> Result<Vec<u8>> {
 /// Carga una imagen de noticia especificamente con formato correcto
 pub async fn load_news_image_bytes(s3_key: &str) -> Result<Vec<u8>> {
     // URL especifica para imagenes de noticias de Hytale
-    let url = format!("https://cdn.hytale.com/variants/blog_thumb_{}", s3_key);
+    // El s3_key ya incluye el prefijo completo (blog_cover_... o blog_thumb_...)
+    let url = format!("https://cdn.hytale.com/variants/{}", s3_key);
     load_image_bytes(&url).await
 }
 
@@ -99,7 +100,21 @@ async fn get_image_path(url: &str, cache_subdir: &str) -> Result<PathBuf> {
         hex::encode(hasher.finalize())
     };
 
-    let file_path = cache_dir.join(format!("{}.jpg", hash));
+    // Detectar extensión del archivo desde la URL
+    let extension = url
+        .rsplit('.')
+        .next()
+        .and_then(|ext| {
+            let ext_lower = ext.to_lowercase();
+            // Solo aceptar extensiones de imagen válidas
+            match ext_lower.as_str() {
+                "png" | "jpg" | "jpeg" | "gif" | "webp" => Some(ext_lower),
+                _ => None,
+            }
+        })
+        .unwrap_or_else(|| "png".to_string());
+
+    let file_path = cache_dir.join(format!("{}.{}", hash, extension));
 
     if !file_path.exists() {
         download_and_save_image(url, &file_path).await?;
