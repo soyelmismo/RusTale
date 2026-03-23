@@ -95,8 +95,13 @@ impl PatchApiManager {
                 continue;
             }
 
-            if let Ok(version) = provider.get_latest_version(channel, os, arch).await {
-                return Ok(version);
+            match provider.get_latest_version(channel, os, arch).await {
+                Ok(version) => {
+                    return Ok(version);
+                }
+                Err(_) => {
+                    continue;
+                }
             }
         }
         anyhow::bail!("No provider could fetch the latest version")

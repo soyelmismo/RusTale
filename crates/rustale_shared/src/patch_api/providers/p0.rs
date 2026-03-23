@@ -79,7 +79,11 @@ impl Provider0 {
     }
 
     async fn version_exists(&self, from: i32, to: i32, arch: &str, os: &str, ch: &str) -> bool {
-        self.exec(os, arch, ch, from, to, false, None).await
+        let result = self.exec(os, arch, ch, from, to, false, None).await;
+        if !result {
+            eprintln!("[Provider0] version_exists({}, {}) returned false for os={}, arch={}, ch={}", from, to, os, arch, ch);
+        }
+        result
     }
 
     async fn latest_version(&self, channel: &str, os: &str, arch: &str) -> Result<i32> {
