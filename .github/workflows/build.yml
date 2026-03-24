@@ -81,9 +81,6 @@ jobs:
         shell: bash
         run: |
           echo "${{ secrets.ENV_FILE }}" | tr -d '\r' > .env
-          set -a
-          source .env
-          set +a
           cargo build --release --verbose
 
       - name: Prepare Distribution Folder
@@ -153,9 +150,6 @@ jobs:
         shell: bash
         run: |
           echo "${{ secrets.ENV_FILE }}" | tr -d '\r' > .env
-          set -a
-          source .env
-          set +a
           cargo build --release --verbose
 
       - name: Prepare Distribution Folder
