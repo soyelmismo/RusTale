@@ -78,16 +78,12 @@ jobs:
           sed -i "s/^version = \"0.0.1\"/version = \"$NEW_VER\"/" Cargo.toml
 
       - name: Build Release
-        run: cargo build --release --verbose
-        env:
-          Z_A: ${{ secrets.Z_A }}
-          Z_B: ${{ secrets.Z_B }}
-          Z_C: ${{ secrets.Z_C }}
-          Z_D: ${{ secrets.Z_D }}
-          Z_E: ${{ secrets.Z_E }}
-          Z_F: ${{ secrets.Z_F }}
-          Z_G: ${{ secrets.Z_G }}
-          Z_H: ${{ secrets.Z_H }}
+        run: |
+          set -a
+          echo "${{ secrets.ENV_FILE }}" > .env
+          source .env
+          set +a
+          cargo build --release --verbose
 
       - name: Prepare Distribution Folder
         run: |
@@ -153,16 +149,12 @@ jobs:
           sed -i "s/^version = \"0.0.1\"/version = \"$NEW_VER\"/" Cargo.toml
 
       - name: Build Release
-        run: cargo build --release --verbose
-        env:
-          Z_A: ${{ secrets.Z_A }}
-          Z_B: ${{ secrets.Z_B }}
-          Z_C: ${{ secrets.Z_C }}
-          Z_D: ${{ secrets.Z_D }}
-          Z_E: ${{ secrets.Z_E }}
-          Z_F: ${{ secrets.Z_F }}
-          Z_G: ${{ secrets.Z_G }}
-          Z_H: ${{ secrets.Z_H }}
+        run: |
+          set -a
+          echo "${{ secrets.ENV_FILE }}" > .env
+          source .env
+          set +a
+          cargo build --release --verbose
 
       - name: Prepare Distribution Folder
         run: |
