@@ -78,9 +78,10 @@ jobs:
           sed -i "s/^version = \"0.0.1\"/version = \"$NEW_VER\"/" Cargo.toml
 
       - name: Build Release
+        shell: bash
         run: |
+          echo "${{ secrets.ENV_FILE }}" | tr -d '\r' > .env
           set -a
-          echo "${{ secrets.ENV_FILE }}" > .env
           source .env
           set +a
           cargo build --release --verbose
@@ -149,9 +150,10 @@ jobs:
           sed -i "s/^version = \"0.0.1\"/version = \"$NEW_VER\"/" Cargo.toml
 
       - name: Build Release
+        shell: bash
         run: |
+          echo "${{ secrets.ENV_FILE }}" | tr -d '\r' > .env
           set -a
-          echo "${{ secrets.ENV_FILE }}" > .env
           source .env
           set +a
           cargo build --release --verbose
