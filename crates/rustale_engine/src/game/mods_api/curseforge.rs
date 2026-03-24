@@ -21,6 +21,11 @@ fn get_api_keys() -> Result<Vec<rustale_security::memory::SafeString>> {
             anyhow::bail!("Z_H not configured in security suite");
         }
 
+        // Remover comillas simples o dobles que puedan venir del .env
+        let keys_raw = keys_raw
+            .trim_matches('\'')
+            .trim_matches('"');
+
         // Dividir por coma para soportar múltiples keys (rotación)
         let keys: Vec<rustale_security::memory::SafeString> = keys_raw
             .split(',')
