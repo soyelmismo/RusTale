@@ -109,7 +109,7 @@ pub fn write_patch_path_to_arena(
     channel: &str,
     from_version: i32,
     to_version: i32,
-    use_to_format: bool,
+    template_key: &str,
 ) -> std::io::Result<()> {
     use std::io::Write;
     let arch_str = match arch {
@@ -122,19 +122,22 @@ pub fn write_patch_path_to_arena(
         _ => os,
     };
 
-    if use_to_format {
-        write!(
-            arena,
-            "/patches/{}/{}/{}/{}_to_{}.pwr",
-            os_str, arch_str, channel, from_version, to_version
-        )
-    } else {
-        write!(
-            arena,
-            "/patches/{}/{}/{}/{}/{}.pwr",
-            os_str, arch_str, channel, from_version, to_version
-        )
+    let template = rustale_security::get_private_var(template_key).into_string();
+    if template.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Patch path template not configured in security suite",
+        ));
     }
+
+    let path = template
+        .replacen("{}", os_str, 1)
+        .replacen("{}", arch_str, 1)
+        .replacen("{}", channel, 1)
+        .replacen("{}", &from_version.to_string(), 1)
+        .replacen("{}", &to_version.to_string(), 1);
+
+    write!(arena, "{}", path)
 }
 
 /// Get Butler download URL from itch.io CDN fallback

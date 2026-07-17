@@ -34,7 +34,6 @@ pub struct TokenResponse {
 }
 
 /// Official Hytale API provider (public endpoint)
-///
 /// This is a public provider that doesn't require authentication.
 /// Uses the standard HTTP_CLIENT from the network module.
 pub struct HytaleProvider {
@@ -55,28 +54,20 @@ impl HytaleProvider {
 
     #[cfg(feature = "security")]
     pub fn get_session_token(&self) -> Option<SafeString> {
-        let token = rustale_security::get_private_var("Z_Z_B");
-        if token.is_empty() { None } else { Some(token) }
+        rustale_security::get_private_var_opt("Z_Z_B")
     }
 
     #[cfg(feature = "security")]
     pub fn get_identity_token(&self) -> Option<SafeString> {
-        let token = rustale_security::get_private_var("Z_Z_C");
-        if token.is_empty() { None } else { Some(token) }
+        rustale_security::get_private_var_opt("Z_Z_C")
     }
 
     #[cfg(feature = "security")]
     pub async fn initiate_device_auth(&self) -> anyhow::Result<DeviceAuthResponse> {
-        let mut client_id_safe = rustale_security::get_private_var("Z_Z_A");
-        if client_id_safe.is_empty() {
-            client_id_safe = SafeString::new("default_hytale_client_id".to_string());
-        }
+        let client_id_safe = rustale_security::require_private_var("Z_Z_A")?;
         
-        let auth_url = rustale_security::get_private_var("Z_Z_D");
-        if auth_url.is_empty() { anyhow::bail!("Z_Z_D not configured in security suite"); }
-
-        let p_client_id = rustale_security::get_private_var("Z_Z_F");
-        if p_client_id.is_empty() { anyhow::bail!("Z_Z_F not configured in security suite"); }
+        let auth_url = rustale_security::require_private_var("Z_Z_D")?;
+        let p_client_id = rustale_security::require_private_var("Z_Z_F")?;
         
         let params = [(p_client_id.as_str(), client_id_safe.as_str())];
         let res = HTTP_CLIENT
@@ -94,25 +85,13 @@ impl HytaleProvider {
 
     #[cfg(feature = "security")]
     pub async fn poll_device_token(&self, device_code: &str) -> anyhow::Result<TokenResponse> {
-        let mut client_id_safe = rustale_security::get_private_var("Z_Z_A");
-        if client_id_safe.is_empty() {
-            client_id_safe = SafeString::new("default_hytale_client_id".to_string());
-        }
+        let client_id_safe = rustale_security::require_private_var("Z_Z_A")?;
         
-        let token_url = rustale_security::get_private_var("Z_Z_E");
-        if token_url.is_empty() { anyhow::bail!("Z_Z_E not configured in security suite"); }
-
-        let p_client_id = rustale_security::get_private_var("Z_Z_F");
-        if p_client_id.is_empty() { anyhow::bail!("Z_Z_F not configured in security suite"); }
-
-        let p_device_code = rustale_security::get_private_var("Z_Z_G");
-        if p_device_code.is_empty() { anyhow::bail!("Z_Z_G not configured in security suite"); }
-
-        let p_grant_type = rustale_security::get_private_var("Z_Z_H");
-        if p_grant_type.is_empty() { anyhow::bail!("Z_Z_H not configured in security suite"); }
-
-        let v_grant_type = rustale_security::get_private_var("Z_Z_I");
-        if v_grant_type.is_empty() { anyhow::bail!("Z_Z_I not configured in security suite"); }
+        let token_url = rustale_security::require_private_var("Z_Z_E")?;
+        let p_client_id = rustale_security::require_private_var("Z_Z_F")?;
+        let p_device_code = rustale_security::require_private_var("Z_Z_G")?;
+        let p_grant_type = rustale_security::require_private_var("Z_Z_H")?;
+        let v_grant_type = rustale_security::require_private_var("Z_Z_I")?;
         
         let params = [
             (p_client_id.as_str(), client_id_safe.as_str()),
@@ -329,10 +308,7 @@ impl PatchProvider for HytaleProvider {
             _ => os,
         };
 
-        let template = rustale_security::get_private_var("Z_Z_T").into_string();
-        if template.is_empty() {
-            anyhow::bail!("Z_Z_T not configured in security suite");
-        }
+        let template = rustale_security::require_private_var("Z_Z_T")?.into_string();
 
         let url = template
             .replacen("{}", os_str, 1)

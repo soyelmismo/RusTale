@@ -61,6 +61,7 @@ pub fn get_all_providers() -> Vec<Arc<dyn PatchProvider>> {
         //providers.push(Arc::new(Provider2::new()));
         //providers.push(Arc::new(Provider3::new()));
     }
+    providers.push(Arc::new(HytaleProvider::new()));
 
     // Sort by priority (highest first)
     providers.sort_by(|a, b| b.priority().cmp(&a.priority()));
@@ -72,10 +73,10 @@ pub fn get_all_providers() -> Vec<Arc<dyn PatchProvider>> {
 pub fn provider_count() -> usize {
     #[cfg(feature = "security")]
     {
-        4
+        5 // 4 privados + 1 público
     }
     #[cfg(not(feature = "security"))]
     {
-        0
+        1 // Solo el público
     }
 }

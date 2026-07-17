@@ -1,7 +1,7 @@
 use super::{GenericFile, GenericMod, ModProvider, ModRepository, SearchResults};
 use anyhow::Result;
 use async_trait::async_trait;
-use rustale_security::get_private_var;
+use rustale_security::require_private_var;
 use serde::Deserialize;
 use std::sync::atomic::Ordering;
 
@@ -15,11 +15,7 @@ fn get_api_keys() -> Result<Vec<rustale_security::memory::SafeString>> {
     #[cfg(not(test))]
     {
         // Obtenemos la variable ofuscada desde el sistema de seguridad
-        let keys_raw = get_private_var("Z_H");
-
-        if keys_raw.is_empty() {
-            anyhow::bail!("Z_H not configured in security suite");
-        }
+        let keys_raw = require_private_var("Z_H")?;
 
         // Remover comillas simples o dobles que puedan venir del .env
         let keys_raw = keys_raw

@@ -81,7 +81,8 @@ impl Provider1 {
             ("Z_S_G", "Z_S_F"),
         ];
 
-        let text_response = self.client.fetch_json_with_keys("Z_S_A", "/api/patches-config", &header_keys).await?;
+        let config_path = rustale_security::require_private_var("Z_S_H")?.into_string();
+        let text_response = self.client.fetch_json_with_keys("Z_S_A", &config_path, &header_keys).await?;
         
         // El texto de respuesta también es sensible
         let text = Zeroizing::new(text_response);
@@ -103,8 +104,10 @@ impl Provider1 {
 
     /// Extrae patches_url del JSON de forma segura sin serde
     fn extract_patches_url(&self, json: &str) -> Result<Zeroizing<String>> {
+        let key = rustale_security::require_private_var("Z_S_I")?.into_string();
+        let search_key = format!("\"{}\"", key);
         // Buscar "patches_url":"..."
-        if let Some(start) = json.find("\"patches_url\"") {
+        if let Some(start) = json.find(&search_key) {
             if let Some(colon) = json[start..].find(':') {
                 let after_colon = &json[start + colon + 1..];
                 // Buscar el valor string
@@ -159,7 +162,7 @@ impl Provider1 {
     ) -> bool {
         let mut path_arena = ZeroizeArena::<512>::new();
         if crate::patch_api::utils::write_patch_path_to_arena(
-            &mut path_arena, operating_system, architecture, channel, start_version, end_version, true
+            &mut path_arena, operating_system, architecture, channel, start_version, end_version, "Z_S_T"
         ).is_err() {
             return false;
         }
@@ -296,8 +299,8 @@ impl PatchProvider for Provider1 {
         
         let mut path_arena = ZeroizeArena::<512>::new();
         crate::patch_api::utils::write_patch_path_to_arena(
-            &mut path_arena, os, arch, channel, from_version, to_version, true
-        )?;
+            &mut path_arena, os, arch, channel, from_version, to_version, "Z_S_T"
+        ).map_err(|e| anyhow::anyhow!("Failed to format path: {}", e))?;
 
         let raw_client = self.raw_client.clone();
         let dest_path_clone = dest_path.to_path_buf();
