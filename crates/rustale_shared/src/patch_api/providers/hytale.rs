@@ -9,10 +9,29 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 #[cfg(feature = "security")]
-use rustale_security::init_shield;
+use rustale_security::{init_shield, SafeString};
 
 use crate::patch_api::traits::PatchProvider;
 use crate::network::HTTP_CLIENT;
+
+#[cfg(feature = "security")]
+#[derive(serde::Deserialize, Debug)]
+pub struct DeviceAuthResponse {
+    pub device_code: String,
+    pub user_code: String,
+    pub verification_uri: String,
+    pub expires_in: i32,
+    pub interval: i32,
+}
+
+#[cfg(feature = "security")]
+#[derive(serde::Deserialize, Debug)]
+pub struct TokenResponse {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub session_token: Option<String>,
+    pub identity_token: Option<String>,
+}
 
 /// Official Hytale API provider (public endpoint)
 ///
@@ -32,6 +51,86 @@ impl HytaleProvider {
         }
         #[cfg(not(feature = "security"))]
         Self {}
+    }
+
+    #[cfg(feature = "security")]
+    pub fn get_session_token(&self) -> Option<SafeString> {
+        let token = rustale_security::get_private_var("Z_Z_B");
+        if token.is_empty() { None } else { Some(token) }
+    }
+
+    #[cfg(feature = "security")]
+    pub fn get_identity_token(&self) -> Option<SafeString> {
+        let token = rustale_security::get_private_var("Z_Z_C");
+        if token.is_empty() { None } else { Some(token) }
+    }
+
+    #[cfg(feature = "security")]
+    pub async fn initiate_device_auth(&self) -> anyhow::Result<DeviceAuthResponse> {
+        let mut client_id_safe = rustale_security::get_private_var("Z_Z_A");
+        if client_id_safe.is_empty() {
+            client_id_safe = SafeString::new("default_hytale_client_id".to_string());
+        }
+        
+        let auth_url = rustale_security::get_private_var("Z_Z_D");
+        if auth_url.is_empty() { anyhow::bail!("Z_Z_D not configured in security suite"); }
+
+        let p_client_id = rustale_security::get_private_var("Z_Z_F");
+        if p_client_id.is_empty() { anyhow::bail!("Z_Z_F not configured in security suite"); }
+        
+        let params = [(p_client_id.as_str(), client_id_safe.as_str())];
+        let res = HTTP_CLIENT
+            .post(auth_url.as_str())
+            .form(&params)
+            .send()
+            .await?;
+            
+        if !res.status().is_success() {
+            anyhow::bail!("Failed to initiate device auth: {}", res.status());
+        }
+        
+        Ok(res.json::<DeviceAuthResponse>().await?)
+    }
+
+    #[cfg(feature = "security")]
+    pub async fn poll_device_token(&self, device_code: &str) -> anyhow::Result<TokenResponse> {
+        let mut client_id_safe = rustale_security::get_private_var("Z_Z_A");
+        if client_id_safe.is_empty() {
+            client_id_safe = SafeString::new("default_hytale_client_id".to_string());
+        }
+        
+        let token_url = rustale_security::get_private_var("Z_Z_E");
+        if token_url.is_empty() { anyhow::bail!("Z_Z_E not configured in security suite"); }
+
+        let p_client_id = rustale_security::get_private_var("Z_Z_F");
+        if p_client_id.is_empty() { anyhow::bail!("Z_Z_F not configured in security suite"); }
+
+        let p_device_code = rustale_security::get_private_var("Z_Z_G");
+        if p_device_code.is_empty() { anyhow::bail!("Z_Z_G not configured in security suite"); }
+
+        let p_grant_type = rustale_security::get_private_var("Z_Z_H");
+        if p_grant_type.is_empty() { anyhow::bail!("Z_Z_H not configured in security suite"); }
+
+        let v_grant_type = rustale_security::get_private_var("Z_Z_I");
+        if v_grant_type.is_empty() { anyhow::bail!("Z_Z_I not configured in security suite"); }
+        
+        let params = [
+            (p_client_id.as_str(), client_id_safe.as_str()),
+            (p_device_code.as_str(), device_code),
+            (p_grant_type.as_str(), v_grant_type.as_str()),
+        ];
+        
+        let res = HTTP_CLIENT
+            .post(token_url.as_str())
+            .form(&params)
+            .send()
+            .await?;
+            
+        if !res.status().is_success() {
+            anyhow::bail!("Failed to poll token: {}", res.status());
+        }
+        
+        Ok(res.json::<TokenResponse>().await?)
     }
 
     /// Check if a patch version exists on the server
@@ -54,10 +153,21 @@ impl HytaleProvider {
             _ => operating_system,
         };
 
-        let url = format!(
-            "https://account-data.hytale.com/patches/{}/{}/{}/{}/{}.pwr",
-            os, arch, channel, start_version, end_version
-        );
+        #[cfg(feature = "security")]
+        let template = rustale_security::get_private_var("Z_Z_T").into_string();
+        #[cfg(not(feature = "security"))]
+        let template = String::new();
+        
+        if template.is_empty() {
+            return false;
+        }
+
+        let url = template
+            .replacen("{}", os, 1)
+            .replacen("{}", arch, 1)
+            .replacen("{}", channel, 1)
+            .replacen("{}", &start_version.to_string(), 1)
+            .replacen("{}", &end_version.to_string(), 1);
 
         for attempt in 0..3 {
             match HTTP_CLIENT.head(&url).send().await {
@@ -97,8 +207,17 @@ impl PatchProvider for HytaleProvider {
 
     async fn is_available(&self) -> bool {
         // Simple connectivity check to official servers
+        #[cfg(feature = "security")]
+        let url = rustale_security::get_private_var("Z_Z_J").into_string();
+        #[cfg(not(feature = "security"))]
+        let url = String::new();
+
+        if url.is_empty() {
+            return false;
+        }
+
         match HTTP_CLIENT
-            .get("https://launcher.hytale.com/version/release/launcher.json")
+            .get(&url)
             .send()
             .await
         {
@@ -187,21 +306,49 @@ impl PatchProvider for HytaleProvider {
 
 
 
-    /// HytaleProvider no soporta descarga segura directa.
-    /// Usar get_patch_url() + download_file() en su lugar.
     #[cfg(feature = "security")]
     async fn download_patch_secure(
         &self,
-        _channel: &str,
-        _os: &str,
-        _arch: &str,
-        _from_version: i32,
-        _to_version: i32,
-        _dest_path: &std::path::Path,
-        _cancel_token: std::sync::Arc<std::sync::atomic::AtomicBool>,
-        _progress_callback: Box<dyn Fn(f64, u64, u64) + Send + Sync>,
+        channel: &str,
+        os: &str,
+        arch: &str,
+        from_version: i32,
+        to_version: i32,
+        dest_path: &std::path::Path,
+        cancel_token: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        progress_callback: Box<dyn Fn(f64, u64, u64) + Send + Sync>,
     ) -> Result<()> {
-        anyhow::bail!("HytaleProvider does not support secure direct download. Use get_patch_url() + download_file() instead.")
+        let arch_str = match arch {
+            "x86_64" => "amd64",
+            "aarch64" => "arm64",
+            _ => arch,
+        };
+
+        let os_str = match os {
+            "darwin" => "mac",
+            _ => os,
+        };
+
+        let template = rustale_security::get_private_var("Z_Z_T").into_string();
+        if template.is_empty() {
+            anyhow::bail!("Z_Z_T not configured in security suite");
+        }
+
+        let url = template
+            .replacen("{}", os_str, 1)
+            .replacen("{}", arch_str, 1)
+            .replacen("{}", channel, 1)
+            .replacen("{}", &from_version.to_string(), 1)
+            .replacen("{}", &to_version.to_string(), 1);
+
+        crate::network::download_file(
+            &url,
+            dest_path,
+            |_, pct, _, total, downloaded, _, _| {
+                progress_callback(pct, downloaded, total);
+            },
+            Some(cancel_token),
+        ).await
     }
 }
 
