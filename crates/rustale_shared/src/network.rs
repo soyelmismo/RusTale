@@ -199,7 +199,7 @@ where
                         }
                     }
                     
-                    let mut file = if status == reqwest::StatusCode::PARTIAL_CONTENT {
+                    let file = if status == reqwest::StatusCode::PARTIAL_CONTENT {
                         OpenOptions::new()
                             .create(true)
                             .append(true)
@@ -210,6 +210,8 @@ where
                         File::create(&temp_destination).await?
                     };
 
+                    let mut writer = tokio::io::BufWriter::with_capacity(512 * 1024, file);
+
                     let mut stream = response.bytes_stream();
                     let mut last_report = std::time::Instant::now();
                     let mut bytes_since_last_report: u64 = 0;
@@ -218,14 +220,14 @@ where
                     while let Some(chunk_result) = stream.next().await {
                         if let Some(token) = &cancel_token {
                             if token.load(Ordering::Relaxed) {
-                                let _ = file.flush().await;
+                                let _ = writer.flush().await;
                                 return Err(anyhow!("Cancelled by user"));
                             }
                         }
 
                         match chunk_result {
                             Ok(chunk) => {
-                                if let Err(_) = file.write_all(&chunk).await {
+                                if let Err(_) = writer.write_all(&chunk).await {
                                     stream_failed = true;
                                     break;
                                 }
@@ -279,7 +281,7 @@ where
                     }
 
                     if !stream_failed {
-                        file.flush().await?;
+                        writer.flush().await?;
                         if total_size > 0 && downloaded_len == total_size {
                             break;
                         } else if total_size == 0 && downloaded_len > 0 {
