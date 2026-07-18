@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 rustale_shared = { path = "../rustale_shared" }
 rustale_engine = { path = "../rustale_engine" }
+rustale_security = { path = "../rustale_security" }
 auth_server = { path = "../../auth_server" }
 
 tokio = { version = "1.49.0", features = ["full"] }

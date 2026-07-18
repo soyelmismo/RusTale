@@ -91,6 +91,7 @@
         "enable_news": "Enable news section",
         "enable_online_fix": "Enable multiplayer patch",
         "online_fix_desc": "Redirects authentication to play on unofficial servers.",
+        "hytale_oauth": "OAuth with Hytale",
         "minimize_to_tray": "Minimize to tray on close",
         "minimize_to_tray_linux": "Minimize on close",
         "minimize_on_play": "Hide window when game starts",

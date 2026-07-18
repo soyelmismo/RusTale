@@ -452,6 +452,44 @@ impl UiOrchestrator {
                 }
                 None
             }
+            Message::StartHytaleOAuth(use_mock) => {
+                let issuer = if *use_mock {
+                    "http://127.0.0.1:8080".to_string() // auth_server port
+                } else {
+                    "https://connect.accounts.hytale.com".to_string()
+                };
+                
+                let client_id = rustale_security::get_private_var("Z_CLIENT_ID");
+                
+                Some(Task::perform(
+                    async move {
+                        rustale_shared::oauth::run_client_oauth_flow(&issuer, &client_id)
+                            .await
+                            .map_err(|e| e.to_string())
+                    },
+                    Message::HytaleOAuthCompleted,
+                ))
+            }
+            Message::HytaleOAuthCompleted(res) => {
+                match res {
+                    Ok(success) => {
+                        println!("OAuth Success: {:?}", success);
+                        self.settings.oauth_tokens = Some(success.tokens);
+                        // Iniciar guardado de settings
+                        let _ = to_core.try_send(crate::core::signals::ToCore::SaveSettings(self.settings.clone()));
+                        
+                        self.log_to_launcher(crate::ui::server_panel::LogEntry::success(
+                            &format!("OAuth Login successful. Hello, {}", success.profile.map(|p| p.username).unwrap_or_else(|| "Unknown".to_string()))
+                        ));
+                        return Some(Task::done(Message::SaveSettings(self.settings.clone())));
+                    }
+                    Err(e) => {
+                        println!("OAuth Error: {}", e);
+                        self.error = Some(format!("OAuth failed: {}", e));
+                    }
+                }
+                None
+            }
             Message::OpenMods => {
                 self.views.mods.is_open = true;
                 None

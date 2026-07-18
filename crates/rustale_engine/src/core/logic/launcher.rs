@@ -367,12 +367,17 @@ async fn launch_flow_internal(
         }
 
         let mut tokens_res = Err(anyhow::anyhow!("Initial state"));
+        
+        let mut current_access_token = settings.oauth_tokens.as_ref().map(|t| t.access_token.clone());
+        let mut refreshed = false;
+
         for _ in 0..5 {
             match crate::game::auth::fetch_remote_tokens(
                 &client,
                 &auth_url,
                 &profile_name,
                 &profile_uuid.to_string(),
+                current_access_token.as_deref(),
             )
             .await
             {
@@ -380,7 +385,32 @@ async fn launch_flow_internal(
                     tokens_res = Ok(t);
                     break;
                 }
-                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(500)).await,
+                Err(e) => {
+                    let err_str = e.to_string();
+                    if !refreshed && err_str.contains("401") {
+                        if let Some(oauth) = &settings.oauth_tokens {
+                            if let Some(refresh_token) = &oauth.refresh_token {
+                                println!("[Auth] Access token expired (401), attempting OAuth refresh...");
+                                let issuer = if auth_mode == "sanasol" { "https://oauth.sanasol.ws" } else { "https://oauth.accounts.hytale.com" };
+                                match rustale_shared::oauth::refresh_oauth_tokens(issuer, &rustale_security::get_private_var("Z_CLIENT_ID"), refresh_token).await {
+                                    Ok(new_tokens) => {
+                                        current_access_token = Some(new_tokens.access_token.clone());
+                                        // Update settings struct so it uses it, though it won't persist to disk here.
+                                        // Core should be updated to save it if needed, but for now we recover the launch.
+                                        settings.oauth_tokens = Some(new_tokens);
+                                        refreshed = true;
+                                        continue;
+                                    }
+                                    Err(re) => {
+                                        println!("[Auth] Failed to refresh OAuth token: {}", re);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    println!("[Auth] Failed to fetch session token: {}. Retrying in 500ms...", e);
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
             }
         }
 

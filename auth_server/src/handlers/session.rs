@@ -213,7 +213,7 @@ pub async fn handle_session_authorize(
                 last_uuid.clone()
             } else {
                 println!("    ! Advertencia: No se detecto audience y no hay servidor registrado, usando fallback generico");
-                "hytale-server".to_string()
+                rustale_security::get_private_var("Z_SERVER_CLIENT_ID").into_string()
             }
         }
     };

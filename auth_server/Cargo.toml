@@ -12,6 +12,7 @@ tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "sync", "
 
 # Internal dependencies
 rustale_shared = { path = "../crates/rustale_shared" }
+rustale_security = { path = "../crates/rustale_security" }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

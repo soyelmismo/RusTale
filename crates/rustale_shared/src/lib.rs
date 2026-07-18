@@ -4,6 +4,7 @@ pub mod errors;
 pub mod java;
 pub mod lang;
 pub mod network;
+pub mod oauth;
 pub mod patch_api;
 pub mod patcher;
 pub mod paths;

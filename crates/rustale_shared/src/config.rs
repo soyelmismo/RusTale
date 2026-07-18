@@ -201,6 +201,8 @@ pub struct GameSettings {
     pub theme: ThemeConfig,
     #[serde(default)]
     pub safe_mode: bool,
+    #[serde(default)]
+    pub oauth_tokens: Option<crate::oauth::OAuthTokens>,
 }
 
 impl std::hash::Hash for GameSettings {
@@ -225,6 +227,8 @@ impl std::hash::Hash for GameSettings {
         self.enable_auto_update.hash(state);
         self.theme.hash(state);
         self.safe_mode.hash(state);
+        // OAuth tokens don't affect visual/behavioral equality strictly for UI purposes,
+        // so we don't hash them.
     }
 }
 

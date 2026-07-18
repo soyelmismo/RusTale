@@ -11,6 +11,7 @@ tray = ["dep:tray-icon", "dep:rustale_tray"]
 rustale_shared = { path = "../rustale_shared" }
 rustale_engine = { path = "../rustale_engine" }
 rustale_server = { path = "../rustale_server" }
+rustale_security = { path = "../rustale_security" }
 
 # UI Core
 iced = { version = "0.14.0", features = ["image", "svg", "tokio", "advanced", "canvas", "wgpu"] }

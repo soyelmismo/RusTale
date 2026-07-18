@@ -20,8 +20,10 @@ pub struct AuthTokens {
 #[derive(Debug, Serialize)]
 struct AuthRequest {
     uuid: String,
-    name: String,
-    scopes: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scopes: Option<Vec<String>>,
 }
 
 pub async fn fetch_remote_tokens(
@@ -29,6 +31,7 @@ pub async fn fetch_remote_tokens(
     auth_server_url: &str,
     player_name: &str,
     player_uuid: &str,
+    access_token: Option<&str>,
 ) -> Result<AuthTokens> {
     // Si es localhost, generamos tokens localmente en lugar de hacer petición HTTP
     if auth_server_url.contains("127.0.0.") {
@@ -40,21 +43,41 @@ pub async fn fetch_remote_tokens(
         ));
     }
 
-    // Usamos el endpoint child que es el estandar para launchers
-    let url = format!("{}/game-session/child", auth_server_url);
+    let is_official = auth_server_url.contains("sessions.hytale.com");
+
+    let url = if is_official {
+        format!("{}/game-session/new", auth_server_url)
+    } else {
+        // ponytail: [Compatibilidad Proxy] -> [Alinear con guía oficial /new cuando proxy esté actualizado]
+        format!("{}/game-session/child", auth_server_url)
+    };
 
     println!("[Auth] Fetching tokens from: {}", url);
 
-    let body = AuthRequest {
-        uuid: player_uuid.to_string(),
-        name: player_name.to_string(),
-        scopes: vec!["hytale:server".to_string(), "hytale:client".to_string()],
+    let body = if is_official {
+        AuthRequest {
+            uuid: player_uuid.to_string(),
+            name: None,
+            scopes: None,
+        }
+    } else {
+        AuthRequest {
+            uuid: player_uuid.to_string(),
+            name: Some(player_name.to_string()),
+            scopes: Some(vec!["hytale:server".to_string(), "hytale:client".to_string()]),
+        }
     };
 
-    let response = client
+    let mut req = client
         .post(&url)
         .header("Content-Type", "application/json")
-        .json(&body)
+        .json(&body);
+
+    if let Some(token) = access_token {
+        req = req.bearer_auth(token);
+    }
+
+    let response = req
         .send()
         .await
         .context("Failed to connect to auth server")?;

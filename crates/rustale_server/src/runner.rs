@@ -645,6 +645,89 @@ pub async fn run_server_flow_internal(
     let clean_install_dir = rustale_engine::util::sanitize_path(&install_dir);
     let clean_target_jar = rustale_engine::util::sanitize_path(&target_jar_path);
 
+    let mut session_tokens = None;
+
+    if config.online_mode == "authenticated" || config.online_mode == "sanasol" {
+        let issuer = if config.online_mode == "sanasol" {
+            "https://oauth.sanasol.ws"
+        } else {
+            "https://oauth.accounts.hytale.com"
+        };
+        
+        let session_issuer = if config.online_mode == "sanasol" {
+            "https://sessions.sanasol.ws"
+        } else {
+            "https://sessions.hytale.com"
+        };
+        
+        if config.oauth_tokens.is_none() {
+            sink.log("[Server] No OAuth tokens found. Starting Device Code Flow...");
+            match rustale_shared::oauth::run_server_device_code_flow(issuer, &rustale_security::get_private_var("Z_SERVER_CLIENT_ID")).await {
+                Ok(success) => {
+                    config.oauth_tokens = Some(success.tokens);
+                    let _ = rustale_server::config::save_config(&config).await;
+                }
+                Err(e) => {
+                    sink.err(format!("[Server] Failed to authenticate: {}", e));
+                }
+            }
+        }
+        
+        if let Some(oauth) = &config.oauth_tokens {
+            sink.log("[Server] Fetching game session tokens...");
+            let client = rustale_shared::HTTP_CLIENT.clone();
+            let mut auth_url = session_issuer.to_string();
+            
+            // Dummy profile/uuid for dedicated server auth (can be overridden)
+            let profile_name = "ServerOperator";
+            let profile_uuid = uuid::Uuid::new_v4().to_string(); // In reality, /my-account/get-profiles should be queried
+            
+            let mut current_access_token = oauth.access_token.clone();
+            let mut refreshed = false;
+            
+            loop {
+                match rustale_engine::game::auth::fetch_remote_tokens(
+                    &client,
+                    &auth_url,
+                    profile_name,
+                    &profile_uuid,
+                    Some(&current_access_token),
+                ).await {
+                    Ok(tokens) => {
+                        session_tokens = Some(tokens);
+                        break;
+                    }
+                    Err(e) => {
+                        if !refreshed && e.to_string().contains("401") {
+                            if let Some(refresh_token) = &config.oauth_tokens.as_ref().and_then(|t| t.refresh_token.clone()) {
+                                sink.log("[Server] Access token expired, attempting refresh...");
+                                match rustale_shared::oauth::refresh_oauth_tokens(issuer, &rustale_security::get_private_var("Z_SERVER_CLIENT_ID"), refresh_token).await {
+                                    Ok(new_tokens) => {
+                                        current_access_token = new_tokens.access_token.clone();
+                                        config.oauth_tokens = Some(new_tokens);
+                                        let _ = rustale_server::config::save_config(&config).await;
+                                        refreshed = true;
+                                        continue;
+                                    }
+                                    Err(re) => {
+                                        sink.err(format!("[Server] Failed to refresh OAuth token: {}", re));
+                                        break;
+                                    }
+                                }
+                            } else {
+                                sink.err("[Server] No refresh token available.");
+                                break;
+                            }
+                        } else {
+                            sink.err(format!("[Server] Failed to fetch session token: {}. Server may fail to validate players.", e));
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     sink.log(format!("  - Final server args: {}", config.server_args));
 
     // ── Build command ────────────────────────────────────────────────────────
@@ -700,6 +783,12 @@ pub async fn run_server_flow_internal(
     let java_args: Vec<&str> = config.java_exec_args.split_whitespace().collect();
     cmd.args(java_args).arg("-jar").arg(&clean_target_jar);
     cmd.args(config.server_args.split_whitespace());
+    
+    if let Some(st) = session_tokens {
+        cmd.arg("--session-token").arg(&st.session_token);
+        cmd.arg("--identity-token").arg(&st.identity_token);
+    }
+    
     cmd.arg("--disable-sentry");
 
     cmd.stdout(std::process::Stdio::piped())

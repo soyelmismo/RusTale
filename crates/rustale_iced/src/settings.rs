@@ -125,6 +125,7 @@ pub enum SettingsMessage {
     LsdToggled(bool),
     LsdHovered(bool),
     BaseThemeChanged(crate::config::BaseThemeMode),
+    OpenHytaleOAuth,
 
     None,
 }
@@ -712,7 +713,16 @@ impl SettingsState {
         let online_fix_section = column![
             online_fix_checkbox,
             if self.temp_settings.enable_online_fix {
-                Into::<Element<'_, SettingsMessage>>::into(fix_mode_picker)
+                row![
+                    Into::<Element<'_, SettingsMessage>>::into(fix_mode_picker),
+                    button(theme::text_body(localization.t("settings.hytale_oauth").to_string(), ctx))
+                        .on_press(SettingsMessage::OpenHytaleOAuth)
+                        .style(move |t, s| theme::primary_button_style(&palette, t, s))
+                        .padding(5)
+                ]
+                .spacing(10)
+                .align_y(Alignment::Center)
+                .into()
             } else {
                 container(Space::new())
                     .style(move |t| theme::container_style_transparent(&palette, t))
@@ -999,6 +1009,9 @@ impl SettingsState {
             SettingsMessage::ToggleMinimizePlay(val) => {
                 self.temp_settings.minimize_on_play = val;
                 None
+            }
+            SettingsMessage::OpenHytaleOAuth => {
+                Some(Message::StartHytaleOAuth(self.temp_settings.enable_online_fix))
             }
             SettingsMessage::QuickplayToggled(val) => {
                 self.temp_settings.quickplay = val;

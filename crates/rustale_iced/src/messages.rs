@@ -128,6 +128,10 @@ pub enum Message {
     /// Messages routed to / from the server panel widget.
     Server(ServerMessage),
 
+    // --- OAuth ---
+    StartHytaleOAuth(bool),
+    HytaleOAuthCompleted(Result<rustale_shared::oauth::OAuthSuccess, String>),
+
     // Fallback
     None,
 }

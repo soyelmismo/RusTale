@@ -13,6 +13,7 @@ pub struct ServerConfig {
     pub auth_domain: Option<String>, // Custom F2P auth domain (e.g., "auth.sanasol.ws")
     pub trust_all_issuers: bool, // HYTALE_TRUST_ALL_ISSUERS
     pub trusted_issuers: Vec<String>, // HYTALE_TRUSTED_ISSUERS
+    pub oauth_tokens: Option<rustale_shared::oauth::OAuthTokens>, // Persisted tokens
 }
 
 impl Default for ServerConfig {
@@ -28,6 +29,7 @@ impl Default for ServerConfig {
             auth_domain: Some("127.0.0.000001".to_string()), // Local embedded server
             trust_all_issuers: true, // Recommended true
             trusted_issuers: Vec::new(), // Empty list
+            oauth_tokens: None,
         }
     }
 }
@@ -139,9 +141,14 @@ pub async fn load_or_create(args: &rustale_engine::cli::CliArgs) -> ServerConfig
     }
 
     // 4. Guardar cambios inmediatamente para "inicio rapido" futuro
-    if let Ok(str) = toml::to_string_pretty(&config) {
-        let _ = fs::write(&path, str).await;
-    }
+    let _ = save_config(&config).await;
 
     config
+}
+
+pub async fn save_config(config: &ServerConfig) -> anyhow::Result<()> {
+    let path = rustale_shared::config::get_server_root_dir().join("server_config.toml");
+    let str = toml::to_string_pretty(config)?;
+    fs::write(&path, str).await?;
+    Ok(())
 }
