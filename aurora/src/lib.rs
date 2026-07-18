@@ -178,7 +178,43 @@ fn get_swaps() -> Vec<SwapDefinition> {
         "http://127.0.0"
     ));
     
-    // 5. Argumentos CLI: Reemplazos directos
+    // 5. "wss://socket-gateway." (21 chars)
+    swaps.push(SwapDefinition::new(
+        "wss://socket-gateway.",
+        "ws://127.0.0.00000000"
+    ));
+    // 5b. "wss://socket-gateway" (20 chars)
+    swaps.push(SwapDefinition::new(
+        "wss://socket-gateway",
+        "ws://127.0.0.0000000"
+    ));
+
+    // 6. "https://server-discovery." (25 chars)
+    swaps.push(SwapDefinition::new(
+        "https://server-discovery.",
+        "http://127.0.0.0000000000"
+    ));
+    // 6b. "https://server-discovery" (24 chars)
+    swaps.push(SwapDefinition::new(
+        "https://server-discovery",
+        "http://127.0.0.000000000"
+    ));
+
+    // 7. "https://liveconfig." (19 chars) -> "http://127.0.0.0000" (19 chars)
+    // Resultado final: http://127.0.0.00000001:59313
+    swaps.push(SwapDefinition::new(
+        "https://liveconfig.",
+        "http://127.0.0.0000"
+    ));
+
+    // 8. "https://social." (15 chars) -> "http://127.0.0." (15 chars)
+    // Resultado final: http://127.0.0.0001:59313
+    swaps.push(SwapDefinition::new(
+        "https://social.",
+        "http://127.0.0."
+    ));
+
+    // 9. Argumentos CLI: Reemplazos directos
     // No hacemos reemplazo de argumentos de tokens o authenticated ya que nuestro 127.0.0.000001:59313 firmara las llaves.
 
     swaps
@@ -432,8 +468,8 @@ unsafe fn scan_and_patch() {
     let mut exe_path = [0u8; 1024];
     let len = unsafe {
         libc::readlink(
-            "/proc/self/exe\0".as_ptr() as *const i8,
-            exe_path.as_mut_ptr() as *mut i8,
+            "/proc/self/exe\0".as_ptr() as *const libc::c_char,
+            exe_path.as_mut_ptr() as *mut libc::c_char,
             1023
         )
     };

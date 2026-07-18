@@ -199,7 +199,7 @@ fn create_router(state: Arc<Mutex<ServerState>>, _port: u16) -> Router {
         .merge(internal_routes)
         .merge(cosmetics_routes)
         .merge(discovery_routes)
-        .route("/{*path}", axum::routing::get(cors_options_handler))
+        .route("/{*path}", axum::routing::options(cors_options_handler))
         .fallback(handlers::not_found)
         .layer(middleware::from_fn(cors_middleware))
         .layer(middleware::from_fn(log_request))
