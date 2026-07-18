@@ -54,7 +54,7 @@ pub fn verify_aurora_checksum(aurora_path: &Path) -> Result<bool, Box<dyn std::e
 
     // En modo dev (sin AURORA_CHECKSUM en compile-time) se acepta cualquier aurora
     // para no bloquear el flujo de desarrollo.
-    if EMBEDDED_CHECKSUM == "dev_checksum_placeholder" {
+    if embedded_checksum == "dev_checksum_placeholder" {
         println!("[Security] AURORA_CHECKSUM not set at compile time — skipping checksum verification (dev mode).");
         return Ok(true);
     }
