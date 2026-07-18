@@ -45,6 +45,12 @@ impl JreInstaller {
         let paths = GamePaths::new(base_dir.clone());
         let jre_base_dir = paths.tools().join("jre");
         let latest_dir = jre_base_dir.join("latest");
+
+        if latest_dir.exists() && is_jre_installed_at(&latest_dir) {
+            progress_callback("jre".to_string(), 100.0, localization.t("common.jre_installed").to_string(), 0, 0, None, None);
+            return Ok(());
+        }
+
         let cache_dir = crate::config::get_cache_dir("jre").await;
         tokio::fs::create_dir_all(&jre_base_dir).await?;
         tokio::fs::create_dir_all(&cache_dir).await?;

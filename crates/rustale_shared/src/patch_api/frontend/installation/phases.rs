@@ -162,6 +162,8 @@ impl PatchApiFrontend {
             is_game_installed(base_dir, channel, &install_dir_name).await;
         let start_version = if is_latest && files_exist {
             version_info.current_local
+        } else if !is_latest && files_exist {
+            target_ver_val // Si es una versión específica y ya existe, asumimos que ya está en la versión objetivo
         } else {
             0
         };
