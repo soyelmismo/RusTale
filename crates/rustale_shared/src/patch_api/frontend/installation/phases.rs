@@ -57,6 +57,21 @@ impl PatchApiFrontend {
             None,
         );
 
+        let tracker_clone = tracker.clone();
+        self.download_jre(
+            base_dir,
+            std::sync::Arc::new(move |_component: String, progress: f64, status: String, _total: u64, _downloaded: u64, _eta: Option<String>, _step: Option<usize>| {
+                WeightedProgressTracker::report(
+                    &tracker_clone,
+                    progress as f32,
+                    &status,
+                    vec![],
+                    None,
+                );
+            }),
+            None,
+        ).await?;
+
         // Bridge the legacy JRE callback to our new system
         let java_info = crate::java::ensure_java_available(base_dir).await?;
         println!("[JRE] Detected Java version: {}", java_info.version);

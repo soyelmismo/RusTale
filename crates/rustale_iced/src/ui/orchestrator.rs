@@ -668,8 +668,11 @@ impl UiOrchestrator {
                 // StatusChanged(Ready) after LaunchFailed, so this is safe for all error paths.
                 self.error = Some(message.clone());
                 self.status_text = message.clone();
-                self.views.mods.error = Some(message);
+                self.views.mods.error = Some(message.clone());
                 self.displayed_status = crate::game::LauncherStatus::Ready;
+
+                // Log the error to the logs panel
+                self.log_to_launcher(crate::ui::server_panel::LogEntry::error(message.clone()));
 
                 // If saving failed, rollback visuals to last known safe state
                 if let Some(backup) = self.last_known_safe_settings.take() {
