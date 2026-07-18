@@ -36,7 +36,7 @@ impl From<anyhow::Error> for LaunchError {
 async fn launch_flow_internal(
     tx: mpsc::Sender<FromCore>,
     internal_tx: mpsc::Sender<super::super::coordinator::CoordinatorEvent>,
-    settings: rustale_shared::config::GameSettings,
+    mut settings: rustale_shared::config::GameSettings,
     profile_name: String,
     profile_uuid: uuid::Uuid,
     version_hint: Option<i32>,

@@ -110,7 +110,7 @@ pub async fn run_client_oauth_flow(
             });
         "#;
 
-        let mut tx_opt = Some(tx);
+        let tx_opt = std::sync::Arc::new(std::sync::Mutex::new(Some(tx)));
         let proxy_nav = proxy.clone();
         
         let nav_handler = move |url: String| -> bool {
@@ -125,7 +125,7 @@ pub async fn run_client_oauth_flow(
                             if k == "error" { err = Some(v.to_string()); }
                         }
                     }
-                    if let Some(tx) = tx_opt.take() {
+                    if let Some(tx) = tx_opt.lock().unwrap().take() {
                         if let Some(e) = err {
                             let _ = tx.send(Err(anyhow::anyhow!("OAuth error: {}", e)));
                         } else if let Some(c) = code {
@@ -152,9 +152,8 @@ pub async fn run_client_oauth_flow(
 
         let mut web_context = wry::WebContext::new(Some(data_dir));
 
-        let _webview = WebViewBuilder::new()
+        let _webview = WebViewBuilder::new_with_web_context(&mut web_context)
             .with_url(&auth_url)
-            .with_web_context(&mut web_context)
             .with_initialization_script(script)
             .with_ipc_handler(ipc_handler)
             .with_navigation_handler(nav_handler)
