@@ -388,23 +388,19 @@ async fn launch_flow_internal(
                 Err(e) => {
                     let err_str = e.to_string();
                     if !refreshed && err_str.contains("401") {
-                        if let Some(oauth) = &settings.oauth_tokens {
-                            if let Some(refresh_token) = &oauth.refresh_token {
-                                println!("[Auth] Access token expired (401), attempting OAuth refresh...");
-                                let issuer = if auth_mode == "sanasol" { "https://oauth.sanasol.ws" } else { "https://oauth.accounts.hytale.com" };
-                                match rustale_shared::oauth::refresh_oauth_tokens(issuer, &rustale_security::get_private_var("Z_CLIENT_ID"), refresh_token).await {
-                                    Ok(new_tokens) => {
-                                        current_access_token = Some(new_tokens.access_token.clone());
-                                        // Update settings struct so it uses it, though it won't persist to disk here.
-                                        // Core should be updated to save it if needed, but for now we recover the launch.
-                                        settings.oauth_tokens = Some(new_tokens);
-                                        refreshed = true;
-                                        continue;
-                                    }
-                                    Err(re) => {
-                                        println!("[Auth] Failed to refresh OAuth token: {}", re);
-                                    }
-                                }
+                        println!("[Auth] Access token expired (401) or missing. Running transparent WebView auth flow...");
+                        let issuer = if auth_mode == "sanasol" { "https://oauth.sanasol.ws" } else { "https://oauth.accounts.hytale.com" };
+                        match rustale_shared::oauth::run_client_oauth_flow(issuer, &rustale_security::get_private_var("Z_CLIENT_ID").into_string()).await {
+                            Ok(success) => {
+                                current_access_token = Some(success.tokens.access_token.clone());
+                                // Update settings struct so it uses it, though it won't persist to disk here.
+                                // Core should be updated to save it if needed, but for now we recover the launch.
+                                settings.oauth_tokens = Some(success.tokens);
+                                refreshed = true;
+                                continue;
+                            }
+                            Err(re) => {
+                                println!("[Auth] Failed to run silent auth flow: {}", re);
                             }
                         }
                     }

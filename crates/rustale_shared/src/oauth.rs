@@ -41,15 +41,10 @@ pub async fn run_client_oauth_flow(
     issuer: &str,
     client_id: &str,
 ) -> Result<OAuthSuccess> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpListener;
-    
     let (verifier, challenge) = generate_pkce();
     let state = uuid::Uuid::new_v4().to_string();
 
-    let listener = TcpListener::bind("127.0.0.1:0").await?;
-    let port = listener.local_addr()?.port();
-    let redirect_uri = format!("http://127.0.0.1:{}/callback", port);
+    let redirect_uri = "http://127.0.0.1:41234/callback".to_string();
 
     let auth_url = format!(
         "{}/oauth2/auth?response_type=code&client_id={}&redirect_uri={}&scope=openid%20hytale:profile&state={}&code_challenge={}&code_challenge_method=S256",
@@ -60,67 +55,134 @@ pub async fn run_client_oauth_flow(
         challenge
     );
 
-    // Open browser (handled gracefully if it fails)
-    let _ = open::that(&auth_url);
+    let (tx, rx) = tokio::sync::oneshot::channel::<Result<String>>();
 
-    // Wait for callback
-    let (mut stream, _) = listener.accept().await?;
-    let mut reader = tokio::io::BufReader::new(&mut stream);
-    let mut first_line = String::new();
-    let _ = tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut first_line).await?;
+    // Mover a un thread dedicado para la interfaz de wry/tao
+    std::thread::spawn(move || {
+        use tao::event_loop::{ControlFlow, EventLoopBuilder};
+        use tao::window::WindowBuilder;
+        use tao::event::{Event, WindowEvent};
+        use wry::WebViewBuilder;
+        use directories::ProjectDirs;
 
-    let mut code = None;
-    let mut received_state = None;
-    let mut error_msg = None;
+        enum WebViewEvent {
+            ShowWindow,
+            CloseWindow,
+        }
 
-    if first_line.starts_with("GET ") {
-        let parts: Vec<&str> = first_line.split_whitespace().collect();
-        if parts.len() > 1 {
-            let url = parts[1];
-            if let Some(query) = url.split('?').nth(1) {
-                for pair in query.split('&') {
-                    let mut kv = pair.split('=');
-                    if let (Some(k), Some(v)) = (kv.next(), kv.next()) {
-                        if k == "code" {
-                            code = Some(v.to_string());
-                        } else if k == "state" {
-                            received_state = Some(v.to_string());
-                        } else if k == "error" {
-                            error_msg = Some(v.to_string());
-                        } else if k == "error_description" {
-                            if let Some(err) = &mut error_msg {
-                                *err = format!("{}: {}", err, urlencoding::decode(v).unwrap_or_default());
-                            }
+        let event_loop = EventLoopBuilder::<WebViewEvent>::with_user_event().build();
+        let proxy = event_loop.create_proxy();
+        
+        let window = WindowBuilder::new()
+            .with_title("RusTale Authentication")
+            .with_inner_size(tao::dpi::LogicalSize::new(500.0, 600.0))
+            .with_visible(false) // Inicialmente oculta
+            .build(&event_loop)
+            .unwrap();
+
+        let data_dir = ProjectDirs::from("com", "rustale", "RustaleLauncher")
+            .map(|p| p.data_local_dir().join("webview"))
+            .unwrap_or_else(|| std::path::PathBuf::from(".webview_data"));
+
+        let script = r#"
+            window.addEventListener('DOMContentLoaded', () => {
+                let url = window.location.href.toLowerCase();
+                let html = document.body.innerHTML.toLowerCase();
+                
+                // Mostrar ventana si estamos en una pantalla que requiere interacción manual
+                if (url.includes('/login') || html.includes('sign in with') || html.includes('password')) {
+                    window.ipc.postMessage('SHOW_WINDOW');
+                }
+                
+                // Si estamos en la pantalla de "Authorize" (consentimiento), damos click automático
+                if (url.includes('/oauth') || url.includes('consent') || html.includes('authorize')) {
+                    let btn = document.querySelector('button[type="submit"], button.primary, .btn-primary, [name="accept"]');
+                    if (btn && !url.includes('/login')) {
+                        btn.click();
+                    } else if (!url.includes('/login')) {
+                        // Failsafe por si cambia el DOM del consent screen
+                        window.ipc.postMessage('SHOW_WINDOW');
+                    }
+                }
+                
+                // Failsafe global: si el proceso se estanca en cualquier pantalla por 4 segundos, mostrarla
+                setTimeout(() => window.ipc.postMessage('SHOW_WINDOW'), 4000);
+            });
+        "#;
+
+        let mut tx_opt = Some(tx);
+        let proxy_nav = proxy.clone();
+        
+        let nav_handler = move |url: String| -> bool {
+            if url.starts_with("http://127.0.0.1:41234/callback") {
+                if let Some(query) = url.split('?').nth(1) {
+                    let mut code = None;
+                    let mut err = None;
+                    for pair in query.split('&') {
+                        let mut kv = pair.split('=');
+                        if let (Some(k), Some(v)) = (kv.next(), kv.next()) {
+                            if k == "code" { code = Some(v.to_string()); }
+                            if k == "error" { err = Some(v.to_string()); }
+                        }
+                    }
+                    if let Some(tx) = tx_opt.take() {
+                        if let Some(e) = err {
+                            let _ = tx.send(Err(anyhow::anyhow!("OAuth error: {}", e)));
+                        } else if let Some(c) = code {
+                            let _ = tx.send(Ok(c));
+                        } else {
+                            let _ = tx.send(Err(anyhow::anyhow!("No code or error in redirect")));
                         }
                     }
                 }
+                let _ = proxy_nav.send_event(WebViewEvent::CloseWindow);
+                false
+            } else {
+                true
             }
-        }
-    }
+        };
 
-    let response_body = if error_msg.is_none() && code.is_some() && received_state.as_deref() == Some(state.as_str()) {
-        "<html><body><h1>Success!</h1><p>You can close this window and return to the application.</p><script>window.close();</script></body></html>"
-    } else {
-        "<html><body><h1>Authentication Failed</h1><p>Please close this window and try again.</p></body></html>"
+        let proxy_ipc = proxy.clone();
+        let ipc_handler = move |req: wry::http::Request<String>| {
+            let msg = req.into_body();
+            if msg == "SHOW_WINDOW" {
+                let _ = proxy_ipc.send_event(WebViewEvent::ShowWindow);
+            }
+        };
+
+        let _webview = WebViewBuilder::new()
+            .with_url(&auth_url)
+            .with_data_directory(data_dir)
+            .with_initialization_script(script)
+            .with_ipc_handler(ipc_handler)
+            .with_navigation_handler(nav_handler)
+            .build(&window)
+            .unwrap();
+
+        event_loop.run(move |event, _, control_flow| {
+            *control_flow = ControlFlow::Wait;
+
+            match event {
+                Event::UserEvent(WebViewEvent::CloseWindow) => {
+                    *control_flow = ControlFlow::Exit;
+                }
+                Event::UserEvent(WebViewEvent::ShowWindow) => {
+                    window.set_visible(true);
+                    window.focus_window();
+                }
+                Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
+                    *control_flow = ControlFlow::Exit;
+                }
+                _ => {}
+            }
+        });
+    });
+
+    let code = match rx.await {
+        Ok(Ok(c)) => c,
+        Ok(Err(e)) => return Err(e),
+        Err(_) => return Err(anyhow::anyhow!("WebView thread panicked or closed")),
     };
-
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        response_body.len(),
-        response_body
-    );
-    let _ = stream.write_all(response.as_bytes()).await;
-    let _ = stream.flush().await;
-
-    if let Some(err) = error_msg {
-        return Err(anyhow::anyhow!("OAuth Error: {}", err));
-    }
-
-    if received_state.as_deref() != Some(state.as_str()) {
-        return Err(anyhow::anyhow!("State mismatch"));
-    }
-
-    let code = code.ok_or_else(|| anyhow::anyhow!("No code received"))?;
 
     // Exchange token
     let client = crate::network::HTTP_CLIENT.clone();

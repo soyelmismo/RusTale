@@ -35,6 +35,8 @@ aes-gcm = "0.10"
 generic-array = "0.14"
 rustale_security = { path = "../rustale_security", optional = true }
 rustls = { version = "0.23.36", default-features = false, features = ["ring"] }
+wry = "0.55.1"
+tao = "0.35.3"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_ProcessStatus"] }
