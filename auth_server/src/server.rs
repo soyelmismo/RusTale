@@ -182,6 +182,11 @@ fn create_router(state: Arc<Mutex<ServerState>>, _port: u16) -> Router {
     let cosmetics_routes = Router::new()
         .route("/cosmetics/list", get(handlers::handle_cosmetics_list_get));
 
+    // Discovery routes
+    let discovery_routes = Router::new()
+        .route("/servers/listings", get(handlers::handle_listings_get))
+        .route("/servers/{uuid}/interaction/{action}", post(handlers::handle_interaction_post));
+
     // Combine all routes
     Router::new()
         .merge(system_routes)
@@ -193,6 +198,7 @@ fn create_router(state: Arc<Mutex<ServerState>>, _port: u16) -> Router {
         .merge(server_routes)
         .merge(internal_routes)
         .merge(cosmetics_routes)
+        .merge(discovery_routes)
         .route("/{*path}", axum::routing::get(cors_options_handler))
         .fallback(handlers::not_found)
         .layer(middleware::from_fn(cors_middleware))
