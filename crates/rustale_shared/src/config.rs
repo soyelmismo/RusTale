@@ -251,6 +251,7 @@ fn default_true() -> bool {
 impl Default for GameSettings {
     fn default() -> Self {
         Self {
+            oauth_tokens: None,
             min_memory: 2,
             max_memory: 4,
             width: 1024,

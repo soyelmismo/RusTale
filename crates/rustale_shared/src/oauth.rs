@@ -4,7 +4,7 @@ use rand::RngCore;
 use sha2::{Digest, Sha256};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct OAuthTokens {
     pub access_token: String,
     pub id_token: Option<String>, // Often returned in OIDC, but Device Code flow might just return access_token
@@ -26,7 +26,7 @@ pub struct OAuthSuccess {
 
 pub fn generate_pkce() -> (rustale_security::memory::SafeString, String) {
     let mut verifier_bytes = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut verifier_bytes);
+    rand::rng().fill_bytes(&mut verifier_bytes);
     let verifier = URL_SAFE_NO_PAD.encode(verifier_bytes);
 
     let mut hasher = Sha256::new();
@@ -150,9 +150,11 @@ pub async fn run_client_oauth_flow(
             }
         };
 
+        let mut web_context = wry::WebContext::new(Some(data_dir));
+
         let _webview = WebViewBuilder::new()
             .with_url(&auth_url)
-            .with_data_directory(data_dir)
+            .with_web_context(&mut web_context)
             .with_initialization_script(script)
             .with_ipc_handler(ipc_handler)
             .with_navigation_handler(nav_handler)
@@ -168,7 +170,7 @@ pub async fn run_client_oauth_flow(
                 }
                 Event::UserEvent(WebViewEvent::ShowWindow) => {
                     window.set_visible(true);
-                    window.focus_window();
+                    window.set_focus();
                 }
                 Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
                     *control_flow = ControlFlow::Exit;
