@@ -5,6 +5,8 @@ pub mod profile;
 pub mod skins;
 pub mod cosmetics;
 pub mod discovery;
+pub mod liveconfig;
+pub mod websocket;
 
 pub use system::*;
 pub use account::*;
@@ -13,3 +15,5 @@ pub use profile::*;
 pub use skins::*;
 pub use cosmetics::*;
 pub use discovery::*;
+pub use liveconfig::*;
+pub use websocket::*;

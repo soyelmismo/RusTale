@@ -187,6 +187,17 @@ fn create_router(state: Arc<Mutex<ServerState>>, _port: u16) -> Router {
         .route("/servers/listings", get(handlers::handle_listings_get))
         .route("/servers/{uuid}/interaction/{action}", post(handlers::handle_interaction_post));
 
+    // LiveConfig routes
+    let liveconfig_routes = Router::new()
+        .route("/configs/{*path}", get(handlers::handle_configs_get))
+        .route("/liveconfig/manifest.json", get(handlers::handle_liveconfig_manifest))
+        .route("/v1/release/any/any/feature-flags/209d2849185b9bef0d883bdcf57f52b1d981967e9a1ab15244b25dc96ca6708a.json", get(handlers::handle_feature_flags))
+        .route("/news-tiles", get(handlers::handle_news_tiles));
+
+    // WebSocket Gateway route
+    let ws_routes = Router::new()
+        .route("/ws", get(handlers::handle_ws_upgrade));
+
     // Combine all routes
     Router::new()
         .merge(system_routes)
@@ -199,6 +210,8 @@ fn create_router(state: Arc<Mutex<ServerState>>, _port: u16) -> Router {
         .merge(internal_routes)
         .merge(cosmetics_routes)
         .merge(discovery_routes)
+        .merge(liveconfig_routes)
+        .merge(ws_routes)
         .route("/{*path}", axum::routing::any(catch_all_handler))
         .fallback(handlers::not_found)
         .layer(middleware::from_fn(cors_middleware))

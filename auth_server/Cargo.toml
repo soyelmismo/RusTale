@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 # Web framework
-axum = { version = "0.8.8", features = ["json", "macros"] }
+axum = { version = "0.8.8", features = ["json", "macros", "ws"] }
 
 # Async runtime
 tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "sync", "fs", "net"] }
