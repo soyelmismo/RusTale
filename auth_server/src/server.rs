@@ -11,7 +11,7 @@ use tokio::sync::{oneshot, Mutex};
 use crate::{
     crypto,
     handlers,
-    middleware::{cors_middleware, cors_options_handler, log_request},
+    middleware::{cors_middleware, catch_all_handler, log_request},
     state::ServerState,
     utils::{load_skins_from_disk, migrate_skins},
 };
@@ -199,7 +199,7 @@ fn create_router(state: Arc<Mutex<ServerState>>, _port: u16) -> Router {
         .merge(internal_routes)
         .merge(cosmetics_routes)
         .merge(discovery_routes)
-        .route("/{*path}", axum::routing::options(cors_options_handler))
+        .route("/{*path}", axum::routing::any(catch_all_handler))
         .fallback(handlers::not_found)
         .layer(middleware::from_fn(cors_middleware))
         .layer(middleware::from_fn(log_request))

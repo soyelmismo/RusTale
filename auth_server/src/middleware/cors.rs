@@ -31,6 +31,10 @@ pub async fn cors_middleware(request: Request, next: Next) -> Result<Response, S
     Ok(response)
 }
 
-pub async fn cors_options_handler() -> StatusCode {
-    StatusCode::OK
+pub async fn catch_all_handler(method: axum::http::Method) -> StatusCode {
+    if method == axum::http::Method::OPTIONS {
+        StatusCode::OK
+    } else {
+        StatusCode::NOT_FOUND
+    }
 }
