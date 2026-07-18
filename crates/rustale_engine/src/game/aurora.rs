@@ -1,5 +1,12 @@
 use sha2::Digest;
 use std::path::Path;
+use std::sync::OnceLock;
+
+static EXPECTED_CHECKSUM: OnceLock<&'static str> = OnceLock::new();
+
+pub fn set_expected_checksum(checksum: &'static str) {
+    let _ = EXPECTED_CHECKSUM.set(checksum);
+}
 
 /// Security guard to clean up temporary files when exiting the scope via Drop.
 pub struct FileCleanupGuard {
@@ -43,10 +50,7 @@ pub fn verify_aurora_checksum(aurora_path: &Path) -> Result<bool, Box<dyn std::e
     // Checksum embebido como variable de entorno en tiempo de compilación.
     // Si la variable no fue definida en tiempo de compilación (builds de desarrollo),
     // usamos el placeholder y saltamos la verificación.
-    const EMBEDDED_CHECKSUM: &str = match option_env!("AURORA_CHECKSUM") {
-        Some(checksum) => checksum,
-        None => "dev_checksum_placeholder",
-    };
+    let embedded_checksum = EXPECTED_CHECKSUM.get().copied().or(option_env!("AURORA_CHECKSUM")).unwrap_or("dev_checksum_placeholder");
 
     // En modo dev (sin AURORA_CHECKSUM en compile-time) se acepta cualquier aurora
     // para no bloquear el flujo de desarrollo.
@@ -61,11 +65,11 @@ pub fn verify_aurora_checksum(aurora_path: &Path) -> Result<bool, Box<dyn std::e
     hasher.update(&aurora_bytes);
     let current_checksum = format!("{:x}", hasher.finalize());
 
-    let is_valid = EMBEDDED_CHECKSUM == current_checksum;
+    let is_valid = embedded_checksum == current_checksum;
 
     if !is_valid {
         eprintln!("[Security] Aurora checksum mismatch!");
-        eprintln!("[Security] Expected: {}", EMBEDDED_CHECKSUM);
+        eprintln!("[Security] Expected: {}", embedded_checksum);
         eprintln!("[Security] Current:  {}", current_checksum);
     } else {
         println!("[Security] Aurora checksum verified: {}", current_checksum);

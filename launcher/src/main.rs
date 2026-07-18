@@ -23,6 +23,11 @@ pub fn main() -> std::process::ExitCode {
     // ACTIVATE SHIELD IMMEDIATELY
     rustale_shared::init_shield();
 
+    // REGISTER AURORA CHECKSUM
+    if let Some(checksum) = option_env!("AURORA_CHECKSUM") {
+        rustale_engine::game::aurora::set_expected_checksum(checksum);
+    }
+
     // 2. CLI Parsing
     let args = cli::parse();
 
