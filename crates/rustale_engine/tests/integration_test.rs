@@ -482,3 +482,62 @@ fn test_installation_with_cancellation() {
     let err = result.unwrap_err();
     assert!(err.to_string().contains("cancelled"), "Error should mention cancellation");
 }
+
+// === Integration Test 9: Download Status Signal Detection ===
+
+#[test]
+fn test_download_status_signal_from_stats_presence() {
+    use rustale_engine::core::logic::launcher::classify_status_from_payload;
+    use rustale_engine::game::LauncherStatus;
+    use rustale_shared::progress::{DownloadStats, ProgressPayload};
+
+    // 1. Payload with stats present -> LauncherStatus::Downloading (even if message_key is arbitrary or legacy raw text)
+    let download_payload = ProgressPayload {
+        current_step: 1,
+        total_steps: 2,
+        step_progress: 0.5,
+        global_progress: 0.25,
+        message_key: "Downloading patch 0->123...".to_string(),
+        message_args: vec![],
+        stats: Some(DownloadStats {
+            total_bytes: 1000,
+            downloaded_bytes: 500,
+            speed_str: "1 MB/s".to_string(),
+            eta_str: Some("5s".to_string()),
+        }),
+    };
+
+    assert_eq!(
+        classify_status_from_payload(&download_payload),
+        Some(LauncherStatus::Downloading)
+    );
+
+    // 2. Payload with stats None and matching keyword -> LauncherStatus::Migrating
+    let migrating_payload = ProgressPayload {
+        current_step: 2,
+        total_steps: 2,
+        step_progress: 0.8,
+        global_progress: 0.9,
+        message_key: "Extracting files...".to_string(),
+        message_args: vec![],
+        stats: None,
+    };
+
+    assert_eq!(
+        classify_status_from_payload(&migrating_payload),
+        Some(LauncherStatus::Migrating)
+    );
+
+    // 3. Payload with stats None and non-matching keyword -> None
+    let other_payload = ProgressPayload {
+        current_step: 2,
+        total_steps: 2,
+        step_progress: 1.0,
+        global_progress: 1.0,
+        message_key: "done".to_string(),
+        message_args: vec![],
+        stats: None,
+    };
+
+    assert_eq!(classify_status_from_payload(&other_payload), None);
+}
