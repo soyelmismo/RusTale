@@ -1088,10 +1088,8 @@ impl SettingsState {
                 None
             }
             SettingsMessage::LanguageSelected(lang) => {
-                // FIX: Also persist the selected language into temp_settings so it
-                // gets included in the SaveSettings payload when the user clicks Save.
-                // Previously only the localization preview was triggered but the value
-                // was never written, so the language reverted on next launch.
+                // Persist the selected language into temp_settings so it gets included
+                // in the SaveSettings payload when the user clicks Save.
                 self.temp_settings.language = lang.id.clone();
                 Some(Message::LanguageChangedInSettings(lang.id))
             }
