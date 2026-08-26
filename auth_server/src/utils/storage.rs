@@ -389,35 +389,151 @@ mod tests {
         assert!(loaded.contains_key("test-uuid"));
     }
 
+    // === get_user_skins_data Tests ===
+
     #[test]
-    fn test_get_user_skins_data_missing_user() {
-        // Test getting skins for a user that doesn't exist
-        let skins = HashMap::new();
-        
-        let result = get_user_skins_data("nonexistent-uuid", &skins);
-        
-        // Should return default data
-        assert!(!result.player_skins.is_empty());
+    fn test_get_user_skins_data_new_format_success() {
+        // Scenario: Valid UserSkinsData in new format with playerSkins and activeSkin
+        let mut skins = HashMap::new();
+        let skin_id = Uuid::new_v4().to_string();
+        let created_at = Utc::now();
+
+        let user_skins_json = serde_json::json!({
+            "playerSkins": [{
+                "id": skin_id,
+                "name": "Custom Avatar",
+                "skinData": "{\"face\":\"Face_1\"}",
+                "createdAt": created_at.to_rfc3339()
+            }],
+            "activeSkin": skin_id,
+            "skin": { "face": "Face_1" }
+        });
+
+        skins.insert("user-uuid-1".to_string(), user_skins_json);
+
+        let result = get_user_skins_data("user-uuid-1", &skins);
+
+        assert_eq!(result.player_skins.len(), 1);
+        assert_eq!(result.player_skins[0].id, skin_id);
+        assert_eq!(result.player_skins[0].name, "Custom Avatar");
+        assert_eq!(result.player_skins[0].skin_data, "{\"face\":\"Face_1\"}");
+        assert_eq!(result.active_skin, Some(skin_id));
+        assert_eq!(result.skin["face"], "Face_1");
+    }
+
+    #[test]
+    fn test_get_user_skins_data_new_format_deserialization_fallback() {
+        // Scenario: 'playerSkins' key exists, but deserialization fails due to wrong type
+        let mut skins = HashMap::new();
+        let malformed_json = serde_json::json!({
+            "playerSkins": "this_should_be_an_array_not_a_string",
+            "activeSkin": "skin-1"
+        });
+
+        skins.insert("user-uuid-2".to_string(), malformed_json.clone());
+
+        let result = get_user_skins_data("user-uuid-2", &skins);
+
+        // Falling back to default avatar
+        assert_eq!(result.player_skins.len(), 1);
+        assert_eq!(result.player_skins[0].name, "Default Avatar");
+        assert!(result.active_skin.is_some());
+        // Whole malformed object is stored in skin field
+        assert_eq!(result.skin, malformed_json);
+    }
+
+    #[test]
+    fn test_get_user_skins_data_hybrid_format() {
+        // Scenario: JSON has 'skin' field but no 'playerSkins'
+        let mut skins = HashMap::new();
+        let skin_data = serde_json::json!({
+            "variant": "ALEX",
+            "cape": "Cape.Red"
+        });
+        let hybrid_json = serde_json::json!({
+            "skin": skin_data
+        });
+
+        skins.insert("user-uuid-3".to_string(), hybrid_json);
+
+        let result = get_user_skins_data("user-uuid-3", &skins);
+
+        assert_eq!(result.player_skins.len(), 1);
+        assert_eq!(result.player_skins[0].name, "Default Avatar");
+        assert_eq!(result.skin, skin_data);
+        assert_eq!(result.player_skins[0].skin_data, serde_json::to_string(&skin_data).unwrap());
         assert!(result.active_skin.is_some());
     }
 
     #[test]
-    fn test_get_user_skins_data_legacy_format() {
-        // Test converting legacy format to new format
+    fn test_get_user_skins_data_pure_legacy_format() {
+        // Scenario: Direct skin object without 'playerSkins' or 'skin' keys
         let mut skins = HashMap::new();
-        skins.insert(
-            "legacy-user".to_string(),
-            serde_json::json!({
-                "variant": "STEVE",
-                "data": "base64encoded"
-            }),
-        );
-        
-        let result = get_user_skins_data("legacy-user", &skins);
-        
-        // Should have created playerSkins from legacy data
-        assert!(!result.player_skins.is_empty());
+        let pure_legacy_json = serde_json::json!({
+            "bodyCharacteristic": "Muscular.09",
+            "underwear": "Boxer.Purple",
+            "face": "Face_Neutral"
+        });
+
+        skins.insert("user-uuid-4".to_string(), pure_legacy_json.clone());
+
+        let result = get_user_skins_data("user-uuid-4", &skins);
+
+        assert_eq!(result.player_skins.len(), 1);
+        assert_eq!(result.player_skins[0].name, "Default Avatar");
+        assert_eq!(result.skin, pure_legacy_json);
+        assert_eq!(result.player_skins[0].skin_data, serde_json::to_string(&pure_legacy_json).unwrap());
         assert!(result.active_skin.is_some());
+    }
+
+    #[test]
+    fn test_get_user_skins_data_missing_uuid_default_skin() {
+        // Scenario: UUID not found in skins_map
+        let skins = HashMap::new();
+
+        let result = get_user_skins_data("nonexistent-uuid", &skins);
+
+        let expected_default_skin: serde_json::Value = serde_json::from_str(DEFAULT_SKIN).unwrap();
+        assert_eq!(result.player_skins.len(), 1);
+        assert_eq!(result.player_skins[0].name, "Default Avatar");
+        assert_eq!(result.skin, expected_default_skin);
+        assert!(result.active_skin.is_some());
+    }
+
+    #[test]
+    fn test_get_user_skins_data_multiple_skins_new_format() {
+        // Scenario: New format with multiple skins in playerSkins array
+        let mut skins = HashMap::new();
+        let skin_id_1 = Uuid::new_v4().to_string();
+        let skin_id_2 = Uuid::new_v4().to_string();
+
+        let user_skins_json = serde_json::json!({
+            "playerSkins": [
+                {
+                    "id": skin_id_1.clone(),
+                    "name": "Avatar One",
+                    "skinData": "{}",
+                    "createdAt": Utc::now().to_rfc3339()
+                },
+                {
+                    "id": skin_id_2.clone(),
+                    "name": "Avatar Two",
+                    "skinData": "{}",
+                    "createdAt": Utc::now().to_rfc3339()
+                }
+            ],
+            "activeSkin": skin_id_2.clone(),
+            "skin": {}
+        });
+
+        skins.insert("user-uuid-5".to_string(), user_skins_json);
+
+        let result = get_user_skins_data("user-uuid-5", &skins);
+
+        assert_eq!(result.player_skins.len(), 2);
+        assert_eq!(result.player_skins[0].id, skin_id_1);
+        assert_eq!(result.player_skins[1].id, skin_id_2);
+        assert_eq!(result.active_skin, Some(skin_id_2));
     }
 
     // === Edge Cases ===
