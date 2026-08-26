@@ -157,3 +157,43 @@ pub fn generate_server_uuid(server_id: &str) -> String {
         bytes[15]
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_port_valid() {
+        assert_eq!(extract_port(Some("localhost:8080".to_string())), Some(8080));
+        assert_eq!(extract_port(Some("127.0.0.1:3000".to_string())), Some(3000));
+        assert_eq!(extract_port(Some("example.com:80".to_string())), Some(80));
+    }
+
+    #[test]
+    fn test_extract_port_none() {
+        assert_eq!(extract_port(None), None);
+    }
+
+    #[test]
+    fn test_extract_port_no_port() {
+        assert_eq!(extract_port(Some("localhost".to_string())), None);
+        assert_eq!(extract_port(Some("127.0.0.1".to_string())), None);
+    }
+
+    #[test]
+    fn test_extract_port_invalid_port() {
+        assert_eq!(extract_port(Some("localhost:badport".to_string())), None);
+        assert_eq!(extract_port(Some("localhost:".to_string())), None);
+        assert_eq!(extract_port(Some("localhost:-1".to_string())), None);
+    }
+
+    #[test]
+    fn test_extract_port_out_of_bounds() {
+        assert_eq!(extract_port(Some("localhost:70000".to_string())), None);
+    }
+
+    #[test]
+    fn test_extract_port_empty_string() {
+        assert_eq!(extract_port(Some("".to_string())), None);
+    }
+}
