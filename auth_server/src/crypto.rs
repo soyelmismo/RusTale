@@ -240,11 +240,6 @@ pub fn update_jwks_from_remote(jwks: JwkSet) {
     }
 }
 
-// Deprecated logic kept for compatibility
-pub fn ensure_local_signing_capability() {
-    initialize_constant_keys();
-}
-
 /// Obtiene EXCLUSIVAMENTE las llaves públicas locales del servidor emulado.
 /// Ignora el caché remoto. Usado por el servidor interno para anunciar su propia identidad.
 pub fn get_host_jwks() -> JwkSet {
