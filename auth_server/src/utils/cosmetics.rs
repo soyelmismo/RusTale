@@ -167,3 +167,186 @@ fn get_exact_field_name(cat: &str) -> &'static str {
         _ => "",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+    use zip::write::SimpleFileOptions;
+
+    #[test]
+    fn test_nonexistent_zip_file_returns_empty_json() {
+        let non_existent_path = PathBuf::from("non_existent_archive_12345.zip");
+        let inventory_res = read_cosmetic_inventory_from_zip(&non_existent_path);
+        assert_eq!(inventory_res, "{}");
+
+        let cosmetics_res = read_cosmetics_from_zip(&non_existent_path);
+        assert_eq!(cosmetics_res, "{}");
+    }
+
+    #[test]
+    fn test_corrupted_zip_file_returns_empty_json() {
+        let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
+        writeln!(temp_file, "This is not a zip file").expect("Failed to write to temp file");
+
+        let zip_path = temp_file.path().to_path_buf();
+
+        let inventory_res = read_cosmetic_inventory_from_zip(&zip_path);
+        assert_eq!(inventory_res, "{}");
+
+        let cosmetics_res = read_cosmetics_from_zip(&zip_path);
+        assert_eq!(cosmetics_res, "{}");
+    }
+
+    #[test]
+    fn test_read_cosmetic_inventory_from_valid_zip() {
+        let temp_file = NamedTempFile::new().expect("Failed to create temp file");
+        let zip_path = temp_file.path().to_path_buf();
+
+        let file = std::fs::File::create(&zip_path).expect("Failed to open file for zip creation");
+        let mut zip_builder = zip::ZipWriter::new(file);
+        let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+
+        let haircut_json = r#"[
+            {"Id": "haircut_short_01", "Name": "Short Hair"},
+            {"Id": "haircut_long_01", "Name": "Long Hair"}
+        ]"#;
+        zip_builder
+            .start_file("Cosmetics/CharacterCreator/Haircuts.json", options)
+            .expect("Failed to start Haircuts file");
+        zip_builder
+            .write_all(haircut_json.as_bytes())
+            .expect("Failed to write Haircuts file");
+
+        let capes_json = r#"[
+            {"Id": "cape_red", "Name": "Red Cape"}
+        ]"#;
+        zip_builder
+            .start_file("Cosmetics/CharacterCreator/Capes.json", options)
+            .expect("Failed to start Capes file");
+        zip_builder
+            .write_all(capes_json.as_bytes())
+            .expect("Failed to write Capes file");
+
+        zip_builder.finish().expect("Failed to finalize zip archive");
+
+        let inventory_json = read_cosmetic_inventory_from_zip(&zip_path);
+        let parsed: HashMap<String, Vec<String>> =
+            serde_json::from_str(&inventory_json).expect("Failed to parse output JSON");
+
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(
+            parsed.get("haircut"),
+            Some(&vec!["haircut_short_01".to_string(), "haircut_long_01".to_string()])
+        );
+        assert_eq!(parsed.get("cape"), Some(&vec!["cape_red".to_string()]));
+    }
+
+    #[test]
+    fn test_read_cosmetic_inventory_malformed_json_in_zip() {
+        let temp_file = NamedTempFile::new().expect("Failed to create temp file");
+        let zip_path = temp_file.path().to_path_buf();
+
+        let file = std::fs::File::create(&zip_path).expect("Failed to open file for zip creation");
+        let mut zip_builder = zip::ZipWriter::new(file);
+        let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+
+        let malformed_json = r#"[{"Id": "haircut_short_01", "Name": "Short Hair""#;
+        zip_builder
+            .start_file("Cosmetics/CharacterCreator/Haircuts.json", options)
+            .expect("Failed to start Haircuts file");
+        zip_builder
+            .write_all(malformed_json.as_bytes())
+            .expect("Failed to write malformed file");
+
+        zip_builder.finish().expect("Failed to finalize zip archive");
+
+        let inventory_json = read_cosmetic_inventory_from_zip(&zip_path);
+        assert_eq!(inventory_json, "{}");
+    }
+
+    #[test]
+    fn test_read_cosmetics_from_zip_with_gradient_sets_and_textures() {
+        let temp_file = NamedTempFile::new().expect("Failed to create temp file");
+        let zip_path = temp_file.path().to_path_buf();
+
+        let file = std::fs::File::create(&zip_path).expect("Failed to open file for zip creation");
+        let mut zip_builder = zip::ZipWriter::new(file);
+        let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+
+        // 1. GradientSets.json
+        let gradient_json = r#"[
+            {
+                "Id": "hair_gradients",
+                "Gradients": {
+                    "black": {},
+                    "brown": {},
+                    "blonde": {}
+                }
+            }
+        ]"#;
+        zip_builder
+            .start_file("Cosmetics/CharacterCreator/GradientSets.json", options)
+            .expect("Failed to start GradientSets file");
+        zip_builder
+            .write_all(gradient_json.as_bytes())
+            .expect("Failed to write GradientSets file");
+
+        // 2. Haircuts.json with GradientSet reference & texture item & incomplete item
+        let haircuts_json = r#"[
+            {
+                "Id": "hair_01",
+                "Name": "Curly Hair",
+                "GradientSet": "hair_gradients",
+                "GreyscaleTexture": "hair_01_thumb.png"
+            },
+            {
+                "Id": "hair_02",
+                "Name": "Straight Hair",
+                "Textures": {
+                    "red": "tex_red.png",
+                    "blue": "tex_blue.png"
+                }
+            },
+            {
+                "Id": "hidden_item"
+            }
+        ]"#;
+        zip_builder
+            .start_file("Cosmetics/CharacterCreator/Haircuts.json", options)
+            .expect("Failed to start Haircuts file");
+        zip_builder
+            .write_all(haircuts_json.as_bytes())
+            .expect("Failed to write Haircuts file");
+
+        zip_builder.finish().expect("Failed to finalize zip archive");
+
+        let cosmetics_json = read_cosmetics_from_zip(&zip_path);
+        let parsed: HashMap<String, Vec<serde_json::Value>> =
+            serde_json::from_str(&cosmetics_json).expect("Failed to parse cosmetics JSON");
+
+        assert!(parsed.contains_key("haircut"));
+        let haircut_items = parsed.get("haircut").unwrap();
+
+        // hidden_item should be skipped (missing name, model, and variants)
+        assert_eq!(haircut_items.len(), 2);
+
+        let item1 = &haircut_items[0];
+        assert_eq!(item1["id"], "hair_01");
+        assert_eq!(item1["name"], "Curly Hair");
+        assert_eq!(item1["thumbnail"], "hair_01_thumb.png");
+        let colors1: Vec<String> = serde_json::from_value(item1["colors"].clone()).unwrap();
+        assert_eq!(colors1.len(), 3);
+        assert!(colors1.contains(&"black".to_string()));
+        assert!(colors1.contains(&"brown".to_string()));
+        assert!(colors1.contains(&"blonde".to_string()));
+
+        let item2 = &haircut_items[1];
+        assert_eq!(item2["id"], "hair_02");
+        let colors2: Vec<String> = serde_json::from_value(item2["colors"].clone()).unwrap();
+        assert_eq!(colors2.len(), 2);
+        assert!(colors2.contains(&"red".to_string()));
+        assert!(colors2.contains(&"blue".to_string()));
+    }
+}
