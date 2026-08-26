@@ -579,12 +579,40 @@ impl UiOrchestrator {
     }
 
     /// Reconcile local server when profile changes
-    fn reconcile_local_server(&mut self) {
-        // TODO: Implement local server reconciliation logic
-        // This would typically involve:
-        // - Checking if auth server needs to be restarted with new profile
-        // - Updating server configuration
-        // - Restarting if necessary
+    fn reconcile_local_server(&mut self) -> Option<Task<Message>> {
+        if let Some(profile) = self.profiles.get_active_profile() {
+            let msg = format!(
+                "Reconciling local server configuration for profile '{}' ({})",
+                profile.name, profile.id
+            );
+            self.log_to_launcher(crate::ui::server_panel::LogEntry::info(msg));
+
+            if let Some(ref mgr) = self.views.server.manager {
+                let current_state = mgr.current_state_sync();
+                let is_active = matches!(
+                    current_state,
+                    rustale_server::ServerState::Running | rustale_server::ServerState::Starting
+                );
+
+                let log = crate::ui::server_panel::LogEntry::info(format!(
+                    "[Reconcile] Local server profile aligned to '{}'. Restarting server: {}",
+                    profile.name, is_active
+                ));
+                let _ = self
+                    .views
+                    .server
+                    .update(crate::ui::server_panel::ServerMessage::AuthServerLog(log));
+
+                if is_active {
+                    return Some(
+                        self.views
+                            .server
+                            .update(crate::ui::server_panel::ServerMessage::Restart),
+                    );
+                }
+            }
+        }
+        None
     }
 
     /// Helper to log a message to the launcher tab of the logs panel
@@ -1811,9 +1839,7 @@ impl UiOrchestrator {
                 self.visuals.profile_dropdown_open = false;
 
                 // Reconcile local server when profile changes
-                self.reconcile_local_server();
-
-                Some(Task::none())
+                self.reconcile_local_server()
             }
             Message::AddProfile => {
                 self.visuals.editing_profile = Some((None, String::new()));
