@@ -857,9 +857,8 @@ impl UiOrchestrator {
 
             // Launcher Update Events
             FromCore::LauncherUpdateCheckResult(result) => {
-                // FIX: Also update the settings modal's update_btn_status so the
-                // "Check for Updates" button in Settings reflects the result instead
-                // of staying in "Checking..." state forever.
+                // Update the settings modal's update_btn_status so the "Check for Updates"
+                // button in Settings reflects the result instead of staying in "Checking..." state forever.
                 match result {
                     Ok(Some(release)) => {
                         self.status_text = format!("Update available: {}", release.tag_name);
