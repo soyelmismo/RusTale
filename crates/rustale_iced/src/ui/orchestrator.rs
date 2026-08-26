@@ -764,12 +764,8 @@ impl UiOrchestrator {
                 );
             }
             FromCore::NewsLoaded(result) => {
-                // FIX: Previously this arm directly mutated self.views.news.posts, which:
-                //   1. Never reset loading = false → UI stuck in "Loading..." forever.
-                //   2. Never dispatched image-loading tasks → thumbnails never appeared.
-                //   3. Error case never set self.views.news.error → silent failure.
-                // Now we delegate through NewsSection::update(NewsLoaded) which handles
-                // all three concerns correctly.
+                // Delegate through NewsSection::update(NewsLoaded) which handles loading,
+                // thumbnail tasks, and error handling.
                 // NOTE: NewsSection::update already returns Task<Message> (not Task<NewsMessage>),
                 // so no additional .map() wrapping is needed here.
                 return Some(self.views.news.update(
