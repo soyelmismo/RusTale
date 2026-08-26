@@ -16,8 +16,6 @@ pub struct TokenConfig {
 }
 
 pub fn create_auth_token(username: &str, uuid: &str, port: u16, config: TokenConfig) -> String {
-    crypto::ensure_local_signing_capability();
-
     let header = JwtHeader {
         alg: "EdDSA".to_string(),
         kid: crypto::KEY_ID.to_string(),
