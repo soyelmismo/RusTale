@@ -251,10 +251,13 @@ impl shader::Pipeline for LsdPipeline {
         }))
         .unwrap_or_else(|_| {
             eprintln!("[SHADER] Failed to create shader module! Using fallback.");
-            device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Fallback Shader"),
-                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(DEFAULT_FALLBACK)),
-            })
+            std::panic::catch_unwind(AssertUnwindSafe(|| {
+                device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                    label: Some("Fallback Shader"),
+                    source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(DEFAULT_FALLBACK)),
+                })
+            }))
+            .expect("Failed to create fallback shader module")
         });
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

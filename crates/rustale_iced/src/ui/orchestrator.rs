@@ -11,6 +11,7 @@ use crate::ui::visuals::VisualState;
 use crate::util::MemoryStats;
 use iced::{Task, mouse};
 use rustale_shared::lang::Localization;
+use std::panic::AssertUnwindSafe;
 #[cfg(all(feature = "tray", windows))]
 use rustale_tray;
 
@@ -120,12 +121,12 @@ impl UiOrchestrator {
         quickplay: bool,
     ) -> (Self, Task<Message>) {
         // 1. CARGA INICIAL DE SHADERS
-        let total_shaders = std::panic::catch_unwind(|| {
+        let total_shaders = std::panic::catch_unwind(AssertUnwindSafe(|| {
             let shader_count = crate::ui::shader_manager::get_shader_count();
             let shader_code = crate::ui::shader_manager::build_uber_shader_with_index(0);
             crate::ui::lsd_shader::set_global_wgsl(shader_code);
             shader_count
-        })
+        }))
         .unwrap_or_else(|_| {
             crate::ui::lsd_shader::set_safe_mode_shader();
             1
