@@ -579,12 +579,33 @@ impl UiOrchestrator {
     }
 
     /// Reconcile local server when profile changes
-    fn reconcile_local_server(&mut self) {
-        // TODO: Implement local server reconciliation logic
-        // This would typically involve:
-        // - Checking if auth server needs to be restarted with new profile
-        // - Updating server configuration
-        // - Restarting if necessary
+    pub fn reconcile_local_server(&mut self) -> Task<Message> {
+        let (profile_name, profile_id) = match self.profiles.get_active_profile() {
+            Some(profile) => (profile.name, profile.id.to_string()),
+            None => ("Default".to_string(), "unknown".to_string()),
+        };
+
+        self.log_to_launcher(crate::ui::server_panel::LogEntry::info(format!(
+            "[Auth/Server] Reconciling local server for active profile: {} ({})",
+            profile_name, profile_id
+        )));
+
+        if matches!(
+            self.views.server.server_state,
+            rustale_server::ServerState::Running | rustale_server::ServerState::Starting
+        ) {
+            self.log_to_launcher(crate::ui::server_panel::LogEntry::warning(
+                "[Auth/Server] Local server is active. Restarting server to apply new profile credentials...",
+            ));
+            self.views
+                .server
+                .update(crate::ui::server_panel::ServerMessage::Restart)
+        } else {
+            self.log_to_launcher(crate::ui::server_panel::LogEntry::info(
+                "[Auth/Server] Local server is idle/stopped. Configuration reconciled for next startup.",
+            ));
+            Task::none()
+        }
     }
 
     /// Helper to log a message to the launcher tab of the logs panel
@@ -1811,9 +1832,9 @@ impl UiOrchestrator {
                 self.visuals.profile_dropdown_open = false;
 
                 // Reconcile local server when profile changes
-                self.reconcile_local_server();
+                let task = self.reconcile_local_server();
 
-                Some(Task::none())
+                Some(task)
             }
             Message::AddProfile => {
                 self.visuals.editing_profile = Some((None, String::new()));
@@ -2198,6 +2219,74 @@ fn tray_events_internal() -> impl iced::futures::Stream<Item = Message> {
             }
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rustale_shared::profiles::Profile;
+    use uuid::Uuid;
+
+    #[test]
+    fn test_reconcile_local_server_idle() {
+        let settings = GameSettings::default();
+        let mut profiles = ProfilesConfig::default();
+        let p1 = Profile {
+            id: Uuid::new_v4(),
+            name: "TestUser".to_string(),
+        };
+        profiles.profiles = vec![p1.clone()];
+        profiles.current_profile = p1.id;
+
+        let visuals = VisualState::new(1, crate::theme::generate_palette(&settings.theme));
+        let mut orchestrator = UiOrchestrator::new(settings, profiles, visuals);
+
+        // Server is in Idle state by default
+        let _task = orchestrator.reconcile_local_server();
+
+        // Check launcher log buffer in server view
+        let launcher_logs = orchestrator
+            .views
+            .server
+            .logs
+            .get(&crate::ui::server_panel::LogTab::Launcher)
+            .expect("Launcher logs tab should exist");
+
+        assert!(!launcher_logs.is_empty());
+        let last_log = launcher_logs.back().unwrap();
+        assert!(last_log.text.contains("Reconciling local server for active profile: TestUser"));
+    }
+
+    #[test]
+    fn test_reconcile_local_server_running() {
+        let settings = GameSettings::default();
+        let mut profiles = ProfilesConfig::default();
+        let p1 = Profile {
+            id: Uuid::new_v4(),
+            name: "TestUserRunning".to_string(),
+        };
+        profiles.profiles = vec![p1.clone()];
+        profiles.current_profile = p1.id;
+
+        let visuals = VisualState::new(1, crate::theme::generate_palette(&settings.theme));
+        let mut orchestrator = UiOrchestrator::new(settings, profiles, visuals);
+
+        // Simulate running server
+        orchestrator.views.server.server_state = rustale_server::ServerState::Running;
+
+        let _task = orchestrator.reconcile_local_server();
+
+        let launcher_logs = orchestrator
+            .views
+            .server
+            .logs
+            .get(&crate::ui::server_panel::LogTab::Launcher)
+            .expect("Launcher logs tab should exist");
+
+        assert!(launcher_logs.len() >= 2);
+        let log_texts: Vec<String> = launcher_logs.iter().map(|l| l.text.clone()).collect();
+        assert!(log_texts.iter().any(|t| t.contains("Restarting server to apply new profile credentials")));
+    }
 }
 
 #[cfg(all(feature = "tray", windows))]
