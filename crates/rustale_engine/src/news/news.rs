@@ -108,10 +108,13 @@ impl BlogPost {
         self.featured
     }
     
-    pub fn get_tags_display(&self) -> String {
+    pub fn get_tags_display(&self, loc: Option<&rustale_shared::lang::Localization>) -> String {
         if self.tags.is_empty() {
-            // TODO: Pass localization context here
-            "No tags".to_string() // Temporal hasta que se pueda pasar localización
+            if let Some(loc) = loc {
+                loc.t("common.no_tags").to_string()
+            } else {
+                "No tags".to_string()
+            }
         } else {
             self.tags.join(", ")
         }
@@ -201,4 +204,71 @@ fn strip_html_tags(html: &str) -> String {
            .replace("&gt;", ">")
            .trim()
            .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rustale_shared::lang::Localization;
+
+    #[test]
+    fn test_get_tags_display_with_empty_tags_and_localization() {
+        let mut loc = Localization::new();
+        loc.load_available_languages();
+        loc.load_language("es-ES");
+
+        let post = BlogPost {
+            id: "1".to_string(),
+            title: "Test".to_string(),
+            published_at: chrono::Utc::now(),
+            slug: "test".to_string(),
+            url: None,
+            cover_image: None,
+            body_excerpt: None,
+            author: "Test Author".to_string(),
+            featured: false,
+            tags: vec![],
+            created_at: chrono::Utc::now(),
+        };
+
+        assert_eq!(post.get_tags_display(Some(&loc)), "Sin etiquetas");
+    }
+
+    #[test]
+    fn test_get_tags_display_with_empty_tags_no_localization() {
+        let post = BlogPost {
+            id: "1".to_string(),
+            title: "Test".to_string(),
+            published_at: chrono::Utc::now(),
+            slug: "test".to_string(),
+            url: None,
+            cover_image: None,
+            body_excerpt: None,
+            author: "Test Author".to_string(),
+            featured: false,
+            tags: vec![],
+            created_at: chrono::Utc::now(),
+        };
+
+        assert_eq!(post.get_tags_display(None), "No tags");
+    }
+
+    #[test]
+    fn test_get_tags_display_with_tags() {
+        let post = BlogPost {
+            id: "1".to_string(),
+            title: "Test".to_string(),
+            published_at: chrono::Utc::now(),
+            slug: "test".to_string(),
+            url: None,
+            cover_image: None,
+            body_excerpt: None,
+            author: "Test Author".to_string(),
+            featured: false,
+            tags: vec!["hytale".to_string(), "update".to_string()],
+            created_at: chrono::Utc::now(),
+        };
+
+        assert_eq!(post.get_tags_display(None), "hytale, update");
+    }
 }
