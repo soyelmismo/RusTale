@@ -946,9 +946,8 @@ impl UiOrchestrator {
                 match result {
                     Ok(mod_id) => {
                         self.status_text = format!("Successfully installed {}", mod_id);
-                        // FIX: Dispatch a real background refresh task instead of just
-                        // setting loading=true with no follow-up task, which would leave
-                        // the spinner running forever.
+                        // Dispatch a background refresh task when the mods view is open so
+                        // local mods are reloaded and spinner does not run forever.
                         if self.views.mods.is_open {
                             return Some(Task::done(Message::Mods(
                                 crate::ui::mods_modal::ModsMessage::RefreshLocalBackground,
@@ -967,7 +966,7 @@ impl UiOrchestrator {
                 match result {
                     Ok(mod_id) => {
                         self.status_text = format!("Successfully uninstalled {}", mod_id);
-                        // FIX: Same as ModInstallCompleted — dispatch real refresh.
+                        // Dispatch a background refresh task when the mods view is open.
                         if self.views.mods.is_open {
                             return Some(Task::done(Message::Mods(
                                 crate::ui::mods_modal::ModsMessage::RefreshLocalBackground,
