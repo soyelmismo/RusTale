@@ -4,7 +4,7 @@ use crate::assets::{
 use crate::config::ServerConfig;
 use crate::manager::ServerEvent;
 use anyhow::{Context, Result};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
@@ -100,33 +100,36 @@ pub async fn run_server_flow(config: ServerConfig) -> Result<()> {
 
 // ─── Core server flow ─────────────────────────────────────────────────────────
 
-/// Run the full dedicated-server lifecycle.
-///
-/// All user-visible output goes through `sink` so the caller decides whether
-/// it ends up on stdout or in a broadcast channel.
-///
-/// # Parameters
-/// - `config`   – server configuration (cloned from `ServerManager` or built by CLI).
-/// - `sink`     – where log lines are emitted.
-/// - `stop_rx`  – resolves when an external stop request arrives.
-/// - `stdin_rx` – lines forwarded to the Java process's stdin.
-///
-/// # Returns
-/// `Ok(Some(exit_code))` on a clean exit, `Ok(None)` if killed by stop signal,
-/// `Err(...)` on a fatal setup error.
-pub async fn run_server_flow_internal(
-    mut config: ServerConfig,
-    sink: LogSink,
-    mut stop_rx: oneshot::Receiver<()>,
-    mut stdin_rx: mpsc::Receiver<String>,
-) -> Result<Option<i32>> {
-    sink.log("--- RusTale Dedicated Server ---");
-    sink.log(format!(
-        "Mode: {} | Port: 5520 | Version: {}",
-        config.online_mode, config.game_version
-    ));
+/// Helper to construct a progress reporting callback for operations using LogSink.
+fn create_progress_callback(sink: &LogSink) -> ProgressCallback {
+    let sink_for_callback = sink.clone();
+    Arc::new(move |task: String,
+                   pct: f64,
+                   msg: String,
+                   total: u64,
+                   downloaded: u64,
+                   eta: Option<String>,
+                   _step: Option<usize>| {
+        let eta_str = eta.as_ref().map(|e| format!(" • ETA: {}", e)).unwrap_or_default();
+        if total > 0 {
+            let size_info = format!(
+                "{}/{}",
+                rustale_engine::game::patch_api::utils::format_bytes(downloaded),
+                rustale_engine::game::patch_api::utils::format_bytes(total)
+            );
+            sink_for_callback.log(format!("[{}] {:.1}% - {} ({}){}", task, pct, msg, size_info, eta_str));
+        } else {
+            sink_for_callback.log(format!("[{}] {:.1}% - {}{}", task, pct, msg, eta_str));
+        }
+    })
+}
 
-    // ── Auth port discovery ──────────────────────────────────────────────────
+/// Discovers or starts the local authentication server (emulator) if online_mode == "local".
+async fn setup_auth_server(
+    config: &ServerConfig,
+    sink: &LogSink,
+    root_dir: &Path,
+) -> Result<u16> {
     let mut auth_port = rustale_engine::util::get_saved_port();
 
     if auth_server::is_server_alive(auth_port).await {
@@ -141,12 +144,9 @@ pub async fn run_server_flow_internal(
         rustale_engine::util::save_active_port(auth_port);
     }
 
-    // ── Directory setup ──────────────────────────────────────────────────────
-    let root_dir = rustale_shared::config::get_server_root_dir();
-    let _ = tokio::fs::create_dir_all(&root_dir).await;
+    let _ = tokio::fs::create_dir_all(root_dir).await;
     let _ = auth_server::crypto::set_identity_dir(rustale_shared::config::get_identity_dir());
 
-    // ── Auth server startup ──────────────────────────────────────────────────
     let (auth_result_tx, mut auth_result_rx) = tokio::sync::oneshot::channel();
     let (_server_stop_tx, server_stop_rx) = tokio::sync::oneshot::channel::<()>();
 
@@ -213,58 +213,35 @@ pub async fn run_server_flow_internal(
         return Err(anyhow::anyhow!("Auth server failed to start: {}", e));
     }
 
-    // ── Path resolution ──────────────────────────────────────────────────────
-    let _tools_dir = root_dir.join("tools");
-    let version_dir_name = if config.game_version == "latest" || config.game_version == "0" {
-        "latest".to_string()
-    } else {
-        config.game_version.clone()
-    };
-    let install_dir = root_dir.join(&config.branch).join(&version_dir_name);
+    Ok(auth_port)
+}
 
-    // ── DualAuth agent ───────────────────────────────────────────────────────
+/// Ensures DualAuth Agent, JRE, Butler, and Java tools are verified and installed.
+async fn ensure_tools_and_java(
+    sink: &LogSink,
+    root_dir: &Path,
+    tools_dir: &Path,
+    callback: ProgressCallback,
+) -> Result<()> {
     sink.log("Ensuring DualAuth Agent is up to date...");
     rustale_engine::game::agent::ensure_agent(
-        &root_dir,
+        root_dir,
         &|_phase: String, _pct: f64, _msg: String| {},
         None,
     )
     .await?;
 
-    // ── Tool validation ──────────────────────────────────────────────────────
     sink.log("[1/5] Validating tools...");
 
-    let sink_for_callback = sink.clone();
-    let callback: ProgressCallback = Arc::new(move |task: String,
-                    pct: f64,
-                    msg: String,
-                    total: u64,
-                    downloaded: u64,
-                    eta: Option<String>,
-                    _step: Option<usize>| {
-        let eta_str = eta.as_ref().map(|e| format!(" • ETA: {}", e)).unwrap_or_default();
-        if total > 0 {
-            let size_info = format!(
-                "{}/{}",
-                rustale_engine::game::patch_api::utils::format_bytes(downloaded),
-                rustale_engine::game::patch_api::utils::format_bytes(total)
-            );
-            sink_for_callback.log(format!("[{}] {:.1}% - {} ({}){}", task, pct, msg, size_info, eta_str));
-        } else {
-            sink_for_callback.log(format!("[{}] {:.1}% - {}{}", task, pct, msg, eta_str));
-        }
-    });
-
-    // Re-use tools from main installation where possible.
     let main_app_dir = rustale_shared::config::get_app_dir();
-    let tools_dir = main_app_dir.join("tools");
-    let main_java = tools_dir.join("jre");
-    let main_butler = tools_dir.join("butler");
-    let server_java = _tools_dir.join("jre");
-    let server_butler = _tools_dir.join("butler");
+    let main_tools_dir = main_app_dir.join("tools");
+    let main_java = main_tools_dir.join("jre");
+    let main_butler = main_tools_dir.join("butler");
+    let server_java = tools_dir.join("jre");
+    let server_butler = tools_dir.join("butler");
 
     if main_java.exists()
-        && (!server_java.exists() || rustale_engine::java::get_java_exec(&root_dir).is_err())
+        && (!server_java.exists() || rustale_engine::java::get_java_exec(root_dir).is_err())
     {
         sink.log("[Tools] Copying JRE from main installation...");
         let mr = main_java.clone();
@@ -279,15 +256,28 @@ pub async fn run_server_flow_internal(
         tokio::task::spawn_blocking(move || rustale_engine::util::copy_recursive_sync(mt, st)).await??;
     }
 
-    let java_info = rustale_engine::java::detection::ensure_java_available(&root_dir).await?;
+    let java_info = rustale_engine::java::detection::ensure_java_available(root_dir).await?;
     sink.log(format!("[Server] Environment verified: Java {}", java_info.version));
     let patch_frontend = PatchApiFrontend::get_instance();
-    let callback_clone = callback.clone();
     let _butler_path = patch_frontend
-        .install_butler(&root_dir, callback_clone, None)
+        .install_butler(root_dir, callback, None)
         .await?;
 
-    // ── Game-file resolution ─────────────────────────────────────────────────
+    Ok(())
+}
+
+/// Resolves game files, configures assets, and downloads missing game patches if needed.
+async fn prepare_game_files_and_assets(
+    config: &mut ServerConfig,
+    sink: &LogSink,
+    root_dir: &Path,
+    install_dir: &Path,
+    version_dir_name: &str,
+    callback: ProgressCallback,
+) -> Result<(PathBuf, PathBuf)> {
+    let main_app_dir = rustale_shared::config::get_app_dir();
+    let patch_frontend = PatchApiFrontend::get_instance();
+
     sink.log("[2/5] Checking Game Server files...");
 
     let version_info = patch_frontend
@@ -337,7 +327,7 @@ pub async fn run_server_flow_internal(
                 "Found matching version {} at {:?}. Processing files...",
                 version_str, src
             ));
-            let _ = tokio::fs::create_dir_all(&install_dir).await;
+            let _ = tokio::fs::create_dir_all(install_dir).await;
 
             let src_assets = src.join("Assets.zip");
             if config.use_direct_assets {
@@ -393,12 +383,10 @@ pub async fn run_server_flow_internal(
         }
     }
 
-    // ── Asset configuration ──────────────────────────────────────────────────
     sink.log("Setting up assets configuration...");
     let local_assets_path = install_dir.join("Assets.zip");
     let mut source_candidate: Option<PathBuf> = None;
 
-    let main_app_dir = rustale_shared::config::get_app_dir();
     let version_str = match find_best_client_version(
         &main_app_dir,
         &config.branch,
@@ -484,7 +472,6 @@ pub async fn run_server_flow_internal(
         }
     }
 
-    // ── Download if nothing is available ────────────────────────────────────
     let jar_available = server_jar_raw.exists();
     let assets_exist_in_server = local_assets_path.exists();
     let assets_exist_in_client = {
@@ -523,9 +510,9 @@ pub async fn run_server_flow_internal(
 
         let localization = rustale_engine::lang::Localization::new();
         rustale_engine::game::patcher::apply_pwr(
-            &root_dir,
+            root_dir,
             &config.branch,
-            &version_dir_name,
+            version_dir_name,
             &patch_path,
             callback_for_pwr,
             None,
@@ -546,45 +533,48 @@ pub async fn run_server_flow_internal(
         }
     }
 
-    // ── Runtime preparation ──────────────────────────────────────────────────
-    let target_jar_path = server_jar_raw.clone();
-    sink.log(format!("Using JAR: {:?}", target_jar_path));
+    Ok((server_jar_raw, local_assets_path))
+}
 
+/// Prepares Java runtime and proxy.
+async fn prepare_runtime(sink: &LogSink, root_dir: &Path) -> Result<String> {
     sink.log("[4/5] Preparing Runtime...");
 
-    let java_exec = rustale_engine::java::get_java_exec(&root_dir)?;
+    let java_exec = rustale_engine::java::get_java_exec(root_dir)?;
     let java_path = PathBuf::from(&java_exec);
 
-    // Siempre parchar Java (tanto singleplayer como servidor)
-    // Usar spawn_blocking para no bloquear el hilo async
     let java_path_clone = java_path.clone();
     let proxy_setup = tokio::task::spawn_blocking(move || {
         rustale_engine::java::proxy::setup_java_proxy(&java_path_clone)
-    }).await;
-    
+    })
+    .await;
+
     if let Ok(Err(e)) = proxy_setup {
         sink.err(format!("[Runner] Warning: Failed to setup Java proxy: {}", e));
     }
-    
-    // Servidor dedicado usa java_original explícitamente
+
     let java_original_name = if cfg!(windows) { "java_original.exe" } else { "java_original" };
     let java_original_path = java_path.parent().unwrap().join(java_original_name);
-    
+
     let final_java = if java_original_path.exists() {
         java_original_path.to_string_lossy().to_string()
     } else {
         sink.log("[Runner] (Server) Warning: java_original not found, using vanilla java");
         java_exec.clone()
     };
-    
+
     sink.log(format!("[Runner] (Server) Using Java: {}", final_java));
 
     rustale_engine::util::make_executable(&PathBuf::from(&final_java)).await?;
 
-    // ── Tunnel ───────────────────────────────────────────────────────────────
+    Ok(final_java)
+}
+
+/// Starts optional Playit tunnel process if configured in `ServerConfig`.
+async fn start_tunnel_if_configured(config: &ServerConfig, sink: &LogSink, root_dir: &Path) {
     if let Some(provider) = &config.tunnel_provider {
         if provider == "playit" {
-            let root_clone = root_dir.clone();
+            let root_clone = root_dir.to_path_buf();
             let (tx, mut rx) = mpsc::channel(1);
 
             sink.log("Starting tunnel and waiting for connection details...");
@@ -614,8 +604,111 @@ pub async fn run_server_flow_internal(
             }
         }
     }
+}
 
-    // ── Pre-launch validation ────────────────────────────────────────────────
+/// Fetches session tokens for authenticated or sanasol modes.
+async fn prepare_session_tokens(
+    config: &mut ServerConfig,
+    sink: &LogSink,
+) -> Option<rustale_engine::game::auth::AuthTokens> {
+    let mut session_tokens = None;
+
+    if config.online_mode == "authenticated" || config.online_mode == "sanasol" {
+        let issuer = if config.online_mode == "sanasol" {
+            "https://oauth.sanasol.ws"
+        } else {
+            "https://oauth.accounts.hytale.com"
+        };
+
+        let session_issuer = if config.online_mode == "sanasol" {
+            "https://sessions.sanasol.ws"
+        } else {
+            "https://sessions.hytale.com"
+        };
+
+        if config.oauth_tokens.is_none() {
+            sink.log("[Server] No OAuth tokens found. Starting Device Code Flow...");
+            match rustale_shared::oauth::run_server_device_code_flow(issuer, &rustale_security::get_private_var("Z_SERVER_CLIENT_ID")).await {
+                Ok(success) => {
+                    config.oauth_tokens = Some(success.tokens);
+                    let _ = rustale_server::config::save_config(config).await;
+                }
+                Err(e) => {
+                    sink.err(format!("[Server] Failed to authenticate: {}", e));
+                }
+            }
+        }
+
+        if let Some(oauth) = &config.oauth_tokens {
+            sink.log("[Server] Fetching game session tokens...");
+            let client = rustale_shared::HTTP_CLIENT.clone();
+            let auth_url = session_issuer.to_string();
+
+            let profile_name = "ServerOperator";
+            let profile_uuid = uuid::Uuid::new_v4().to_string();
+
+            let mut current_access_token = oauth.access_token.clone();
+            let mut refreshed = false;
+
+            loop {
+                match rustale_engine::game::auth::fetch_remote_tokens(
+                    &client,
+                    &auth_url,
+                    profile_name,
+                    &profile_uuid,
+                    Some(&current_access_token),
+                ).await {
+                    Ok(tokens) => {
+                        session_tokens = Some(tokens);
+                        break;
+                    }
+                    Err(e) => {
+                        if !refreshed && e.to_string().contains("401") {
+                            if let Some(refresh_token) = &config.oauth_tokens.as_ref().and_then(|t| t.refresh_token.clone()) {
+                                sink.log("[Server] Access token expired, attempting refresh...");
+                                match rustale_shared::oauth::refresh_oauth_tokens(issuer, &rustale_security::get_private_var("Z_SERVER_CLIENT_ID"), refresh_token).await {
+                                    Ok(new_tokens) => {
+                                        current_access_token = new_tokens.access_token.clone();
+                                        config.oauth_tokens = Some(new_tokens);
+                                        let _ = rustale_server::config::save_config(config).await;
+                                        refreshed = true;
+                                        continue;
+                                    }
+                                    Err(re) => {
+                                        sink.err(format!("[Server] Failed to refresh OAuth token: {}", re));
+                                        break;
+                                    }
+                                }
+                            } else {
+                                sink.err("[Server] No refresh token available.");
+                                break;
+                            }
+                        } else {
+                            sink.err(format!("[Server] Failed to fetch session token: {}. Server may fail to validate players.", e));
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    session_tokens
+}
+
+/// Spawns the Java server child process, attaches stdin/stdout/stderr, and waits for completion or stop signal.
+async fn spawn_and_manage_server(
+    config: &ServerConfig,
+    sink: LogSink,
+    root_dir: &Path,
+    install_dir: &Path,
+    target_jar_path: &Path,
+    auth_port: u16,
+    final_java: String,
+    session_tokens: Option<rustale_engine::game::auth::AuthTokens>,
+    mut stop_rx: oneshot::Receiver<()>,
+    mut stdin_rx: mpsc::Receiver<String>,
+) -> Result<Option<i32>> {
     sink.log("[5/5] Launching Server on port 5520!");
     sink.log("---------------------------------------------------");
 
@@ -642,95 +735,11 @@ pub async fn run_server_flow_internal(
         sink.err(format!("WARNING: Server directory not found at {:?}", server_dir));
     }
 
-    let clean_install_dir = rustale_engine::util::sanitize_path(&install_dir);
-    let clean_target_jar = rustale_engine::util::sanitize_path(&target_jar_path);
-
-    let mut session_tokens = None;
-
-    if config.online_mode == "authenticated" || config.online_mode == "sanasol" {
-        let issuer = if config.online_mode == "sanasol" {
-            "https://oauth.sanasol.ws"
-        } else {
-            "https://oauth.accounts.hytale.com"
-        };
-        
-        let session_issuer = if config.online_mode == "sanasol" {
-            "https://sessions.sanasol.ws"
-        } else {
-            "https://sessions.hytale.com"
-        };
-        
-        if config.oauth_tokens.is_none() {
-            sink.log("[Server] No OAuth tokens found. Starting Device Code Flow...");
-            match rustale_shared::oauth::run_server_device_code_flow(issuer, &rustale_security::get_private_var("Z_SERVER_CLIENT_ID")).await {
-                Ok(success) => {
-                    config.oauth_tokens = Some(success.tokens);
-                    let _ = rustale_server::config::save_config(&config).await;
-                }
-                Err(e) => {
-                    sink.err(format!("[Server] Failed to authenticate: {}", e));
-                }
-            }
-        }
-        
-        if let Some(oauth) = &config.oauth_tokens {
-            sink.log("[Server] Fetching game session tokens...");
-            let client = rustale_shared::HTTP_CLIENT.clone();
-            let mut auth_url = session_issuer.to_string();
-            
-            // Dummy profile/uuid for dedicated server auth (can be overridden)
-            let profile_name = "ServerOperator";
-            let profile_uuid = uuid::Uuid::new_v4().to_string(); // In reality, /my-account/get-profiles should be queried
-            
-            let mut current_access_token = oauth.access_token.clone();
-            let mut refreshed = false;
-            
-            loop {
-                match rustale_engine::game::auth::fetch_remote_tokens(
-                    &client,
-                    &auth_url,
-                    profile_name,
-                    &profile_uuid,
-                    Some(&current_access_token),
-                ).await {
-                    Ok(tokens) => {
-                        session_tokens = Some(tokens);
-                        break;
-                    }
-                    Err(e) => {
-                        if !refreshed && e.to_string().contains("401") {
-                            if let Some(refresh_token) = &config.oauth_tokens.as_ref().and_then(|t| t.refresh_token.clone()) {
-                                sink.log("[Server] Access token expired, attempting refresh...");
-                                match rustale_shared::oauth::refresh_oauth_tokens(issuer, &rustale_security::get_private_var("Z_SERVER_CLIENT_ID"), refresh_token).await {
-                                    Ok(new_tokens) => {
-                                        current_access_token = new_tokens.access_token.clone();
-                                        config.oauth_tokens = Some(new_tokens);
-                                        let _ = rustale_server::config::save_config(&config).await;
-                                        refreshed = true;
-                                        continue;
-                                    }
-                                    Err(re) => {
-                                        sink.err(format!("[Server] Failed to refresh OAuth token: {}", re));
-                                        break;
-                                    }
-                                }
-                            } else {
-                                sink.err("[Server] No refresh token available.");
-                                break;
-                            }
-                        } else {
-                            sink.err(format!("[Server] Failed to fetch session token: {}. Server may fail to validate players.", e));
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    }
+    let clean_install_dir = rustale_engine::util::sanitize_path(install_dir);
+    let clean_target_jar = rustale_engine::util::sanitize_path(target_jar_path);
 
     sink.log(format!("  - Final server args: {}", config.server_args));
 
-    // ── Build command ────────────────────────────────────────────────────────
     let mut cmd = Command::new(final_java);
 
     cmd.env("AURORA_MODE", &config.online_mode);
@@ -762,7 +771,7 @@ pub async fn run_server_flow_internal(
         cmd.env("HYTALE_TRUSTED_ISSUERS", config.trusted_issuers.join(","));
     }
 
-    let agent_path = rustale_engine::game::paths::GamePaths::new(root_dir.clone()).dualauth_agent();
+    let agent_path = rustale_engine::game::paths::GamePaths::new(root_dir.to_path_buf()).dualauth_agent();
     if agent_path.exists() {
         let agent_arg = format!("-javaagent:{}", agent_path.to_string_lossy());
         let current_args = cmd.as_std().get_args().collect::<Vec<&std::ffi::OsStr>>();
@@ -783,21 +792,17 @@ pub async fn run_server_flow_internal(
     let java_args: Vec<&str> = config.java_exec_args.split_whitespace().collect();
     cmd.args(java_args).arg("-jar").arg(&clean_target_jar);
     cmd.args(config.server_args.split_whitespace());
-    
+
     if let Some(st) = session_tokens {
         cmd.arg("--session-token").arg(&st.session_token);
         cmd.arg("--identity-token").arg(&st.identity_token);
     }
-    
+
     cmd.arg("--disable-sentry");
 
     cmd.stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
-    // ── Stdin mode ───────────────────────────────────────────────────────────
-    // Managed mode: pipe stdin and forward from channel.
-    // CLI mode: also pipe (terminal input comes via the forwarding task
-    //           started in `run_server_flow`).
     cmd.stdin(std::process::Stdio::piped());
 
     cmd.env("RUSTALE_IS_SERVER", "1");
@@ -813,7 +818,6 @@ pub async fn run_server_flow_internal(
 
     let mut child = cmd.spawn().context("Failed to spawn java process")?;
 
-    // ── Stdin forwarding ─────────────────────────────────────────────────────
     if let Some(mut child_stdin) = child.stdin.take() {
         tokio::spawn(async move {
             use tokio::io::AsyncWriteExt;
@@ -823,7 +827,6 @@ pub async fn run_server_flow_internal(
         });
     }
 
-    // ── Log streaming ────────────────────────────────────────────────────────
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
 
@@ -835,7 +838,6 @@ pub async fn run_server_flow_internal(
         }
     });
 
-    // Emit a state change: the process is now up (Running).
     sink.state(crate::manager::ServerState::Running);
 
     let sink_err = sink.clone();
@@ -846,7 +848,6 @@ pub async fn run_server_flow_internal(
         }
     });
 
-    // ── Windows Job Object ───────────────────────────────────────────────────
     #[cfg(windows)]
     let _job_guard = {
         use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_ALL_ACCESS};
@@ -885,7 +886,6 @@ pub async fn run_server_flow_internal(
         }
     };
 
-    // ── Wait / stop ──────────────────────────────────────────────────────────
     let exit_code: Option<i32> = tokio::select! {
         _ = &mut stop_rx => {
             sink.log("\n[RusTale] Stop signal received. Waiting for server to exit cleanly (up to 60s)...");
@@ -920,4 +920,76 @@ pub async fn run_server_flow_internal(
     };
 
     Ok(exit_code)
+}
+
+/// Run the full dedicated-server lifecycle.
+///
+/// All user-visible output goes through `sink` so the caller decides whether
+/// it ends up on stdout or in a broadcast channel.
+///
+/// # Parameters
+/// - `config`   – server configuration (cloned from `ServerManager` or built by CLI).
+/// - `sink`     – where log lines are emitted.
+/// - `stop_rx`  – resolves when an external stop request arrives.
+/// - `stdin_rx` – lines forwarded to the Java process's stdin.
+///
+/// # Returns
+/// `Ok(Some(exit_code))` on a clean exit, `Ok(None)` if killed by stop signal,
+/// `Err(...)` on a fatal setup error.
+pub async fn run_server_flow_internal(
+    mut config: ServerConfig,
+    sink: LogSink,
+    stop_rx: oneshot::Receiver<()>,
+    stdin_rx: mpsc::Receiver<String>,
+) -> Result<Option<i32>> {
+    sink.log("--- RusTale Dedicated Server ---");
+    sink.log(format!(
+        "Mode: {} | Port: 5520 | Version: {}",
+        config.online_mode, config.game_version
+    ));
+
+    let root_dir = rustale_shared::config::get_server_root_dir();
+    let auth_port = setup_auth_server(&config, &sink, &root_dir).await?;
+
+    let version_dir_name = if config.game_version == "latest" || config.game_version == "0" {
+        "latest".to_string()
+    } else {
+        config.game_version.clone()
+    };
+    let install_dir = root_dir.join(&config.branch).join(&version_dir_name);
+    let tools_dir = root_dir.join("tools");
+
+    let callback = create_progress_callback(&sink);
+
+    ensure_tools_and_java(&sink, &root_dir, &tools_dir, callback.clone()).await?;
+
+    let (target_jar_path, _local_assets_path) = prepare_game_files_and_assets(
+        &mut config,
+        &sink,
+        &root_dir,
+        &install_dir,
+        &version_dir_name,
+        callback,
+    )
+    .await?;
+
+    let final_java = prepare_runtime(&sink, &root_dir).await?;
+
+    start_tunnel_if_configured(&config, &sink, &root_dir).await;
+
+    let session_tokens = prepare_session_tokens(&mut config, &sink).await;
+
+    spawn_and_manage_server(
+        &config,
+        sink,
+        &root_dir,
+        &install_dir,
+        &target_jar_path,
+        auth_port,
+        final_java,
+        session_tokens,
+        stop_rx,
+        stdin_rx,
+    )
+    .await
 }
