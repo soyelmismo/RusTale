@@ -48,28 +48,13 @@ async fn launch_flow_internal(
     let loc = crate::lang::Localization::new();
     let base_dir_clone = base_dir.clone();
 
-    // FIX: Wrap the base reporter in a proxy that emits semantic LauncherStatus changes
-    // based on the phase key, so the UI can display specific text instead of generic "Busy".
+    // Wrap the base reporter in a proxy that emits semantic LauncherStatus changes
+    // using classify_status_from_payload (stats presence as primary download signal).
     let tx_clone_for_status = tx.clone();
     let reporter_base = create_progress_reporter(tx.clone());
     let reporter = move |payload: crate::game::progress::ProgressPayload| {
-        // FIX: Use stats presence as the primary download signal.
-        // The legacy ProgressCallback sends raw text as the status key (e.g. "Downloading patch 0→123...")
-        // so string matching on the key is fragile and case-sensitive.
-        // DownloadStats are ONLY populated when bytes are actively transferring,
-        // making stats.is_some() a reliable, key-agnostic download detector.
-        if payload.stats.is_some() {
-            let _ = tx_clone_for_status.try_send(FromCore::StatusChanged(LauncherStatus::Downloading));
-        } else {
-            // No active transfer → classify by message key (patching, extracting, etc.)
-            let key_lower = payload.message_key.to_lowercase();
-            if key_lower.contains("patch")
-                || key_lower.contains("extract")
-                || key_lower.contains("install")
-                || key_lower.contains("migrat")
-            {
-                let _ = tx_clone_for_status.try_send(FromCore::StatusChanged(LauncherStatus::Migrating));
-            }
+        if let Some(status) = classify_status_from_payload(&payload) {
+            let _ = tx_clone_for_status.try_send(FromCore::StatusChanged(status));
         }
         // Always forward the full payload to the base reporter (ProgressUpdate signal).
         reporter_base(payload);
@@ -596,6 +581,26 @@ pub async fn launch_flow(
                     let _ = tx.send(FromCore::StatusChanged(LauncherStatus::Ready)).await;
                 }
             }
+        }
+    }
+}
+
+/// Classifies a progress payload into a LauncherStatus signal if applicable.
+/// Uses stats presence as the primary download signal since stats are only populated
+/// when bytes are actively transferring, making it key-agnostic and reliable.
+pub fn classify_status_from_payload(payload: &ProgressPayload) -> Option<LauncherStatus> {
+    if payload.stats.is_some() {
+        Some(LauncherStatus::Downloading)
+    } else {
+        let key_lower = payload.message_key.to_lowercase();
+        if key_lower.contains("patch")
+            || key_lower.contains("extract")
+            || key_lower.contains("install")
+            || key_lower.contains("migrat")
+        {
+            Some(LauncherStatus::Migrating)
+        } else {
+            None
         }
     }
 }
