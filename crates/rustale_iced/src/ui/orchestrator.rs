@@ -262,8 +262,7 @@ impl UiOrchestrator {
                 None
             }
             Message::LanguageChangedInSettings(lang) => {
-                // FIX: Previously the lang param was ignored and localization was reset to default.
-                // Now we actually load the requested language so the UI reflects the change immediately.
+                // Load the requested language so the UI reflects the change immediately.
                 self.localization.load_language(lang);
                 None
             }
