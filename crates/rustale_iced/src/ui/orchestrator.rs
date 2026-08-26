@@ -262,8 +262,8 @@ impl UiOrchestrator {
                 None
             }
             Message::LanguageChangedInSettings(lang) => {
-                // FIX: Previously the lang param was ignored and localization was reset to default.
-                // Now we actually load the requested language so the UI reflects the change immediately.
+                // Previously the lang param was ignored and localization was reset to default.
+                // Now we load the requested language so the UI reflects the change immediately.
                 self.localization.load_language(lang);
                 None
             }
@@ -674,7 +674,7 @@ impl UiOrchestrator {
                 ]));
             }
             FromCore::BootstrapFailed(err) => {
-                // FIX: Was setting Busy (infinite spinner). Now we set status_text so the
+                // Was setting Busy (infinite spinner). Now we set status_text so the
                 // error is readable in the control section and reset to Ready so the user
                 // can still interact (e.g. retry via the Play button).
                 let msg = format!("Bootstrap failed: {}", err);
@@ -712,7 +712,7 @@ impl UiOrchestrator {
                 self.displayed_step_progress = step_progress;
                 self.displayed_current_step = Some(current_step);
                 self.displayed_total_steps = Some(total_steps);
-                // FIX: Translate immediately using the stored localization and arguments.
+                // Translate immediately using the stored localization and arguments.
                 // This ensures the UI shows "Downloading... 45%" instead of the raw key
                 // "launcher.status.downloading" and that {0}, {1} placeholders are filled.
                 let args: Vec<&str> = msg_args.iter().map(|s| s.as_str()).collect();
@@ -722,7 +722,7 @@ impl UiOrchestrator {
                 }
             }
             FromCore::Error { message, fatal: _ } => {
-                // FIX: Was setting Busy (leaves a permanent spinner with no way to recover).
+                // Was setting Busy (leaves a permanent spinner with no way to recover).
                 // Setting Ready allows the user to retry. The coordinator already sends
                 // StatusChanged(Ready) after LaunchFailed, so this is safe for all error paths.
                 self.error = Some(message.clone());
@@ -785,10 +785,10 @@ impl UiOrchestrator {
                 );
             }
             FromCore::NewsLoaded(result) => {
-                // FIX: Previously this arm directly mutated self.views.news.posts, which:
-                //   1. Never reset loading = false → UI stuck in "Loading..." forever.
-                //   2. Never dispatched image-loading tasks → thumbnails never appeared.
-                //   3. Error case never set self.views.news.error → silent failure.
+                // Previously this arm directly mutated self.views.news.posts, which:
+                //   1. Never reset loading = false -> UI stuck in "Loading..." forever.
+                //   2. Never dispatched image-loading tasks -> thumbnails never appeared.
+                //   3. Error case never set self.views.news.error -> silent failure.
                 // Now we delegate through NewsSection::update(NewsLoaded) which handles
                 // all three concerns correctly.
                 // NOTE: NewsSection::update already returns Task<Message> (not Task<NewsMessage>),
@@ -832,7 +832,7 @@ impl UiOrchestrator {
             FromCore::ModOperationFinished(result) => {
                 match result {
                     Ok(_) => {
-                        // FIX: Trigger an actual reload so the mods list reflects
+                        // Trigger an actual reload so the mods list reflects
                         // the toggle/uninstall. Previously only set loading=false, leaving
                         // the UI stale. Now we dispatch a background refresh task.
                         if self.views.mods.is_open {
@@ -878,7 +878,7 @@ impl UiOrchestrator {
 
             // Launcher Update Events
             FromCore::LauncherUpdateCheckResult(result) => {
-                // FIX: Also update the settings modal's update_btn_status so the
+                // Also update the settings modal's update_btn_status so the
                 // "Check for Updates" button in Settings reflects the result instead
                 // of staying in "Checking..." state forever.
                 match result {
@@ -967,7 +967,7 @@ impl UiOrchestrator {
                 match result {
                     Ok(mod_id) => {
                         self.status_text = format!("Successfully installed {}", mod_id);
-                        // FIX: Dispatch a real background refresh task instead of just
+                        // Dispatch a real background refresh task instead of just
                         // setting loading=true with no follow-up task, which would leave
                         // the spinner running forever.
                         if self.views.mods.is_open {
@@ -988,7 +988,7 @@ impl UiOrchestrator {
                 match result {
                     Ok(mod_id) => {
                         self.status_text = format!("Successfully uninstalled {}", mod_id);
-                        // FIX: Same as ModInstallCompleted — dispatch real refresh.
+                        // Same as ModInstallCompleted — dispatch real refresh.
                         if self.views.mods.is_open {
                             return Some(Task::done(Message::Mods(
                                 crate::ui::mods_modal::ModsMessage::RefreshLocalBackground,
@@ -1580,7 +1580,7 @@ impl UiOrchestrator {
             }
 
             // === CAMBIO DE IDIOMA ===
-            // FIX: Previously fell to `_ => None`, so the localization was never updated
+            // Previously fell to `_ => None`, so the localization was never updated
             // at runtime when the user changed language in Settings. Now properly routed
             // to handle_visual_events which calls self.localization.load_language(lang).
             Message::LanguageChangedInSettings(_) => self.handle_visual_events(message, core_tx),
@@ -1687,11 +1687,11 @@ impl UiOrchestrator {
 
         match message {
             Message::StartGame => {
-                // FIX (STOP button bug): The play/stop button always emits Message::StartGame.
+                // The play/stop button emits Message::StartGame.
                 // When the game is already running (or in a running-adjacent state), we must
                 // route to ToCore::StopGame instead of ToCore::LaunchGame.
                 // Previously this unconditionally sent LaunchGame, which made the engine reply
-                // "Game already running" → FromCore::Error → displayed_status reset to Ready,
+                // "Game already running" -> FromCore::Error -> displayed_status reset to Ready,
                 // producing the contradictory "READY TO PLAY" + "Game already running" state
                 // without ever killing the process.
                 match self.displayed_status {
@@ -1716,7 +1716,7 @@ impl UiOrchestrator {
                         self.displayed_status = crate::game::LauncherStatus::Playing;
                     }
                     Err(e) => {
-                        // FIX: Was setting Busy, which leaves the spinner stuck with no way
+                        // Was setting Busy, which leaves the spinner stuck with no way
                         // to retry. The coordinator always sends StatusChanged(Ready) on
                         // LaunchFailed via the internal channel, so this branch mirrors that
                         // behavior for any legacy callers of Message::GameLaunched.
@@ -1774,9 +1774,9 @@ impl UiOrchestrator {
                 let _ = to_core.try_send(crate::core::signals::ToCore::RequestDeleteVersion(
                     version.clone(),
                 ));
-                // FIX: After deleting a version the coordinator only sends StatusChanged(Ready),
+                // After deleting a version the coordinator only sends StatusChanged(Ready),
                 // it never re-scans local versions. We dispatch CheckStatus which sends
-                // RequestInitialStatus → scan_local_versions → InstalledVersionsLoaded so
+                // RequestInitialStatus -> scan_local_versions -> InstalledVersionsLoaded so
                 // the storage list in Settings refreshes automatically.
                 Some(Task::done(Message::CheckStatus))
             }
@@ -2029,7 +2029,7 @@ impl UiOrchestrator {
                 None
             }
             Message::CancelAction => {
-                // FIX: Forward to the engine so it calls state.cancel_all(),
+                // Forward to the engine so it calls state.cancel_all(),
                 // which sets every managed task's AtomicBool cancel token to true.
                 // The coordinator then resets status to Ready immediately.
                 let _ = to_core.try_send(crate::core::signals::ToCore::AbortOperation);
