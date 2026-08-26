@@ -2008,7 +2008,7 @@ impl UiOrchestrator {
                 None
             }
             Message::CancelAction => {
-                // FIX: Forward to the engine so it calls state.cancel_all(),
+                // Forward to the engine so it calls state.cancel_all(),
                 // which sets every managed task's AtomicBool cancel token to true.
                 // The coordinator then resets status to Ready immediately.
                 let _ = to_core.try_send(crate::core::signals::ToCore::AbortOperation);
