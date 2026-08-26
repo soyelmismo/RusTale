@@ -967,7 +967,6 @@ impl UiOrchestrator {
                 match result {
                     Ok(mod_id) => {
                         self.status_text = format!("Successfully uninstalled {}", mod_id);
-                        // FIX: Same as ModInstallCompleted — dispatch real refresh.
                         if self.views.mods.is_open {
                             return Some(Task::done(Message::Mods(
                                 crate::ui::mods_modal::ModsMessage::RefreshLocalBackground,
