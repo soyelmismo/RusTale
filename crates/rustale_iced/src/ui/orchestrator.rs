@@ -1695,10 +1695,10 @@ impl UiOrchestrator {
                         self.displayed_status = crate::game::LauncherStatus::Playing;
                     }
                     Err(e) => {
-                        // FIX: Was setting Busy, which leaves the spinner stuck with no way
-                        // to retry. The coordinator always sends StatusChanged(Ready) on
-                        // LaunchFailed via the internal channel, so this branch mirrors that
-                        // behavior for any legacy callers of Message::GameLaunched.
+                        // Set status to Ready on launch error so the user can retry.
+                        // The coordinator always sends StatusChanged(Ready) on LaunchFailed
+                        // via the internal channel, so this branch mirrors that behavior
+                        // for any legacy callers of Message::GameLaunched.
                         self.error = Some(e.clone());
                         self.displayed_status = crate::game::LauncherStatus::Ready;
                     }
